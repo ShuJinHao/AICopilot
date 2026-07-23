@@ -1,5 +1,4 @@
 using AICopilot.AgentPlugin;
-using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
@@ -14,7 +13,6 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 public sealed class AgentPlanToolGuard(
     ToolRegistryGuard toolRegistryGuard,
     IAgentPluginCatalog pluginCatalog,
-    SkillDefinitionGuard? skillDefinitionGuard = null,
     IOptions<MockMcpOptions>? mockMcpOptions = null,
     IHostEnvironment? hostEnvironment = null)
 {
@@ -34,7 +32,6 @@ public sealed class AgentPlanToolGuard(
         bool simulationOnly,
         IReadOnlyCollection<string>? businessDomains,
         CancellationToken cancellationToken,
-        string? skillCode = null,
         AgentPluginSelectionMode? pluginSelectionMode = null)
     {
         var runtimeMcpTools = ResolveRuntimeMcpToolCodes();
@@ -52,20 +49,6 @@ public sealed class AgentPlanToolGuard(
             .Where(tool => IsPlannerVisible(tool, simulationOnly, businessDomains) &&
                            IsAllowedByPluginSelection(tool, pluginSelectionMode))
             .ToArray();
-        if (skillDefinitionGuard is not null)
-        {
-            var skillFiltered = await skillDefinitionGuard.FilterToolsAsync(
-                filtered,
-                skillCode,
-                cancellationToken);
-            if (!skillFiltered.IsSuccess)
-            {
-                return Result.From(skillFiltered);
-            }
-
-            filtered = skillFiltered.Value!.Tools.ToArray();
-        }
-
         return PlannerToolCatalogBuilder.Build(filtered, runtimeMcpTools);
     }
 
@@ -107,7 +90,6 @@ public sealed class AgentPlanToolGuard(
         bool simulationOnly,
         IReadOnlyCollection<string>? businessDomains,
         CancellationToken cancellationToken,
-        string? skillCode = null,
         AgentPluginSelectionMode? pluginSelectionMode = null)
     {
         var runtimeMcpTools = ResolveRuntimeMcpToolCodes();
@@ -142,18 +124,6 @@ public sealed class AgentPlanToolGuard(
                 return Result.Failure(new ApiProblemDescriptor(
                     AppProblemCodes.AgentPlanToolDenied,
                     $"Tool '{tool.ToolCode}' is not available for planner and agent execution."));
-            }
-
-            if (skillDefinitionGuard is not null)
-            {
-                var skillDecision = await skillDefinitionGuard.ValidateToolAsync(
-                    skillCode,
-                    tool.ToolCode,
-                    cancellationToken);
-                if (!skillDecision.IsSuccess)
-                {
-                    return Result.From(skillDecision);
-                }
             }
 
             if (simulationOnly && !IsPlannerVisible(tool, simulationOnly, businessDomains))
@@ -258,7 +228,8 @@ public sealed class AgentPlanToolGuard(
             if (tool.DataBoundary is not (ToolDataBoundary.NoData
                 or ToolDataBoundary.SimulationBusinessOnly
                 or ToolDataBoundary.RagContextOnly
-                or ToolDataBoundary.ArtifactDraftOnly))
+                or ToolDataBoundary.ArtifactDraftOnly
+                or ToolDataBoundary.AuthorizedEvidenceOnly))
             {
                 return false;
             }

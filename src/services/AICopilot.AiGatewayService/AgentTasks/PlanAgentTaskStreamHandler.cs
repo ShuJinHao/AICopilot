@@ -28,11 +28,7 @@ public sealed record PlanAgentTaskStreamRequest(
     IReadOnlyCollection<string>? BusinessDomains = null,
     string? QueryMode = null,
     bool RequiresDataApproval = false,
-    IReadOnlyCollection<string>? ArtifactTypes = null,
-    string? PlannerMode = null,
-    bool ForceStaticPlanner = false,
-    string? SkillCode = null,
-    IReadOnlyCollection<string>? PreferredToolCodes = null,
+    IReadOnlyCollection<string>? ArtifactTargets = null,
     AgentPluginSelectionMode? PluginSelectionMode = null,
     IReadOnlyCollection<Guid>? SelectedPluginIds = null,
     AgentCapabilitySelectionMode? CapabilitySelectionMode = null,
@@ -57,19 +53,6 @@ public sealed class PlanAgentTaskStreamHandler(
         PlanAgentTaskStreamRequest request,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var retiredSelection = AgentPlanRetiredSelectionContract.Validate(
-            request.SkillCode,
-            request.PreferredToolCodes);
-        if (retiredSelection is not null)
-        {
-            yield return AgentStreamRuntime.CreateErrorChunk(
-                retiredSelection.Code,
-                retiredSelection.Detail,
-                Source,
-                AgentPlanRetiredSelectionContract.UserFacingMessage);
-            yield break;
-        }
-
         var assistantText = new StringBuilder();
         var assistantRenderChunks = new List<ChatChunk>();
         var pendingMessages = new List<SessionMessageAppend>();
@@ -287,7 +270,7 @@ public sealed class PlanAgentTaskStreamHandler(
             detail: "Understanding user goal and routing intent.");
         yield return CreateAgentEventChunk(
             "capability_discovery",
-            detail: "Discovering allowed skills and tool descriptions without execution.");
+            detail: "Discovering allowed capabilities and tool descriptions without execution.");
 
         var result = await sender.Send(ToCommand(request), ct);
         if (!result.IsSuccess || result.Value is null)
@@ -328,11 +311,7 @@ public sealed class PlanAgentTaskStreamHandler(
             request.BusinessDomains,
             request.QueryMode,
             request.RequiresDataApproval,
-            request.ArtifactTypes,
-            request.PlannerMode,
-            request.ForceStaticPlanner,
-            request.SkillCode,
-            request.PreferredToolCodes,
+            request.ArtifactTargets,
             request.PluginSelectionMode,
             request.SelectedPluginIds,
             request.CapabilitySelectionMode,

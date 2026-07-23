@@ -9,50 +9,204 @@ using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
-internal sealed record AgentIntentAdapterContext(
+internal sealed record AgentIntentRegistryContext(
     IReadOnlyCollection<Guid> UploadIds,
     IReadOnlyCollection<Guid> KnowledgeBaseIds,
     IReadOnlyCollection<BusinessDatabaseDescriptor> DataSources,
     IReadOnlyCollection<string> RequestedArtifacts,
-    IReadOnlyCollection<string> KnownSkillCodes,
     IReadOnlyCollection<string> KnownActionIntentCodes,
-    IReadOnlyDictionary<string, string> AuthorizedDeviceIdsByCode);
+    IReadOnlyDictionary<string, string> AuthorizedDeviceIdsByCode,
+    IReadOnlyCollection<string>? DerivedIntentCodes = null,
+    AgentIntentRegistrySnapshot? RegistrySnapshot = null);
 
-internal sealed record AgentIntentCatalogDescriptor(
+internal sealed record AgentIntentRegistryDescriptor(
     string IntentCode,
     AgentIntentClass IntentClass,
     AgentIntentAvailability Availability,
-    string ProviderCode);
+    string ProviderCode,
+    IReadOnlyCollection<string> AllowedNodeKinds,
+    IReadOnlyCollection<string> AllowedToolCodes,
+    string InputRequirement,
+    string OutputEvidenceKind,
+    string? CapabilityGapCode);
 
-internal static class AgentIntentCatalogV1
+internal sealed record AgentIntentRegistryPromptDefinition(
+    string IntentCode,
+    string Description,
+    string? Example = null,
+    string? QueryJsonExample = null,
+    IReadOnlyCollection<string>? AllowedToolCodes = null);
+
+internal sealed record AgentIntentRegistrySnapshot(
+    string Version,
+    string Digest,
+    IReadOnlyDictionary<string, AgentIntentRegistryDescriptor> Descriptors,
+    string PromptInventory)
 {
-    public const string CatalogVersion = "intent-catalog:v1";
-    public const string RouterVersion = "intent-router:v1";
-    public const string PromptVersion = "intent-prompt:v1";
+    public bool TryGet(string intentCode, out AgentIntentRegistryDescriptor descriptor) =>
+        Descriptors.TryGetValue(intentCode, out descriptor!);
+}
 
-    private static readonly IReadOnlyDictionary<string, AgentIntentCatalogDescriptor> BaseDescriptors =
+internal static class AgentIntentRegistryV1
+{
+    public const string RegistryVersion = "intent-registry:v1";
+    public const string RouterVersion = "intent-router:v2";
+    public const string PromptVersion = "intent-prompt:v2";
+
+    private static readonly Regex RegistryCodePattern = new(
+        "^[A-Za-z][A-Za-z0-9_.-]{0,159}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly IReadOnlyDictionary<string, AgentIntentRegistryDescriptor> BaseDescriptors =
         BuildBaseDescriptors().ToDictionary(descriptor => descriptor.IntentCode, StringComparer.Ordinal);
 
-    public static readonly string CatalogDigest = ComputeCatalogDigest();
+    public static readonly string RegistryDigest = ComputeRegistryDigest(BaseDescriptors.Values);
+
+    public static AgentIntentRegistrySnapshot FrozenSnapshot { get; } = new(
+        RegistryVersion,
+        RegistryDigest,
+        BaseDescriptors,
+        string.Empty);
+
+    public static IReadOnlyCollection<string> FallbackIntentCodes { get; } =
+    [
+        "Analysis.Capacity.ByDevice",
+        "Analysis.ClientRelease.List",
+        "Analysis.Device.List",
+        "Analysis.Device.Status",
+        "Analysis.DeviceLog.ByLevel",
+        "Analysis.DeviceLog.Latest",
+        "Analysis.Process.List",
+        "Analysis.ProductionData.ByDevice",
+        "Analysis.ProductionData.Latest"
+    ];
+
+    static AgentIntentRegistryV1()
+    {
+        if (FallbackIntentCodes.Any(code => !BaseDescriptors.ContainsKey(code)))
+        {
+            throw new InvalidOperationException(
+                "Intent fallback codes must be a subset of the versioned IntentRegistry.");
+        }
+    }
+
+    public static AgentIntentRegistrySnapshot CreateRoutingSnapshot(
+        IEnumerable<AgentIntentRegistryPromptDefinition> promptDefinitions,
+        IEnumerable<string>? guidance = null)
+    {
+        var definitions = (promptDefinitions ?? [])
+            .OrderBy(definition => definition.IntentCode, StringComparer.Ordinal)
+            .ToArray();
+        if (definitions.Length == 0 ||
+            definitions.Any(definition =>
+                string.IsNullOrWhiteSpace(definition.IntentCode) ||
+                definition.IntentCode != definition.IntentCode.Trim() ||
+                !RegistryCodePattern.IsMatch(definition.IntentCode) ||
+                string.IsNullOrWhiteSpace(definition.Description) ||
+                definition.Description != definition.Description.Trim()) ||
+            definitions.GroupBy(definition => definition.IntentCode, StringComparer.Ordinal).Any(group => group.Count() != 1))
+        {
+            throw new InvalidOperationException(
+                "IntentRegistry prompt definitions must have unique canonical codes and non-empty descriptions.");
+        }
+
+        var descriptors = BaseDescriptors.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        foreach (var definition in definitions)
+        {
+            if (descriptors.ContainsKey(definition.IntentCode))
+            {
+                continue;
+            }
+
+            descriptors.Add(definition.IntentCode, CreateDynamicDescriptor(definition));
+        }
+
+        if (FallbackIntentCodes.Any(code => !descriptors.ContainsKey(code)))
+        {
+            throw new InvalidOperationException(
+                "IntentRegistry routing snapshot is missing a deterministic fallback code.");
+        }
+
+        var promptBuilder = new StringBuilder();
+        foreach (var definition in definitions)
+        {
+            promptBuilder.AppendLine($"- {definition.IntentCode}: {definition.Description}");
+            if (!string.IsNullOrWhiteSpace(definition.Example))
+            {
+                promptBuilder.AppendLine($"  Query example: {definition.Example}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(definition.QueryJsonExample))
+            {
+                promptBuilder.AppendLine($"  Query JSON example: {definition.QueryJsonExample}");
+            }
+        }
+
+        foreach (var rule in (guidance ?? [])
+                     .Where(rule => !string.IsNullOrWhiteSpace(rule))
+                     .Select(rule => rule.Trim())
+                     .Distinct(StringComparer.Ordinal))
+        {
+            promptBuilder.AppendLine($"  Routing rule: {rule}");
+        }
+
+        var promptInventory = promptBuilder.ToString();
+        var descriptorDigest = ComputeRegistryDigest(descriptors.Values);
+        var snapshotDigest = CanonicalJson.ComputeSha256(CanonicalJson.Serialize(new
+        {
+            version = RegistryVersion,
+            descriptorDigest,
+            promptInventory
+        }));
+        return new AgentIntentRegistrySnapshot(
+            RegistryVersion,
+            snapshotDigest,
+            descriptors,
+            promptInventory);
+    }
+
+    public static bool ValidateRoutedResults(
+        AgentIntentRegistrySnapshot snapshot,
+        IReadOnlyCollection<IntentResult> results)
+    {
+        return string.Equals(snapshot.Version, RegistryVersion, StringComparison.Ordinal) &&
+               IsSha256(snapshot.Digest) &&
+               results.Count is > 0 and <= 16 &&
+               results.All(result =>
+                   !string.IsNullOrWhiteSpace(result.Intent) &&
+                   result.Intent == result.Intent.Trim() &&
+                   snapshot.Descriptors.ContainsKey(result.Intent) &&
+                   !CloudReadonlyAgentTextGuard.ContainsUnsafePersistedPayload(result.Query) &&
+                   !double.IsNaN(result.Confidence) &&
+                   !double.IsInfinity(result.Confidence) &&
+                   result.Confidence is >= 0 and <= 1);
+    }
+
+    public static bool IsIntentClass(
+        AgentIntentRegistrySnapshot snapshot,
+        string intentCode,
+        AgentIntentClass intentClass) =>
+        snapshot.TryGet(intentCode, out var descriptor) &&
+        descriptor.IntentClass == intentClass;
 
     public static bool TryResolve(
         string intentCode,
-        AgentIntentAdapterContext context,
-        out AgentIntentCatalogDescriptor descriptor)
+        AgentIntentRegistryContext context,
+        out AgentIntentRegistryDescriptor descriptor)
     {
-        if (BaseDescriptors.TryGetValue(intentCode, out descriptor!))
+        if (context.RegistrySnapshot?.TryGet(intentCode, out descriptor!) == true)
         {
-            return true;
+            if (descriptor.IntentClass != AgentIntentClass.PluginAction ||
+                context.KnownActionIntentCodes.Any(code =>
+                    string.Equals(code, intentCode, StringComparison.Ordinal) ||
+                    string.Equals($"Action.{code}", intentCode, StringComparison.Ordinal)))
+            {
+                return true;
+            }
         }
 
-        if (intentCode.StartsWith("Skill.", StringComparison.Ordinal) &&
-            context.KnownSkillCodes.Contains(intentCode["Skill.".Length..], StringComparer.Ordinal))
+        if (BaseDescriptors.TryGetValue(intentCode, out descriptor!))
         {
-            descriptor = new AgentIntentCatalogDescriptor(
-                intentCode,
-                AgentIntentClass.TransitionSkill,
-                AgentIntentAvailability.KnownButUnavailable,
-                "TransitionSkillRoster");
             return true;
         }
 
@@ -61,27 +215,58 @@ internal static class AgentIntentCatalogV1
                 string.Equals(code, intentCode, StringComparison.Ordinal) ||
                 string.Equals($"Action.{code}", intentCode, StringComparison.Ordinal)))
         {
-            descriptor = new AgentIntentCatalogDescriptor(
+            descriptor = CreateDescriptor(
                 intentCode,
                 AgentIntentClass.PluginAction,
                 AgentIntentAvailability.KnownButUnavailable,
-                "PluginActionRoster");
+                "PluginActionRoster",
+                ["PolicyValidationNode"],
+                [],
+                "RegisteredPlugin",
+                "Recommendation",
+                AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
             return true;
         }
 
-        descriptor = new AgentIntentCatalogDescriptor(
+        descriptor = CreateDescriptor(
             intentCode,
             AgentIntentClass.Unknown,
             AgentIntentAvailability.Unknown,
-            "None");
+            "None",
+            [],
+            [],
+            "Unknown",
+            "None",
+            AgentPlanCapabilityGapCodes.UnknownIntent);
         return false;
     }
 
-    private static IEnumerable<AgentIntentCatalogDescriptor> BuildBaseDescriptors()
+    private static IEnumerable<AgentIntentRegistryDescriptor> BuildBaseDescriptors()
     {
-        yield return Available("General.Chat", AgentIntentClass.General, "BuiltIn");
-        yield return Available("Knowledge.Retrieve", AgentIntentClass.Knowledge, "KnowledgeBase");
-        yield return Available("Analysis.GovernedQuery", AgentIntentClass.GovernedExploration, "BusinessDatabase");
+        yield return Available(
+            "General.Chat",
+            AgentIntentClass.General,
+            "BuiltIn",
+            ["DeterministicComputeNode", "FileAnalysisNode", "JoinNode", "AgentReasoningNode", "ArtifactGenerationNode", "ApprovalCheckpointNode"],
+            ["read_uploaded_file", "parse_table_file", "join_evidence", "agent_reasoning", "generate_chart_data", "generate_markdown_report", "generate_html_report", "generate_pdf", "generate_pptx", "generate_xlsx", "finalize_artifacts"],
+            "None",
+            "LlmInference");
+        yield return Available(
+            "Knowledge.Retrieve",
+            AgentIntentClass.Knowledge,
+            "KnowledgeBase",
+            ["KnowledgeRetrievalNode"],
+            ["rag_search"],
+            "KnowledgeBaseId",
+            "ObservedFact");
+        yield return Available(
+            "Analysis.GovernedQuery",
+            AgentIntentClass.GovernedExploration,
+            "BusinessDatabase",
+            ["GovernedDataReadNode", "DeterministicComputeNode", "ArtifactGenerationNode"],
+            ["query_business_database_readonly", "summarize_business_query_result", "generate_business_chart"],
+            "DataSourceId",
+            "ObservedFact");
 
         foreach (var policy in new[]
                  {
@@ -92,7 +277,14 @@ internal static class AgentIntentCatalogV1
                      "Policy.RecipeVersioning"
                  })
         {
-            yield return Available(policy, AgentIntentClass.Policy, "BusinessPolicy");
+            yield return Available(
+                policy,
+                AgentIntentClass.Policy,
+                "BusinessPolicy",
+                ["PolicyValidationNode"],
+                [],
+                "None",
+                "Recommendation");
         }
 
         foreach (var cloudIntent in new[]
@@ -113,59 +305,161 @@ internal static class AgentIntentCatalogV1
                      "Analysis.ProductionData.Range"
                  })
         {
-            yield return Available(cloudIntent, AgentIntentClass.CloudOnly, "CloudAiRead");
+            yield return Available(
+                cloudIntent,
+                AgentIntentClass.CloudOnly,
+                "CloudAiRead",
+                ["CloudReadNode", "DeterministicComputeNode"],
+                ["query_cloud_data_readonly", "assess_cloud_health"],
+                "TypedCloudQuery",
+                "ObservedFact");
         }
 
-        yield return Unavailable("Analysis.Recipe.Detail", "CloudAiReadDenied");
-        yield return Unavailable("Analysis.Recipe.List", "CloudAiReadDenied");
-        yield return Unavailable("Analysis.Recipe.VersionHistory", "CloudAiReadDenied");
+        yield return Unavailable("Analysis.Recipe.Detail", "CloudAiReadDenied", "CloudReadNode", "ObservedFact");
+        yield return Unavailable("Analysis.Recipe.List", "CloudAiReadDenied", "CloudReadNode", "ObservedFact");
+        yield return Unavailable("Analysis.Recipe.VersionHistory", "CloudAiReadDenied", "CloudReadNode", "ObservedFact");
 
-        yield return Unavailable("Prediction.Device.FailureRisk", "PredictionCatalog");
-        yield return Unavailable("Prediction.Device.RemainingUsefulLife", "PredictionCatalog");
+        yield return Unavailable("Prediction.Device.FailureRisk", "PredictionCatalog", "PredictionReadNode", "ModelPrediction");
+        yield return Unavailable("Prediction.Device.RemainingUsefulLife", "PredictionCatalog", "PredictionReadNode", "ModelPrediction");
     }
 
-    private static AgentIntentCatalogDescriptor Available(
+    private static AgentIntentRegistryDescriptor Available(
         string intentCode,
         AgentIntentClass intentClass,
-        string providerCode)
+        string providerCode,
+        IReadOnlyCollection<string> allowedNodeKinds,
+        IReadOnlyCollection<string> allowedToolCodes,
+        string inputRequirement,
+        string outputEvidenceKind)
     {
-        return new AgentIntentCatalogDescriptor(
+        return CreateDescriptor(
             intentCode,
             intentClass,
             AgentIntentAvailability.Available,
-            providerCode);
+            providerCode,
+            allowedNodeKinds,
+            allowedToolCodes,
+            inputRequirement,
+            outputEvidenceKind,
+            null);
     }
 
-    private static AgentIntentCatalogDescriptor Unavailable(string intentCode, string providerCode)
+    private static AgentIntentRegistryDescriptor Unavailable(
+        string intentCode,
+        string providerCode,
+        string nodeKind,
+        string outputEvidenceKind)
     {
-        return new AgentIntentCatalogDescriptor(
+        return CreateDescriptor(
             intentCode,
             AgentIntentClass.KnownButUnavailable,
             AgentIntentAvailability.KnownButUnavailable,
-            providerCode);
+            providerCode,
+            [nodeKind],
+            [],
+            "Unavailable",
+            outputEvidenceKind,
+            AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
     }
 
-    public static bool TryGetFrozenDescriptor(
+    public static bool TryGetDescriptor(
         string intentCode,
-        out AgentIntentCatalogDescriptor descriptor)
+        out AgentIntentRegistryDescriptor descriptor)
     {
         return BaseDescriptors.TryGetValue(intentCode, out descriptor!);
     }
 
-    private static string ComputeCatalogDigest()
+    private static AgentIntentRegistryDescriptor CreateDynamicDescriptor(
+        AgentIntentRegistryPromptDefinition definition)
+    {
+        if (definition.IntentCode.StartsWith("Action.", StringComparison.Ordinal) &&
+            definition.IntentCode.Length > "Action.".Length)
+        {
+            return CreateDescriptor(
+                definition.IntentCode,
+                AgentIntentClass.PluginAction,
+                AgentIntentAvailability.Available,
+                "PluginActionRoster",
+                ["PolicyValidationNode"],
+                definition.AllowedToolCodes ?? [],
+                "RegisteredPlugin",
+                "Recommendation",
+                null);
+        }
+
+        if (definition.IntentCode.StartsWith("Knowledge.", StringComparison.Ordinal) &&
+            definition.IntentCode.Length > "Knowledge.".Length)
+        {
+            return CreateDescriptor(
+                definition.IntentCode,
+                AgentIntentClass.Knowledge,
+                AgentIntentAvailability.Available,
+                "KnowledgeBase",
+                ["KnowledgeRetrievalNode"],
+                ["rag_search"],
+                "KnowledgeBaseName",
+                "ObservedFact",
+                null);
+        }
+
+        if (definition.IntentCode.StartsWith("Analysis.", StringComparison.Ordinal) &&
+            definition.IntentCode.Length > "Analysis.".Length)
+        {
+            return CreateDescriptor(
+                definition.IntentCode,
+                AgentIntentClass.GovernedExploration,
+                AgentIntentAvailability.Available,
+                "BusinessDatabase",
+                ["GovernedDataReadNode"],
+                ["query_business_database_readonly"],
+                "DataSourceName",
+                "ObservedFact",
+                null);
+        }
+
+        throw new InvalidOperationException(
+            $"Intent '{definition.IntentCode}' is not a supported versioned Registry definition.");
+    }
+
+    private static AgentIntentRegistryDescriptor CreateDescriptor(
+        string intentCode,
+        AgentIntentClass intentClass,
+        AgentIntentAvailability availability,
+        string providerCode,
+        IReadOnlyCollection<string> allowedNodeKinds,
+        IReadOnlyCollection<string> allowedToolCodes,
+        string inputRequirement,
+        string outputEvidenceKind,
+        string? capabilityGapCode) =>
+        new(
+            intentCode,
+            intentClass,
+            availability,
+            providerCode,
+            allowedNodeKinds.Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+            allowedToolCodes.Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+            inputRequirement,
+            outputEvidenceKind,
+            capabilityGapCode);
+
+    private static bool IsSha256(string? value) =>
+        value is { Length: 64 } && value.All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static string ComputeRegistryDigest(IEnumerable<AgentIntentRegistryDescriptor> descriptors)
     {
         var inventory = string.Join(
             '\n',
-            BaseDescriptors.Values
+            descriptors
                 .OrderBy(descriptor => descriptor.IntentCode, StringComparer.Ordinal)
                 .Select(descriptor =>
-                    $"{descriptor.IntentCode}|{descriptor.IntentClass}|{descriptor.Availability}|{descriptor.ProviderCode}"));
+                    $"{descriptor.IntentCode}|{descriptor.IntentClass}|{descriptor.Availability}|{descriptor.ProviderCode}|{string.Join(',', descriptor.AllowedNodeKinds)}|{string.Join(',', descriptor.AllowedToolCodes)}|{descriptor.InputRequirement}|{descriptor.OutputEvidenceKind}|{descriptor.CapabilityGapCode}"));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(inventory)))
             .ToLowerInvariant();
     }
 }
 
-internal sealed class IntentResultToCandidateAdapter
+internal sealed class AgentIntentRegistryProjector
 {
     private static readonly Regex CanonicalCodePattern = new(
         "^[A-Za-z][A-Za-z0-9_.-]{0,159}$",
@@ -233,20 +527,20 @@ internal sealed class IntentResultToCandidateAdapter
         return expected is not null && candidate.CapabilityGap == expected;
     }
 
-    public Result<IReadOnlyCollection<AgentIntentCandidateDocument>> Adapt(
+    public Result<IReadOnlyCollection<AgentIntentCandidateDocument>> Project(
         IEnumerable<IntentResult> results,
-        AgentIntentAdapterContext context)
+        AgentIntentRegistryContext context)
     {
         var candidates = new List<AgentIntentCandidateDocument>();
         foreach (var result in results ?? [])
         {
-            var adapted = AdaptOne(result, context);
-            if (!adapted.IsSuccess)
+            var projected = ProjectOne(result, context);
+            if (!projected.IsSuccess)
             {
-                return Result.From(adapted);
+                return Result.From(projected);
             }
 
-            candidates.Add(adapted.Value!);
+            candidates.Add(projected.Value!);
         }
 
         var merged = new List<AgentIntentCandidateDocument>();
@@ -266,9 +560,9 @@ internal sealed class IntentResultToCandidateAdapter
         return Result.Success<IReadOnlyCollection<AgentIntentCandidateDocument>>(merged);
     }
 
-    private static Result<AgentIntentCandidateDocument> AdaptOne(
+    private static Result<AgentIntentCandidateDocument> ProjectOne(
         IntentResult result,
-        AgentIntentAdapterContext context)
+        AgentIntentRegistryContext context)
     {
         var intentCode = NormalizeIntentCode(result);
         if (intentCode is null)
@@ -294,7 +588,16 @@ internal sealed class IntentResultToCandidateAdapter
             return Invalid($"IntentResult '{intentCode}' contains a secret, SQL statement, connection string, or local path.");
         }
 
-        var isKnown = AgentIntentCatalogV1.TryResolve(intentCode, context, out var descriptor);
+        var isKnown = AgentIntentRegistryV1.TryResolve(intentCode, context, out var descriptor);
+        if (descriptor.IntentClass == AgentIntentClass.PluginAction)
+        {
+            descriptor = descriptor with
+            {
+                Availability = AgentIntentAvailability.KnownButUnavailable,
+                CapabilityGapCode = AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable
+            };
+        }
+
         var typedQuery = ParseTypedQuery(result.Query, intentCode, context);
         if (!typedQuery.IsSuccess)
         {
@@ -316,8 +619,12 @@ internal sealed class IntentResultToCandidateAdapter
             result.Confidence,
             new AgentIntentRequiredDocument(
                 true,
-                AgentIntentRequiredSource.ExplicitUserGoal,
-                RuleId: null),
+                context.DerivedIntentCodes?.Contains(intentCode, StringComparer.Ordinal) == true
+                    ? AgentIntentRequiredSource.DerivedDependency
+                    : AgentIntentRequiredSource.ExplicitUserGoal,
+                context.DerivedIntentCodes?.Contains(intentCode, StringComparer.Ordinal) == true
+                    ? DeterministicAgentPlanCompiler.CompilerVersion
+                    : null),
             new AgentIntentRequestedResourcesDocument(
                 typed.Devices,
                 descriptor.IntentClass == AgentIntentClass.GovernedExploration
@@ -332,10 +639,10 @@ internal sealed class IntentResultToCandidateAdapter
                 typed.Predicates),
             AgentPlanCanonicalCollections.Strings(context.RequestedArtifacts),
             new AgentIntentProvenanceDocument(
-                AgentIntentCatalogV1.RouterVersion,
-                AgentIntentCatalogV1.PromptVersion,
-                AgentIntentCatalogV1.CatalogVersion,
-                AgentIntentCatalogV1.CatalogDigest),
+                AgentIntentRegistryV1.RouterVersion,
+                AgentIntentRegistryV1.PromptVersion,
+                context.RegistrySnapshot?.Version ?? AgentIntentRegistryV1.RegistryVersion,
+                context.RegistrySnapshot?.Digest ?? AgentIntentRegistryV1.RegistryDigest),
             capabilityGap);
         return Result.Success(candidate);
     }
@@ -392,9 +699,7 @@ internal sealed class IntentResultToCandidateAdapter
 
     private static string? NormalizeIntentCode(IntentResult result)
     {
-        var code = string.IsNullOrWhiteSpace(result.Intent) && !string.IsNullOrWhiteSpace(result.SkillCode)
-            ? $"Skill.{result.SkillCode.Trim()}"
-            : result.Intent?.Trim();
+        var code = result.Intent?.Trim();
         return !string.IsNullOrWhiteSpace(code) && CanonicalCodePattern.IsMatch(code)
             ? code
             : null;
@@ -414,7 +719,7 @@ internal sealed class IntentResultToCandidateAdapter
     }
 
     private static AgentCapabilityGapDocument? ResolveCapabilityGap(
-        AgentIntentCatalogDescriptor descriptor,
+        AgentIntentRegistryDescriptor descriptor,
         bool isKnown,
         bool resourceResolutionRequired)
     {
@@ -459,7 +764,7 @@ internal sealed class IntentResultToCandidateAdapter
     private static Result<ParsedTypedQuery> ParseTypedQuery(
         string? rawQuery,
         string intentCode,
-        AgentIntentAdapterContext context)
+        AgentIntentRegistryContext context)
     {
         if (string.IsNullOrWhiteSpace(rawQuery) || !rawQuery.TrimStart().StartsWith('{'))
         {

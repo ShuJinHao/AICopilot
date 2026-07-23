@@ -321,17 +321,35 @@ internal sealed class AgentFinalizationNodeExecutor(
     {
         var payloadRef = $"artifact-fileset:{stage.CommitId:N}";
         var payloadBytes = Encoding.UTF8.GetByteCount(stage.ManifestJson);
+        if (!parentEvidence
+                .Select(evidence => evidence.NodeId)
+                .SequenceEqual(nodeContract.EvidenceSelectors, StringComparer.Ordinal))
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentNodeRunStateConflict,
+                "Final-output NodeRun inputs do not match the frozen Evidence selectors."));
+        }
+
         var parentIds = parentEvidence
-            .Where(evidence => nodeContract.DependsOn.Contains(evidence.NodeId, StringComparer.Ordinal))
             .Select(evidence => evidence.Id.Value)
             .Distinct()
             .Order()
             .ToArray();
-        if (nodeContract.DependsOn.Count != parentIds.Length)
+        if (nodeContract.EvidenceSelectors.Count != parentIds.Length)
         {
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.AgentNodeRunStateConflict,
                 "Final-output NodeRun is missing authoritative parent Evidence."));
+        }
+
+        if (!AgentEvidenceSetDigestAuthority.TryComputeEffective(
+                parentEvidence,
+                out var evidenceSetDigest) ||
+            evidenceSetDigest is null)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentNodeRunStateConflict,
+                "Final-output NodeRun could not bind the authoritative input Evidence set."));
         }
 
         var artifactRefs = workspace.Artifacts
@@ -361,9 +379,9 @@ internal sealed class AgentFinalizationNodeExecutor(
                 "artifact-workspace-finalization:v1",
                 BuiltInToolRegistrations.FinalizationCheckpointToolCode,
                 nodeClaim.NodeRun.ExecutionSnapshotDigest,
-                taskClaim.Task.ModelId?.Value,
+                ModelId: null,
                 ModelVersion: null,
-                PromptVersion: "snapshot-bound"),
+                PromptVersion: null),
             new AgentEvidenceSourceDocument(
                 "ArtifactWorkspace",
                 payloadRef,
@@ -406,7 +424,8 @@ internal sealed class AgentFinalizationNodeExecutor(
             new AgentEvidenceLineageDocument(
                 parentIds,
                 nodeClaim.NodeRun.InputDigest,
-                stage.ManifestDigest),
+                stage.ManifestDigest,
+                evidenceSetDigest),
             new AgentEvidenceGovernanceDocument(
                 "Internal",
                 "Redacted",

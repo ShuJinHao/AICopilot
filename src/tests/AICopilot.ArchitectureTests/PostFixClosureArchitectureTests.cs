@@ -101,13 +101,11 @@ public sealed class PostFixClosureArchitectureTests
         const string planCompilerContract =
             "AICopilot.AiGatewayService.AgentTasks.IAgentPlanCompiler";
         const string canonicalPlanCompiler =
-            "AICopilot.AiGatewayService.AgentTasks.DeterministicLinearAgentPlanCompiler";
+            "AICopilot.AiGatewayService.AgentTasks.DeterministicAgentPlanCompiler";
         var builder = Host.CreateApplicationBuilder();
 
         builder.AddAiGatewayService();
 
-        builder.Services.Should().NotContain(descriptor =>
-            descriptor.ServiceType == typeof(IAgentDynamicPlanner));
         builder.Services.Should().ContainSingle(descriptor =>
             descriptor.ServiceType == typeof(IAgentPlanIntegrityValidator) &&
             descriptor.Lifetime == ServiceLifetime.Singleton);

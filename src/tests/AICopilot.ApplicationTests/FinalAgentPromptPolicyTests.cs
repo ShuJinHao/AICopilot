@@ -42,7 +42,9 @@ public sealed class FinalAgentPromptPolicyTests
                 ManufacturingSceneType.KnowledgeQnA,
                 hasDataAnalysis,
                 hasBusinessPolicy,
-                hasKnowledge
+                hasKnowledge,
+                false,
+                false
             ]);
 
         result.Should().BeAssignableTo<IReadOnlyList<string>>();

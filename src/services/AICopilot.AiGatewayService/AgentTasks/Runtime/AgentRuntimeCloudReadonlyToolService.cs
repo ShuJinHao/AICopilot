@@ -8,9 +8,10 @@ internal sealed class AgentRuntimeCloudReadonlyToolService(ICloudReadonlyAgentTo
 
     public Task<object> QueryCloudReadonlyAsync(
         AgentTaskPlanDocument plan,
+        AgentStep step,
         AgentTaskRunState state,
         CancellationToken cancellationToken)
     {
-        return basicTools.QueryCloudReadonlyAsync(plan, state, cancellationToken);
+        return basicTools.QueryCloudReadonlyAsync(plan, step, state, cancellationToken);
     }
 }

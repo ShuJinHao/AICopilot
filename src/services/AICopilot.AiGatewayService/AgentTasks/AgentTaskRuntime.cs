@@ -5,7 +5,6 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Globalization;
-using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.AiGatewayService.Workflows.Executors;
@@ -24,6 +23,7 @@ using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
@@ -75,7 +75,9 @@ internal sealed class AgentTaskRuntime(
     IOptions<AgentRunQueueOptions>? runQueueOptions = null,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
     IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
-    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null)
+    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null,
+    AgentReasoningNodeExecutor? reasoningNodeExecutor = null,
+    IServiceScopeFactory? serviceScopeFactory = null)
     : IAgentTaskRuntime
 {
     private readonly AgentTaskRunAttemptCoordinator runAttemptCoordinator = new(
@@ -92,10 +94,11 @@ internal sealed class AgentTaskRuntime(
         knowledgeBaseAccessCheckers,
         cloudReadonlyToolExecutor,
         identityAccessService,
+        new AgentRuntimeArtifactBuilder(workspaceService, documentGenerator),
         businessDatabaseReadService,
         businessTextToSqlRuntime,
         cloudTextToSqlFallbackRunner,
-        new AgentRuntimeArtifactBuilder(workspaceService, documentGenerator));
+        reasoningNodeExecutor);
 
     public Task<Result<AgentTask>> RunAsync(AgentTask task, CancellationToken cancellationToken = default)
     {
@@ -214,6 +217,7 @@ internal sealed class AgentTaskRuntime(
         var workspace = await LoadWorkspaceAsync(task, cancellationToken);
         var state = new AgentTaskRunState();
         IReadOnlyDictionary<int, AgentNodeRun>? durableNodesByStep = null;
+        IReadOnlyDictionary<string, AgentNodeRun>? durableNodesById = null;
         IReadOnlyCollection<AgentEvidenceRecord> durableEvidence = [];
         var durableOutputByNodeRun = new Dictionary<AgentNodeRunId, string>();
         if (durableClaim is not null)
@@ -239,24 +243,54 @@ internal sealed class AgentTaskRuntime(
                         string.Equals(runtimeNode.NodeId, node.NodeId, StringComparison.Ordinal))
                 })
                 .ToDictionary(item => item.StepIndex, item => item.Node);
+            durableNodesById = materialized.ToDictionary(
+                node => node.NodeId,
+                StringComparer.Ordinal);
             durableEvidence = await nodeRunStore.ListEvidenceByAttemptAsync(
                 durableClaim.RunAttempt.Id,
                 cancellationToken);
             foreach (var evidence in durableEvidence.OrderBy(item => item.CreatedAt))
             {
+                if (!durableNodesById.TryGetValue(evidence.NodeId, out var evidenceNode))
+                {
+                    return Result.Failure(new ApiProblemDescriptor(
+                        AppProblemCodes.AgentNodeRunStateConflict,
+                        "Durable Evidence references a NodeRun outside the current plan attempt."));
+                }
+
+                var access = AgentEvidenceAccessChecker.ValidateDurable(
+                    evidence,
+                    task,
+                    attempt.Id.Value,
+                    evidenceNode,
+                    DateTimeOffset.UtcNow);
+                if (!access.IsSuccess)
+                {
+                    return Result.From(access);
+                }
+
                 if (evidence.StorageMode == AgentEvidenceStorageMode.InlineCanonicalJson &&
                     !string.IsNullOrWhiteSpace(evidence.InlinePayloadJson))
                 {
-                    durableOutputByNodeRun[evidence.NodeRunId] =
-                        AgentTaskRunStateCheckpointCodec.RestoreEvidencePayload(
-                            state,
-                            evidence.InlinePayloadJson);
+                    try
+                    {
+                        durableOutputByNodeRun[evidence.NodeRunId] =
+                            AgentTaskRunStateCheckpointCodec.MergeEvidencePayload(
+                                state,
+                                evidence.InlinePayloadJson);
+                    }
+                    catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+                    {
+                        return Result.Failure(new ApiProblemDescriptor(
+                            AppProblemCodes.AgentNodeRunStateConflict,
+                            "Inline Evidence payload could not restore the durable task checkpoint."));
+                    }
+
                     continue;
                 }
 
-                var evidenceNode = materialized.SingleOrDefault(node => node.Id == evidence.NodeRunId);
                 if (evidence.StorageMode != AgentEvidenceStorageMode.ArtifactReference ||
-                    evidenceNode is null || artifactReferenceEvidenceResolver is null)
+                    artifactReferenceEvidenceResolver is null)
                 {
                     return Result.Failure(new ApiProblemDescriptor(
                         AppProblemCodes.AgentNodeRunStateConflict,
@@ -276,6 +310,71 @@ internal sealed class AgentTaskRuntime(
 
                 durableOutputByNodeRun[evidence.NodeRunId] = resolved.Value!;
             }
+        }
+
+        if (durableClaim is not null &&
+            durableNodesByStep is not null &&
+            durableNodesById is not null &&
+            serviceScopeFactory is not null &&
+            string.Equals(plan.TopologyProfile, "DagV1", StringComparison.Ordinal) &&
+            plan.ConcurrencyPolicy is { MaxParallelism: >= AgentPlanContractVersions.DagMinParallelism })
+        {
+            var parallelRoots = await ExecuteParallelDagReadRootsAsync(
+                task,
+                workspace,
+                attempt,
+                plan,
+                durableClaim,
+                durableNodesByStep,
+                durableEvidence,
+                durableOutputByNodeRun,
+                cancellationToken);
+            if (!parallelRoots.IsSuccess)
+            {
+                return Result.From(parallelRoots);
+            }
+
+            durableEvidence = parallelRoots.Value!.Evidence;
+            durableOutputByNodeRun = parallelRoots.Value.OutputByNodeRun;
+            if (parallelRoots.Value.IsTerminal)
+            {
+                return Result.Success(task);
+            }
+
+            foreach (var evidence in durableEvidence
+                         .Where(item =>
+                             item.StorageMode == AgentEvidenceStorageMode.InlineCanonicalJson &&
+                             !string.IsNullOrWhiteSpace(item.InlinePayloadJson))
+                         .OrderBy(item => item.NodeId, StringComparer.Ordinal))
+            {
+                try
+                {
+                    _ = AgentTaskRunStateCheckpointCodec.MergeEvidencePayload(
+                        state,
+                        evidence.InlinePayloadJson!);
+                }
+                catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+                {
+                    return Result.Failure(new ApiProblemDescriptor(
+                        AppProblemCodes.AgentNodeRunStateConflict,
+                        "Parallel NodeRun Evidence could not merge into the durable task checkpoint."));
+                }
+            }
+
+            var refreshedNodes = await nodeRunStore!.ListByAttemptAsync(
+                durableClaim.RunAttempt.Id,
+                cancellationToken);
+            durableNodesByStep = plan.Nodes!
+                .Select((node, index) => new
+                {
+                    StepIndex = index + 1,
+                    Node = refreshedNodes.Single(runtimeNode =>
+                        string.Equals(runtimeNode.NodeId, node.NodeId, StringComparison.Ordinal))
+                })
+                .ToDictionary(item => item.StepIndex, item => item.Node);
+            durableNodesById = refreshedNodes.ToDictionary(
+                node => node.NodeId,
+                StringComparer.Ordinal);
         }
 
         var executorResolver = CreateExecutorResolver();
@@ -484,6 +583,25 @@ internal sealed class AgentTaskRuntime(
                         "Approved final-output checkpoint is missing durable execution authority."));
                 }
 
+                if (durableNodesById is null)
+                {
+                    return Result.Failure(new ApiProblemDescriptor(
+                        AppProblemCodes.AgentNodeRunStateConflict,
+                        "Approved final-output checkpoint is missing the materialized NodeRun roster."));
+                }
+
+                var parentSelection = AgentEvidenceSelector.SelectForNode(
+                    nodeContract,
+                    durableEvidence,
+                    task,
+                    attempt.Id.Value,
+                    durableNodesById,
+                    DateTimeOffset.UtcNow);
+                if (!parentSelection.IsSuccess)
+                {
+                    return Result.From(parentSelection);
+                }
+
                 return await ExecuteApprovedFinalizationAsync(
                     task,
                     workspace,
@@ -494,7 +612,7 @@ internal sealed class AgentTaskRuntime(
                     durableClaim,
                     durableNode,
                     nodeContract,
-                    durableEvidence,
+                    parentSelection.Value!,
                     cancellationToken);
             }
 
@@ -548,8 +666,43 @@ internal sealed class AgentTaskRuntime(
                 }
             }
 
+            IReadOnlyCollection<AgentEvidenceRecord> selectedParentEvidence = [];
+            if (durableClaim is not null && nodeContract is not null)
+            {
+                if (durableNodesById is null)
+                {
+                    return Result.Failure(new ApiProblemDescriptor(
+                        AppProblemCodes.AgentNodeRunStateConflict,
+                        "Durable node execution is missing the materialized NodeRun roster."));
+                }
+
+                durableEvidence = await nodeRunStore!.ListEvidenceByAttemptAsync(
+                    durableClaim.RunAttempt.Id,
+                    cancellationToken);
+                var refreshedProducerNodes = await nodeRunStore.ListByAttemptAsync(
+                    durableClaim.RunAttempt.Id,
+                    cancellationToken);
+                durableNodesById = refreshedProducerNodes.ToDictionary(
+                    node => node.NodeId,
+                    StringComparer.Ordinal);
+                var parentSelection = AgentEvidenceSelector.SelectForNode(
+                    nodeContract,
+                    durableEvidence,
+                    task,
+                    attempt.Id.Value,
+                    durableNodesById,
+                    DateTimeOffset.UtcNow);
+                if (!parentSelection.IsSuccess)
+                {
+                    return Result.From(parentSelection);
+                }
+
+                selectedParentEvidence = parentSelection.Value!;
+            }
+
             AgentToolExecutionAuditScope? executionScope = null;
             var toolDispatchStarted = false;
+            var executionAttempts = 0;
             var nodeCheckpointCommitted = false;
             try
             {
@@ -587,7 +740,10 @@ internal sealed class AgentTaskRuntime(
                     step,
                     state,
                     toolRegistration,
-                    cancellationToken);
+                    cancellationToken,
+                    selectedParentEvidence,
+                    activeNodeClaim?.RunAttemptId,
+                    activeNodeClaim?.NodeRun.Id);
                 using var writeAuthorityScope = activeNodeClaim is null || writeAuthorityAccessor is null
                     ? null
                     : writeAuthorityAccessor.Push(new AgentRuntimeWriteAuthority(
@@ -595,13 +751,26 @@ internal sealed class AgentTaskRuntime(
                         activeNodeClaim.TaskFencingToken,
                         activeNodeClaim.NodeFencingToken));
                 toolDispatchStarted = true;
-                var executionResult = activeNodeClaim is null
-                    ? await ExecuteWithTimeoutAsync(executor, executionContext)
-                    : await ExecuteWithLeaseRenewalAsync(
-                        executor,
-                        executionContext,
-                        activeNodeClaim,
-                        cancellationToken);
+                if (nodeContract is null)
+                {
+                    throw new AgentToolExecutionException(
+                        AppProblemCodes.AgentNodeRunStateConflict,
+                        "AgentTask execution is missing its frozen Node contract.");
+                }
+
+                var executionResult = await AgentNodeExecutionPlane.ExecuteAsync(
+                    AgentNodeExecutionContract.ForDurable(nodeContract),
+                    executionToken => activeNodeClaim is null
+                        ? ExecuteWithTimeoutAsync(
+                            executor,
+                            executionContext with { CancellationToken = executionToken })
+                        : ExecuteWithLeaseRenewalAsync(
+                            executor,
+                            executionContext with { CancellationToken = executionToken },
+                            activeNodeClaim,
+                            executionToken),
+                    cancellationToken,
+                    attemptCount => executionAttempts = attemptCount);
                 var outputValidation = AgentToolRuntimeOutputGate.Validate(
                     toolRegistration,
                     executionResult);
@@ -655,9 +824,8 @@ internal sealed class AgentTaskRuntime(
                         }
                     }
 
-                    var parentEvidence = await nodeRunStore!.ListEvidenceByAttemptAsync(
-                        durableClaim.RunAttempt.Id,
-                        cancellationToken);
+                    var nodeCompletedAtUtc = DateTimeOffset.UtcNow;
+                    var nodeDuration = nodeCompletedAtUtc - nodeExecutionStartedAt;
                     var normalized = AgentEvidenceNormalizer.Normalize(
                         durableClaim,
                         activeNodeClaim,
@@ -667,19 +835,31 @@ internal sealed class AgentTaskRuntime(
                         executionResult,
                         state,
                         workspace,
-                        parentEvidence,
-                        DateTimeOffset.UtcNow - nodeExecutionStartedAt,
-                        DateTimeOffset.UtcNow);
+                        selectedParentEvidence,
+                        executionAttempts,
+                        nodeDuration,
+                        nodeCompletedAtUtc);
                     if (!normalized.IsSuccess)
                     {
                         var problem = normalized.Errors!
                             .OfType<ApiProblemDescriptor>()
                             .FirstOrDefault();
+                        AgentRuntimeTelemetry.RecordEvidenceNormalizationFailure(
+                            problem?.Code ?? AppProblemCodes.AgentPlanInvalid);
+                        if (string.Equals(
+                                problem?.Code,
+                                AppProblemCodes.AgentRunBudgetExceeded,
+                                StringComparison.Ordinal))
+                        {
+                            AgentRuntimeTelemetry.RecordBudgetReject("evidence-normalization");
+                        }
+
                         throw new AgentToolExecutionException(
                             problem?.Code ?? AppProblemCodes.AgentPlanInvalid,
                             problem?.Detail ?? "Node output could not be normalized as Evidence v1.");
                     }
 
+                    AgentRuntimeTelemetry.RecordNodeDuration(nodeDuration, nodeContract.NodeKind);
                     var checkpoint = normalized.Value!;
                     var committed = await nodeCheckpointCoordinator!.CommitSuccessAsync(
                         new AgentNodeSuccessCheckpoint(
@@ -706,7 +886,7 @@ internal sealed class AgentTaskRuntime(
                     }
 
                     nodeCheckpointCommitted = true;
-                    durableEvidence = parentEvidence.Append(checkpoint.Evidence).ToArray();
+                    durableEvidence = durableEvidence.Append(checkpoint.Evidence).ToArray();
                 }
 
                 step.Complete(executionResult.DurableOutput.CanonicalJson, DateTimeOffset.UtcNow);
@@ -744,6 +924,10 @@ internal sealed class AgentTaskRuntime(
 
                 var safeMessage = AgentToolExecutionAuditBuilder.BuildSafeExceptionSummary(ex);
                 var errorCode = AgentToolExecutionAuditBuilder.ResolveExecutionErrorCode(ex, step, toolRegistration);
+                if (string.Equals(errorCode, AppProblemCodes.AgentRunBudgetExceeded, StringComparison.Ordinal))
+                {
+                    AgentRuntimeTelemetry.RecordBudgetReject("node-execution");
+                }
                 if (durableClaim is not null && activeNodeClaim is not null)
                 {
                     var sideEffecting = activeNodeClaim.NodeRun.SideEffectClass is
@@ -802,9 +986,16 @@ internal sealed class AgentTaskRuntime(
                             CreateFailureUsage(
                                 durableClaim,
                                 activeNodeClaim,
-                                toolDispatchStarted,
+                                toolDispatchStarted ? Math.Max(1, executionAttempts) : 0,
                                 nodeExecutionStartedAt,
-                                DateTimeOffset.UtcNow),
+                                DateTimeOffset.UtcNow,
+                                ex is AgentToolExecutionException toolException
+                                    ? toolException.ModelCalls > 0
+                                        ? toolException.ModelCalls
+                                        : nodeContract?.NodeKind == "AgentReasoningNode" && toolDispatchStarted
+                                            ? nodeContract.Budget.MaxModelCalls
+                                            : 0
+                                    : 0),
                             DateTimeOffset.UtcNow,
                             RetryAtUtc: null),
                         cancellationToken);
@@ -826,6 +1017,19 @@ internal sealed class AgentTaskRuntime(
                     safeMessage,
                     DateTimeOffset.UtcNow,
                     cancellationToken);
+                if (durableClaim is not null &&
+                    activeNodeClaim is not null &&
+                    !activeNodeClaim.NodeRun.IsRequired)
+                {
+                    await SaveAsync(task, workspace, attempt, cancellationToken);
+                    continue;
+                }
+
+                if (nodeContract?.Required == true)
+                {
+                    AgentRuntimeTelemetry.RecordRequiredNodeFailure(nodeContract.NodeKind);
+                }
+
                 task.Fail($"步骤 {step.StepIndex} 执行失败：{safeMessage}", DateTimeOffset.UtcNow);
                 attempt.MarkFailed(errorCode, safeMessage, DateTimeOffset.UtcNow);
                 task.ReleaseRunLease(DateTimeOffset.UtcNow, clearActiveAttempt: true);
@@ -962,7 +1166,7 @@ internal sealed class AgentTaskRuntime(
                 CreateFailureUsage(
                     durableClaim,
                     nodeClaim,
-                    toolDispatchStarted: true,
+                    toolCallCount: 1,
                     startedAtUtc: nodeExecutionStartedAt,
                     nowUtc: failedAt),
                 failedAt,
@@ -991,6 +1195,377 @@ internal sealed class AgentTaskRuntime(
         await SaveAsync(task, workspace, attempt, cancellationToken);
         return Result.Success(task);
     }
+
+    private async Task<Result<AgentParallelDagRootState>> ExecuteParallelDagReadRootsAsync(
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        AgentTaskRunAttempt attempt,
+        AgentTaskPlanDocument plan,
+        DurableTaskClaim durableClaim,
+        IReadOnlyDictionary<int, AgentNodeRun> durableNodesByStep,
+        IReadOnlyCollection<AgentEvidenceRecord> durableEvidence,
+        Dictionary<AgentNodeRunId, string> durableOutputByNodeRun,
+        CancellationToken cancellationToken)
+    {
+        if (serviceScopeFactory is null ||
+            nodeRunClaimCoordinator is null ||
+            nodeCheckpointCoordinator is null ||
+            plan.ConcurrencyPolicy is null ||
+            plan.Nodes is null)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentNodeRunStateConflict,
+                "Bounded DAG execution services are unavailable."));
+        }
+
+        var orderedSteps = task.Steps.OrderBy(step => step.StepIndex).ToArray();
+        var candidates = plan.Nodes
+            .Select((node, index) => new AgentParallelDagRootCandidate(
+                index + 1,
+                node,
+                durableNodesByStep[index + 1],
+                orderedSteps[index]))
+            .Where(candidate =>
+                candidate.RuntimeNode.Status == AgentNodeRunStatus.Runnable &&
+                candidate.NodeContract.DependsOn.Count == 0 &&
+                candidate.NodeContract.EvidenceSelectors.Count == 0 &&
+                !candidate.NodeContract.ApprovalPolicy.Required &&
+                candidate.NodeContract.SideEffectClass == "ReadOnly" &&
+                candidate.NodeContract.NodeKind is
+                    "CloudReadNode" or "GovernedDataReadNode" or "KnowledgeRetrievalNode")
+            .OrderBy(candidate => candidate.StepIndex)
+            .ToArray();
+        if (candidates.Length < AgentPlanContractVersions.DagMinParallelism)
+        {
+            return Result.Success(new AgentParallelDagRootState(
+                durableEvidence,
+                durableOutputByNodeRun,
+                IsTerminal: false));
+        }
+
+        var evidence = durableEvidence.ToList();
+        AgentParallelDagRequiredFailure? requiredFailure = null;
+        foreach (var chunk in candidates.Chunk(plan.ConcurrencyPolicy.MaxParallelism))
+        {
+            var workItems = new List<AgentParallelDagRootWorkItem>(chunk.Length);
+            foreach (var candidate in chunk)
+            {
+                var toolDecision = await toolRegistryGuard.ValidateAsync(
+                    candidate.Step.ToolCode,
+                    task.UserId,
+                    cancellationToken);
+                if (!toolDecision.IsAllowed)
+                {
+                    return Result.Failure(toolDecision.Problem!);
+                }
+
+                var tool = toolDecision.Tool!;
+                if (plan.PluginSelectionMode != AgentPluginSelectionMode.BuiltInOnly ||
+                    tool.TargetType != ToolRegistrationTargetType.AgentRuntime ||
+                    tool.ProviderType is ToolProviderType.Mcp or ToolProviderType.MockMcp ||
+                    RequiresRuntimeApproval(candidate.Step, tool))
+                {
+                    return Result.Failure(new ApiProblemDescriptor(
+                        AppProblemCodes.AgentPlanToolDenied,
+                        $"Tool '{tool.ToolCode}' is outside the parallel built-in read boundary."));
+                }
+
+                var claimed = await nodeRunClaimCoordinator.ClaimAsync(
+                    candidate.RuntimeNode.Id,
+                    durableClaim.RunAttempt.Id,
+                    durableClaim.TaskFencingToken,
+                    durableClaim.RunAttempt.LeaseOwner ?? "agent-dag-read-runtime",
+                    (runQueueOptions?.Value ?? new AgentRunQueueOptions()).LeaseDuration,
+                    DateTimeOffset.UtcNow,
+                    cancellationToken);
+                if (!claimed.IsSuccess || claimed.Value is null)
+                {
+                    return claimed.IsSuccess
+                        ? Result.Failure(new ApiProblemDescriptor(
+                            AppProblemCodes.AgentNodeRunStateConflict,
+                            $"Parallel read NodeRun '{candidate.NodeContract.NodeId}' was not claimable."))
+                        : Result.From(claimed);
+                }
+
+                var running = await nodeRunClaimCoordinator.MarkRunningAsync(
+                    claimed.Value,
+                    DateTimeOffset.UtcNow,
+                    cancellationToken);
+                if (!running.IsSuccess)
+                {
+                    return Result.From(running);
+                }
+
+                candidate.Step.Start(DateTimeOffset.UtcNow);
+                await runtimeEventRecorder.StageStepStartedAsync(task, candidate.Step, cancellationToken);
+                var auditScope = runtimeEventRecorder.BeginToolExecution(
+                    task,
+                    candidate.Step,
+                    tool,
+                    attempt,
+                    DateTimeOffset.UtcNow);
+                workItems.Add(new AgentParallelDagRootWorkItem(
+                    candidate,
+                    tool,
+                    claimed.Value,
+                    auditScope));
+            }
+
+            using var batchCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var executions = workItems
+                .Select(item => ExecuteParallelReadInScopeAsync(
+                    new AgentParallelReadNodeExecutionRequest(
+                        task,
+                        workspace,
+                        plan,
+                        item.Candidate.NodeContract,
+                        item.Candidate.Step,
+                        item.Tool),
+                    batchCts.Token))
+                .ToArray();
+            var outcomes = await AwaitParallelReadBatchWithLeaseRenewalAsync(
+                executions,
+                workItems.Select(item => item.NodeClaim).ToArray(),
+                batchCts,
+                cancellationToken);
+            if (!outcomes.IsSuccess)
+            {
+                return Result.From(outcomes);
+            }
+
+            for (var index = 0; index < workItems.Count; index++)
+            {
+                var item = workItems[index];
+                var outcome = outcomes.Value![index];
+                var completedAtUtc = outcome.CompletedAtUtc;
+                if (outcome.IsSuccess)
+                {
+                    var normalized = AgentEvidenceNormalizer.Normalize(
+                        durableClaim,
+                        item.NodeClaim,
+                        item.Candidate.NodeContract,
+                        item.Tool,
+                        item.Candidate.Step,
+                        outcome.ExecutionResult!,
+                        outcome.State,
+                        workspace,
+                        parentEvidence: [],
+                        toolCallCount: outcome.ToolCallCount,
+                        elapsed: outcome.CompletedAtUtc - outcome.StartedAtUtc,
+                        nowUtc: completedAtUtc);
+                    if (!normalized.IsSuccess)
+                    {
+                        var problem = normalized.Errors!
+                            .OfType<ApiProblemDescriptor>()
+                            .FirstOrDefault();
+                        AgentRuntimeTelemetry.RecordEvidenceNormalizationFailure(
+                            problem?.Code ?? AppProblemCodes.AgentPlanInvalid);
+                        return Result.From(normalized);
+                    }
+
+                    AgentRuntimeTelemetry.RecordNodeDuration(
+                        outcome.CompletedAtUtc - outcome.StartedAtUtc,
+                        item.Candidate.NodeContract.NodeKind);
+                    var checkpoint = normalized.Value!;
+                    var committed = await nodeCheckpointCoordinator.CommitSuccessAsync(
+                        new AgentNodeSuccessCheckpoint(
+                            durableClaim.Task.Id,
+                            durableClaim.RunAttempt.Id,
+                            item.NodeClaim.NodeRun.Id,
+                            durableClaim.TaskFencingToken,
+                            item.NodeClaim.NodeFencingToken,
+                            checkpoint.Evidence,
+                            checkpoint.Usage,
+                            checkpoint.OutputDigest,
+                            item.Tool.ToolCode,
+                            ProviderReceiptHash: null,
+                            completedAtUtc),
+                        cancellationToken);
+                    if (!committed.IsSuccess)
+                    {
+                        return Result.From(committed);
+                    }
+
+                    evidence.Add(checkpoint.Evidence);
+                    durableOutputByNodeRun[item.NodeClaim.NodeRun.Id] =
+                        outcome.ExecutionResult!.DurableOutput.CanonicalJson;
+                    item.Candidate.Step.Complete(
+                        outcome.ExecutionResult.DurableOutput.CanonicalJson,
+                        completedAtUtc);
+                    var artifactId = runtimeEventRecorder.MarkToolExecutionSucceeded(
+                        item.AuditScope,
+                        task,
+                        workspace,
+                        item.Candidate.Step,
+                        item.Tool,
+                        outcome.ExecutionResult.ContractOutput.ToJsonElement(),
+                        completedAtUtc);
+                    await runtimeEventRecorder.StageStepCompletedAsync(
+                        task,
+                        item.Candidate.Step,
+                        cancellationToken);
+                    await runtimeEventRecorder.RecordToolSucceededAsync(
+                        task,
+                        workspace,
+                        item.Candidate.Step,
+                        artifactId,
+                        cancellationToken);
+                    continue;
+                }
+
+                var failureCode = outcome.FailureCode ?? AppProblemCodes.AgentNodeRunStateConflict;
+                var safeMessage = outcome.SafeMessage ?? "Parallel read node failed without an authoritative result.";
+                var failed = await nodeCheckpointCoordinator.CommitFailureAsync(
+                    new AgentNodeFailureCheckpoint(
+                        durableClaim.Task.Id,
+                        durableClaim.RunAttempt.Id,
+                        item.NodeClaim.NodeRun.Id,
+                        durableClaim.TaskFencingToken,
+                        item.NodeClaim.NodeFencingToken,
+                        failureCode,
+                        safeMessage,
+                        CreateFailureUsage(
+                            durableClaim,
+                            item.NodeClaim,
+                            outcome.ToolCallCount,
+                            outcome.StartedAtUtc,
+                            completedAtUtc),
+                        completedAtUtc,
+                        RetryAtUtc: null),
+                    cancellationToken);
+                if (!failed.IsSuccess)
+                {
+                    return Result.From(failed);
+                }
+
+                item.Candidate.Step.Fail(safeMessage, completedAtUtc);
+                await runtimeEventRecorder.RecordToolFailedAsync(
+                    item.AuditScope,
+                    task,
+                    workspace,
+                    item.Candidate.Step,
+                    item.Tool,
+                    attempt,
+                    failureCode,
+                    safeMessage,
+                    completedAtUtc,
+                    cancellationToken);
+                if (item.Candidate.RuntimeNode.IsRequired && requiredFailure is null)
+                {
+                    AgentRuntimeTelemetry.RecordRequiredNodeFailure(
+                        item.Candidate.NodeContract.NodeKind);
+                    requiredFailure = new AgentParallelDagRequiredFailure(
+                        item.Candidate.Step.StepIndex,
+                        failureCode,
+                        safeMessage,
+                        completedAtUtc);
+                }
+            }
+        }
+
+        if (requiredFailure is not null)
+        {
+            task.Fail(
+                $"步骤 {requiredFailure.StepIndex} 执行失败：{requiredFailure.SafeMessage}",
+                requiredFailure.FailedAtUtc);
+            attempt.MarkFailed(
+                requiredFailure.FailureCode,
+                requiredFailure.SafeMessage,
+                requiredFailure.FailedAtUtc);
+            task.ReleaseRunLease(requiredFailure.FailedAtUtc, clearActiveAttempt: true);
+            await SaveAsync(task, workspace, attempt, cancellationToken);
+            return Result.Success(new AgentParallelDagRootState(
+                evidence,
+                durableOutputByNodeRun,
+                IsTerminal: true));
+        }
+
+        await SaveAsync(task, workspace, attempt, cancellationToken);
+        return Result.Success(new AgentParallelDagRootState(
+            evidence,
+            durableOutputByNodeRun,
+            IsTerminal: false));
+    }
+
+    private async Task<Result<AgentParallelReadNodeExecutionOutcome[]>> AwaitParallelReadBatchWithLeaseRenewalAsync(
+        Task<AgentParallelReadNodeExecutionOutcome>[] executions,
+        IReadOnlyCollection<AgentNodeRunClaim> nodeClaims,
+        CancellationTokenSource batchCts,
+        CancellationToken cancellationToken)
+    {
+        var batch = Task.WhenAll(executions);
+        var leaseDuration = (runQueueOptions?.Value ?? new AgentRunQueueOptions()).LeaseDuration;
+        var renewalInterval = TimeSpan.FromMilliseconds(Math.Clamp(
+            leaseDuration.TotalMilliseconds / 3d,
+            100d,
+            30_000d));
+        while (!batch.IsCompleted)
+        {
+            var delay = Task.Delay(renewalInterval, cancellationToken);
+            if (await Task.WhenAny(batch, delay) == batch)
+            {
+                break;
+            }
+
+            foreach (var nodeClaim in nodeClaims)
+            {
+                var renewed = await nodeRunClaimCoordinator!.RenewTaskAndNodeLeaseAsync(
+                    nodeClaim,
+                    leaseDuration,
+                    leaseDuration,
+                    DateTimeOffset.UtcNow,
+                    cancellationToken);
+                if (!renewed.IsSuccess)
+                {
+                    batchCts.Cancel();
+                    try
+                    {
+                        await batch;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // The authoritative failure is the stale fence reported below.
+                    }
+
+                    return Result.From(renewed);
+                }
+            }
+        }
+
+        return Result.Success(await batch);
+    }
+
+    private async Task<AgentParallelReadNodeExecutionOutcome> ExecuteParallelReadInScopeAsync(
+        AgentParallelReadNodeExecutionRequest request,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = serviceScopeFactory!.CreateAsyncScope();
+        var executor = scope.ServiceProvider.GetRequiredService<AgentParallelReadNodeExecutor>();
+        return await executor.ExecuteAsync(request, cancellationToken);
+    }
+
+    private sealed record AgentParallelDagRootCandidate(
+        int StepIndex,
+        AgentPlanNodeDocument NodeContract,
+        AgentNodeRun RuntimeNode,
+        AgentStep Step);
+
+    private sealed record AgentParallelDagRootWorkItem(
+        AgentParallelDagRootCandidate Candidate,
+        ToolRegistration Tool,
+        AgentNodeRunClaim NodeClaim,
+        AgentToolExecutionAuditScope AuditScope);
+
+    private sealed record AgentParallelDagRequiredFailure(
+        int StepIndex,
+        string FailureCode,
+        string SafeMessage,
+        DateTimeOffset FailedAtUtc);
+
+    private sealed record AgentParallelDagRootState(
+        IReadOnlyCollection<AgentEvidenceRecord> Evidence,
+        Dictionary<AgentNodeRunId, string> OutputByNodeRun,
+        bool IsTerminal);
 
     private async Task<Result<AgentFinalizationCheckpointState>> ValidateFinalizationCheckpointAsync(
         AgentTask task,
@@ -1054,10 +1629,19 @@ internal sealed class AgentTaskRuntime(
     private static AgentRunUsageLedgerEntry CreateFailureUsage(
         DurableTaskClaim taskClaim,
         AgentNodeRunClaim nodeClaim,
-        bool toolDispatchStarted,
+        int toolCallCount,
         DateTimeOffset startedAtUtc,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        int modelCallCount = 0)
     {
+        if (toolCallCount is < 0 or > 5 ||
+            toolCallCount > nodeClaim.NodeRun.MaxAttempts ||
+            modelCallCount < 0 ||
+            modelCallCount > nodeClaim.NodeRun.MaxModelCalls)
+        {
+            throw new InvalidOperationException("Failure usage is outside the NodeRun retry budget.");
+        }
+
         var elapsed = Math.Max(0, (long)(nowUtc - startedAtUtc).TotalMilliseconds);
         elapsed = Math.Min(elapsed, nodeClaim.NodeRun.ReservedElapsedMilliseconds);
         return new AgentRunUsageLedgerEntry(
@@ -1068,8 +1652,8 @@ internal sealed class AgentTaskRuntime(
             nodeClaim.NodeFencingToken,
             inputTokens: 0,
             outputTokens: 0,
-            modelCalls: 0,
-            toolCalls: toolDispatchStarted ? 1 : 0,
+            modelCalls: modelCallCount,
+            toolCalls: toolCallCount,
             elapsedMilliseconds: elapsed,
             costAmount: 0m,
             artifactCount: 0,
@@ -1080,7 +1664,8 @@ internal sealed class AgentTaskRuntime(
                 taskClaim.TaskFencingToken,
                 nodeClaim.NodeFencingToken,
                 outcome = "known-failure",
-                toolDispatchStarted
+                toolCallCount,
+                modelCallCount
             })),
             nowUtc);
     }

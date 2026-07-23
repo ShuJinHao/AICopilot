@@ -7,7 +7,6 @@ using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
@@ -95,8 +94,6 @@ public static class DependencyInjection
         builder.Services.AddScoped<IRepository<UploadRecord>>(provider => provider.GetRequiredService<AiGatewayRepository<UploadRecord>>());
         builder.Services.AddScoped<IReadRepository<ToolRegistration>>(provider => provider.GetRequiredService<AiGatewayRepository<ToolRegistration>>());
         builder.Services.AddScoped<IRepository<ToolRegistration>>(provider => provider.GetRequiredService<AiGatewayRepository<ToolRegistration>>());
-        builder.Services.AddScoped<IReadRepository<SkillDefinition>>(provider => provider.GetRequiredService<AiGatewayRepository<SkillDefinition>>());
-        builder.Services.AddScoped<IRepository<SkillDefinition>>(provider => provider.GetRequiredService<AiGatewayRepository<SkillDefinition>>());
         builder.Services.AddScoped<IToolExecutionAuditStore, ToolExecutionAuditStore>();
         builder.Services.AddScoped(typeof(RagRepository<>));
         builder.Services.AddScoped<IReadRepository<EmbeddingModel>>(provider => provider.GetRequiredService<RagRepository<EmbeddingModel>>());

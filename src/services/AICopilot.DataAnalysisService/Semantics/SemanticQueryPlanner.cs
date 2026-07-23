@@ -5,7 +5,7 @@ using AICopilot.Services.Contracts;
 namespace AICopilot.DataAnalysisService.Semantics;
 
 public sealed class SemanticQueryPlanner(
-    ISemanticIntentCatalog intentCatalog,
+    ISemanticQuerySchemaRegistry schemaRegistry,
     ISemanticDefinitionCatalog definitionCatalog) : ISemanticQueryPlanner
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -16,7 +16,7 @@ public sealed class SemanticQueryPlanner(
     public SemanticPlanningResult Plan(string intent, string? query)
     {
         var completion = SemanticIntentQueryCompleter.Complete(intent, query);
-        if (!intentCatalog.TryGet(completion.Intent, out var descriptor))
+        if (!schemaRegistry.TryGet(completion.Intent, out var descriptor))
         {
             return SemanticPlanningResult.Failure($"Unsupported semantic intent: {completion.Intent}");
         }

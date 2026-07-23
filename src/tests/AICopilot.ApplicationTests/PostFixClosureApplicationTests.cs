@@ -44,7 +44,6 @@ public sealed class PostFixClosureApplicationTests
             """
             {
               "planSource": "PlanDraft",
-              "plannerMode": "PlanDraft",
               "availableToolCount": 0,
               "isSimulationOnly": false,
               "requiresDataApproval": false,

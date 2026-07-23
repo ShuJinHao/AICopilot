@@ -74,10 +74,34 @@ internal sealed class AgentNodeRunStore(
                 {
                     var seedIds = seeds.Select(seed => seed.NodeId).Order(StringComparer.Ordinal).ToArray();
                     var existingIds = existing.Select(node => node.NodeId).Order(StringComparer.Ordinal).ToArray();
+                    var seedsById = seeds.ToDictionary(seed => seed.NodeId, StringComparer.Ordinal);
                     if (!seedIds.SequenceEqual(existingIds, StringComparer.Ordinal) ||
                         existing.Any(node =>
-                            node.PlanDigest != seeds.Single(seed => seed.NodeId == node.NodeId).PlanDigest ||
-                            node.ExecutionSnapshotDigest != seeds.Single(seed => seed.NodeId == node.NodeId).ExecutionSnapshotDigest))
+                        {
+                            var seed = seedsById[node.NodeId];
+                            return node.PlanDigest != seed.PlanDigest ||
+                                   node.ExecutionSnapshotDigest != seed.ExecutionSnapshotDigest ||
+                                   node.NodeKind != seed.NodeKind ||
+                                   node.ToolCode != seed.ToolCode ||
+                                   node.DependenciesJson != seed.DependenciesJson ||
+                                   node.InputJson != seed.InputJson ||
+                                   node.InputDigest != seed.InputDigest ||
+                                   node.OutputSchemaRef != seed.OutputSchemaRef ||
+                                   node.IsRequired != seed.IsRequired ||
+                                   node.RequiresApproval != seed.RequiresApproval ||
+                                   node.SideEffectClass != seed.SideEffectClass ||
+                                   node.IdempotencyKeyHash != seed.IdempotencyKeyHash ||
+                                   node.MaxAttempts != seed.MaxAttempts ||
+                                   node.TimeoutSeconds != seed.TimeoutSeconds ||
+                                   node.MaxToolCalls != seed.Budget.MaxToolCalls ||
+                                   node.MaxModelCalls != seed.Budget.MaxModelCalls ||
+                                   node.MaxInputTokens != seed.Budget.MaxInputTokens ||
+                                   node.MaxOutputTokens != seed.Budget.MaxOutputTokens ||
+                                   node.MaxCostAmount != seed.Budget.MaxCostAmount ||
+                                   node.MaxArtifactCount != seed.Budget.MaxArtifactCount ||
+                                   node.MaxArtifactBytes != seed.Budget.MaxArtifactBytes ||
+                                   node.JoinPolicy != seed.JoinPolicy;
+                        }))
                     {
                         throw new InvalidOperationException(
                             "Existing NodeRun topology does not match the immutable Plan v2 snapshot.");
@@ -122,6 +146,7 @@ internal sealed class AgentNodeRunStore(
                         seed.MaxAttempts,
                         seed.TimeoutSeconds,
                         seed.Budget,
+                        seed.JoinPolicy,
                         nowUtc);
                     if (seed.IsInitiallyRunnable)
                     {
@@ -163,6 +188,18 @@ internal sealed class AgentNodeRunStore(
             .Where(evidence => evidence.RunAttemptId == runAttemptId && !evidence.IsRevoked)
             .OrderBy(evidence => evidence.CreatedAt)
             .ThenBy(evidence => evidence.NodeId)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<AgentRunUsageLedgerEntry>> ListUsageByAttemptAsync(
+        AgentTaskRunAttemptId runAttemptId,
+        CancellationToken cancellationToken = default)
+    {
+        return await dbContext.AgentRunUsageLedgerEntries
+            .AsNoTracking()
+            .Where(usage => usage.RunAttemptId == runAttemptId)
+            .OrderBy(usage => usage.CreatedAt)
+            .ThenBy(usage => usage.Id)
             .ToListAsync(cancellationToken);
     }
 

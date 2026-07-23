@@ -28,7 +28,7 @@ public sealed record ToolRegistrationSeed(
 
 public static class BuiltInToolRegistrations
 {
-    public const int CurrentCatalogVersion = 14;
+    public const int CurrentCatalogVersion = 18;
     public const int CurrentSchemaVersion = 3;
     public const string FinalizationCheckpointToolCode = "finalize_artifacts";
 
@@ -50,6 +50,12 @@ public static class BuiltInToolRegistrations
         """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["cloud-query-summary"]},"sourceMode":{"type":"string"},"isSimulation":{"type":"boolean"},"rowCount":{"type":"integer"},"isTruncated":{"type":"boolean"},"resultHash":{"type":"string"}},"required":["status","resultType","sourceMode","isSimulation","rowCount","isTruncated","resultHash"],"additionalProperties":false}""";
     private const string BusinessQuerySummaryOutputSchema =
         """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["business-query-summary"]},"sourceMode":{"type":"string"},"isSimulation":{"type":"boolean"},"rowCount":{"type":"integer"},"isTruncated":{"type":"boolean"},"resultHash":{"type":"string"}},"required":["status","resultType","sourceMode","isSimulation","rowCount","isTruncated","resultHash"],"additionalProperties":false}""";
+    private const string EvidenceJoinOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["evidence-join"]},"joinPolicy":{"type":"string","enum":["AllRequired","OptionalBestEffort"]},"requiredEvidenceCount":{"type":"integer"},"optionalEvidenceCount":{"type":"integer"},"missingOptionalCount":{"type":"integer"}},"required":["status","resultType","joinPolicy","requiredEvidenceCount","optionalEvidenceCount","missingOptionalCount"],"additionalProperties":false}""";
+    private const string AgentReasoningOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["agent-reasoning"]},"childRunId":{"type":"string"},"completionStatus":{"type":"string","enum":["Completed"]},"truthClass":{"type":"string","enum":["LlmInference"]},"safeSummary":{"type":"string"},"findings":{"type":"array","items":{"type":"string"}},"citationRefs":{"type":"array","items":{"type":"string"}},"evidenceWarnings":{"type":"array","items":{"type":"string"}},"conflictStatus":{"type":"string","enum":["None","PotentialConflict"]},"confidence":{"type":"number"},"noFurtherToolCalls":{"type":"boolean","enum":[true]},"recoveryUsed":{"type":"boolean"},"modelCalls":{"type":"integer"}},"required":["status","resultType","childRunId","completionStatus","truthClass","safeSummary","findings","citationRefs","evidenceWarnings","conflictStatus","confidence","noFurtherToolCalls","recoveryUsed","modelCalls"],"additionalProperties":false}""";
+    private const string CloudHealthAssessmentOutputSchema =
+        """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["cloud-health-assessment"]},"algorithmVersion":{"type":"string","enum":["cloud-health-assessment:v1"]},"assessmentType":{"type":"string","enum":["CurrentDeviceRuntimeHealth"]},"truthClass":{"type":"string","enum":["DerivedFact"]},"healthScore":{"type":"integer"},"healthLevel":{"type":"string","enum":["Stable","Watch","Attention","DataInsufficient"]},"safeSummary":{"type":"string"},"findings":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number"},"missingRate":{"type":"number"},"inputEvidenceCount":{"type":"integer"},"evidenceSetDigest":{"type":"string"},"sourceAsOfUtc":{"type":"string"},"sourceMode":{"type":"string"},"isSimulation":{"type":"boolean"},"rowCount":{"type":"integer"},"isTruncated":{"type":"boolean"},"typedMetrics":{"type":"object","properties":{"futureHeartbeatCount":{"type":"number"},"missingHeartbeatCount":{"type":"number"},"reportedIssueStatusCount":{"type":"number"},"staleHeartbeatCount":{"type":"number"},"totalDeviceCount":{"type":"number"},"unknownRuntimeStatusCount":{"type":"number"}},"required":["futureHeartbeatCount","missingHeartbeatCount","reportedIssueStatusCount","staleHeartbeatCount","totalDeviceCount","unknownRuntimeStatusCount"],"additionalProperties":false}},"required":["status","resultType","algorithmVersion","assessmentType","truthClass","healthScore","healthLevel","safeSummary","findings","confidence","missingRate","inputEvidenceCount","evidenceSetDigest","sourceAsOfUtc","sourceMode","isSimulation","rowCount","isTruncated","typedMetrics"],"additionalProperties":false}""";
     private const string ArtifactOutputSchema =
         """{"type":"object","properties":{"status":{"type":"string","enum":["completed"]},"resultType":{"type":"string","enum":["artifact"]},"artifactType":{"type":"string","enum":["chart","markdown","html","pdf","pptx","xlsx"]},"artifactId":{"type":"string"}},"required":["status","resultType","artifactType","artifactId"],"additionalProperties":false}""";
     private const string FinalizationCheckpointOutputSchema =
@@ -80,6 +86,9 @@ public static class BuiltInToolRegistrations
         CloudReadonly("query_cloud_data_readonly", "查询 Cloud 只读数据", "Cloud AiRead readonly query boundary. Real mode stays disabled by default."),
         BusinessReadonly("query_business_database_readonly", "查询只读业务库", "Query authorized SimulationBusiness data through Text-to-SQL readonly guardrails."),
         Low("summarize_business_query_result", "总结查询结果", "Summarize approved BusinessDatabase readonly query results with source markers.", "DataAnalysis", ToolDataBoundary.SimulationBusinessOnly),
+        Low("join_evidence", "合并证据", "Deterministically join authorized parent Evidence under the sealed DAG policy.", "Workflow", ToolDataBoundary.AuthorizedEvidenceOnly),
+        Low("assess_cloud_health", "评估当前运行健康", "Derive a replayable current device runtime health assessment from authorized Cloud status Evidence.", "DataAnalysis", ToolDataBoundary.AuthorizedEvidenceOnly),
+        Low("agent_reasoning", "受控证据综合", "Run one evidence-only child reasoning turn plus at most one recovery turn; no model tools are exposed.", "Workflow", ToolDataBoundary.AuthorizedEvidenceOnly),
         Low("generate_business_chart", "生成业务图表", "Generate controlled chart data from approved BusinessDatabase readonly query results.", "Artifacts", ToolDataBoundary.SimulationBusinessOnly, ToolProviderType.Artifact),
         Low("generate_chart_data", "生成图表数据", "Generate chart preview data from controlled task inputs.", "Artifacts", ToolDataBoundary.ArtifactDraftOnly, ToolProviderType.Artifact),
         Low("generate_markdown_report", "生成 Markdown 报告", "Generate a Markdown draft inside the controlled artifact workspace.", "Artifacts", ToolDataBoundary.ArtifactDraftOnly, ToolProviderType.Artifact),
@@ -303,6 +312,9 @@ public static class BuiltInToolRegistrations
             "rag_search" => RagSummaryOutputSchema,
             "query_cloud_data_readonly" => CloudQuerySummaryOutputSchema,
             "query_business_database_readonly" or "summarize_business_query_result" => BusinessQuerySummaryOutputSchema,
+            "join_evidence" => EvidenceJoinOutputSchema,
+            "assess_cloud_health" => CloudHealthAssessmentOutputSchema,
+            "agent_reasoning" => AgentReasoningOutputSchema,
             "generate_business_chart" or "generate_chart_data" or
             "generate_markdown_report" or "generate_html_report" or
             "generate_pdf" or "generate_pptx" or "generate_xlsx" => ArtifactOutputSchema,

@@ -230,7 +230,6 @@ test('inline agent run restores task, workspace, approvals, and artifacts', { ta
           planJson: JSON.stringify({
             planKind: 'PlanDraft',
             isExecutable: false,
-            skillName: '设备日志分析',
             capabilityGaps: [],
             steps: draftPlanSteps,
           }),
@@ -381,7 +380,7 @@ test('config renders fixed agent slots without internal operations preload', asy
           'tpl-intent',
           'IntentRoutingAgent',
           'IntentRouting',
-          '意图识别和 Skill 路由约束',
+          '结构化多意图识别约束',
           '你是 A助理的意图识别 Agent。',
         ),
         template(
@@ -398,6 +397,13 @@ test('config renders fixed agent slots without internal operations preload', asy
           '受控 Agent 步骤执行约束',
           '你是 A助理的最终执行 Agent。',
         ),
+        template(
+          'tpl-reasoning',
+          'agent_reasoning_node',
+          'AgentExecutor',
+          'Evidence-only 受控推理节点约束',
+          '你是 A助理的受控推理子运行。',
+        ),
       ]),
     })
   })
@@ -410,6 +416,7 @@ test('config renders fixed agent slots without internal operations preload', asy
   await expect(page.getByTestId('agent-slot-intent')).toBeHidden()
   await expect(plannerSlot).toBeHidden()
   await expect(page.getByTestId('agent-slot-executor')).toBeHidden()
+  await expect(page.getByTestId('agent-slot-reasoning')).toBeHidden()
   const cloudReadonlyStatusCard = page.getByTestId('cloud-readonly-status-card')
   await expect(cloudReadonlyStatusCard).toBeVisible()
   await expect(cloudReadonlyStatusCard).toContainText('Cloud 只读链路已就绪。')
@@ -462,9 +469,11 @@ test('config renders fixed agent slots without internal operations preload', asy
   await expect(page.getByTestId('agent-slot-intent')).toBeVisible()
   await expect(plannerSlot).toBeVisible()
   await expect(page.getByTestId('agent-slot-executor')).toBeVisible()
+  await expect(page.getByTestId('agent-slot-reasoning')).toBeVisible()
   await expect(page.getByText('IntentRoutingAgent', { exact: true }).first()).toBeHidden()
   await expect(page.getByText('agent_planner', { exact: true }).first()).toBeHidden()
   await expect(page.getByText('agent_executor', { exact: true }).first()).toBeHidden()
+  await expect(page.getByText('agent_reasoning_node', { exact: true }).first()).toBeHidden()
   await expect(page.getByText('受控 Agent 计划生成约束').first()).toBeHidden()
   await plannerSlot.getByText('配置详情').click()
   const plannerTemplateIdentifiers = plannerSlot.getByText('agent_planner', { exact: true })

@@ -41,6 +41,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/agent/task/{id}/audit-summary", "get");
         AssertPath(document, "/api/aigateway/agent/task/{id}/tool-executions", "get");
         AssertPath(document, "/api/aigateway/agent/task/{id}/run-attempts", "get");
+        AssertPath(document, "/api/aigateway/agent/task/{id}/runtime-snapshot", "get");
         AssertPath(document, "/api/aigateway/tools", "get");
         AssertPath(document, "/api/aigateway/tools/{toolCode}", "get");
         AssertPath(document, "/api/aigateway/tools/{toolCode}", "patch");
@@ -115,7 +116,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
             "knowledgeBaseIds",
             "dataSourceIds",
             "requiresDataApproval",
-            "artifactTypes");
+            "artifactTargets");
         AssertRequestSchemaProperties(
             document,
             "/api/aigateway/tools/{toolCode}",
@@ -221,31 +222,6 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
                 invalidBody.Should().NotContain("plan_draft_started");
             }
 
-            foreach (var (legacyProperty, legacyValue) in new[]
-                     {
-                         (
-                             "skillCode",
-                             "\"knowledge_research\""),
-                         (
-                             "preferredToolCodes",
-                             "[\"rag_search\"]")
-                     })
-            {
-                var legacyPayload = validPayload.Replace(
-                    "\"requestedCapabilityCodes\": []",
-                    $"\"requestedCapabilityCodes\": [], \"{legacyProperty}\": {legacyValue}",
-                    StringComparison.Ordinal);
-                using var legacyResponse = await SendPlanStreamAsync(legacyPayload);
-                var legacyBody = await legacyResponse.Content.ReadAsStringAsync();
-
-                legacyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-                legacyResponse.Content.Headers.ContentType?.MediaType.Should().Be("text/event-stream");
-                legacyBody.Should().Contain(AppProblemCodes.AgentPlanSchemaInvalid);
-                legacyBody.Should().Contain("Agent task plan does not match the required schema.");
-                legacyBody.Should().NotContain("retired for Plan v2");
-                legacyBody.Should().NotContain("session_not_found");
-                legacyBody.Should().NotContain("plan_draft_started");
-            }
         }
         finally
         {

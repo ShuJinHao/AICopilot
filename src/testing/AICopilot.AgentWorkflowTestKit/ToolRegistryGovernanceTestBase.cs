@@ -7,7 +7,6 @@ using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.AiGatewayService.Runtime;
-using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Uploads;
 using AICopilot.AiGatewayService.Workspaces;
@@ -18,7 +17,6 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
@@ -53,11 +51,9 @@ public abstract class ToolRegistryGovernanceTestBase
         IEnumerable<IKnowledgeBaseAccessChecker>? knowledgeBaseAccessCheckers = null,
         IKnowledgeRetrievalService? knowledgeRetrievalService = null,
         IIdentityAccessService? identityAccessService = null,
-        SkillDefinitionGuard? skillDefinitionGuard = null,
         AgentTaskPlanFreshReadGate? freshReadGate = null,
         IAuditLogWriter? auditLogWriter = null)
     {
-        _ = skillDefinitionGuard;
         return new AgentTaskRuntime(
             taskRepository,
             runAttemptRepository ?? new InMemoryAgentTaskRunAttemptStore(),
@@ -154,15 +150,13 @@ public abstract class ToolRegistryGovernanceTestBase
 
     internal static (AgentTask Task, ArtifactWorkspace Workspace) CreateApprovedTask(
         string toolCode,
-        bool requiresApproval = false,
-        string? skillCode = null)
+        bool requiresApproval = false)
     {
         var now = DateTimeOffset.UtcNow;
         var planJson = AgentPlanV2TestData.CreateSingleStep(
             toolCode,
             executable: false,
-            requiresApproval: requiresApproval,
-            skillCode: skillCode);
+            requiresApproval: requiresApproval);
         var task = new AgentTask(
             SessionId.New(),
             UserId,
@@ -247,12 +241,11 @@ public abstract class ToolRegistryGovernanceTestBase
         return (task, workspace);
     }
 
-    internal static string CreatePlanJson(string toolCode, string? skillCode = null, string? inputJson = null)
+    internal static string CreatePlanJson(string toolCode, string? inputJson = null)
     {
         return AgentPlanV2TestData.CreateSingleStep(
             toolCode,
             executable: false,
-            skillCode: skillCode,
             inputJson: inputJson);
     }
 
@@ -311,29 +304,6 @@ public abstract class ToolRegistryGovernanceTestBase
         return new AgentPlanToolGuard(guard, new StubAgentPluginCatalog(runtimeTools));
     }
 
-    internal static SkillDefinitionGuard CreateSkillGuard(params SkillDefinition[] skills)
-    {
-        return new SkillDefinitionGuard(new InMemoryRepository<SkillDefinition>(skills));
-    }
-
-    internal static SkillDefinition CreateSkill(string skillCode, IReadOnlyCollection<string> allowedToolCodes)
-    {
-        return new SkillDefinition(
-            skillCode,
-            skillCode,
-            "test skill",
-            allowedToolCodes,
-            AiToolRiskLevel.Low,
-            "None",
-            [],
-            [],
-            ["markdown"],
-            isEnabled: true,
-            isBuiltIn: false,
-            version: 1,
-            DateTimeOffset.UtcNow);
-    }
-
     internal static Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> ValidateSingleAsync(
         AgentPlanToolGuard guard,
         string toolCode,
@@ -349,21 +319,13 @@ public abstract class ToolRegistryGovernanceTestBase
     internal static PlanAgentTaskCommandHandler CreatePlanHandler(
         Session session,
         ToolRegistryGuard guard,
-        IAgentDynamicPlanner? dynamicPlanner = null,
-        IReadOnlyCollection<LanguageModel>? models = null,
         ICloudReadonlyAgentPlanService? cloudReadonlyPlanService = null,
         IReadOnlyCollection<AiToolDefinition>? runtimeTools = null,
-        InMemoryRepository<AgentTask>? taskRepository = null,
-        SkillDefinitionGuard? skillDefinitionGuard = null,
-        IAgentSkillAutoSelector? skillAutoSelector = null)
+        InMemoryRepository<AgentTask>? taskRepository = null)
     {
-        _ = dynamicPlanner;
-        _ = models;
-        _ = skillAutoSelector;
         var planToolGuard = new AgentPlanToolGuard(
             guard,
-            new StubAgentPluginCatalog((runtimeTools ?? []).ToArray()),
-            skillDefinitionGuard);
+            new StubAgentPluginCatalog((runtimeTools ?? []).ToArray()));
         return new PlanAgentTaskCommandHandler(
             new PlanAgentTaskCoordinator(
                 taskRepository ?? new InMemoryRepository<AgentTask>(),
@@ -374,19 +336,6 @@ public abstract class ToolRegistryGovernanceTestBase
                 new TestCurrentUser(UserId),
                 planToolGuard: planToolGuard,
                 cloudReadonlyPlanService: cloudReadonlyPlanService ?? new FixedCloudReadonlyAgentPlanService()));
-    }
-
-    internal static LanguageModel CreatePlannerModel()
-    {
-        return new LanguageModel(
-            "FakeEval",
-            "planner",
-            "http://localhost/fake",
-            "fake-key",
-            new ModelParameters { MaxTokens = 4096, MaxOutputTokens = 1024, Temperature = 0.2f },
-            "FakeEval",
-            LanguageModelUsage.Chat | LanguageModelUsage.Planner,
-            true);
     }
 
     internal static ToolRegistryGuard CreateGuard(params ToolRegistration[] tools)
@@ -1052,53 +1001,14 @@ public abstract class ToolRegistryGovernanceTestBase
         {
             return result;
         }
-    }
 
-    internal sealed class FixedSkillAutoSelector(string? skillCode, string? reason = "test selector") : IAgentSkillAutoSelector
-    {
-        public int CallCount { get; private set; }
-
-        public Task<AgentSkillSelection?> SelectSkillAsync(
-            Guid sessionId,
+        public Result<IReadOnlyCollection<CloudReadonlyAgentPlanIntent>> CreateIntentsFromRouted(
             string goal,
-            CancellationToken cancellationToken)
+            IReadOnlyCollection<IntentResult> routedIntents)
         {
-            CallCount++;
-            return Task.FromResult<AgentSkillSelection?>(new AgentSkillSelection(skillCode, reason));
-        }
-    }
-
-    internal sealed class ThrowingDynamicPlanner : IAgentDynamicPlanner
-    {
-        public Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> CreatePlanAsync(
-            AgentDynamicPlannerRequest request,
-            CancellationToken cancellationToken)
-        {
-            throw new InvalidOperationException("Dynamic planner should not be called by this test.");
-        }
-    }
-
-    internal sealed class FixedDynamicPlanner(params AgentStepPlanDto[] steps) : IAgentDynamicPlanner
-    {
-        public AgentDynamicPlannerRequest? LastRequest { get; private set; }
-
-        public Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> CreatePlanAsync(
-            AgentDynamicPlannerRequest request,
-            CancellationToken cancellationToken)
-        {
-            LastRequest = request;
-            return Task.FromResult(Result.Success<IReadOnlyCollection<AgentStepPlanDto>>(steps));
-        }
-    }
-
-    internal sealed class FailingDynamicPlanner(string code, string detail) : IAgentDynamicPlanner
-    {
-        public Task<Result<IReadOnlyCollection<AgentStepPlanDto>>> CreatePlanAsync(
-            AgentDynamicPlannerRequest request,
-            CancellationToken cancellationToken)
-        {
-            Result<IReadOnlyCollection<AgentStepPlanDto>> result = Result.Failure(new ApiProblemDescriptor(code, detail));
-            return Task.FromResult(result);
+            return result.IsSuccess
+                ? Result.Success<IReadOnlyCollection<CloudReadonlyAgentPlanIntent>>([result.Value!])
+                : Result.From(result);
         }
     }
 

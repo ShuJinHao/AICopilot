@@ -182,6 +182,11 @@ internal sealed class AgentNodeCheckpointStore(
                     checkpoint.SafeMessage,
                     checkpoint.FailedAtUtc,
                     checkpoint.RetryAtUtc);
+                await PromoteRunnableDependentsAsync(
+                    context,
+                    checkpoint.RunAttemptId,
+                    checkpoint.FailedAtUtc,
+                    token);
                 return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
                     AgentFencedWriteResult.Succeeded);
             },
@@ -565,29 +570,58 @@ internal sealed class AgentNodeCheckpointStore(
         var nodes = await context.AgentNodeRuns
             .Where(node => node.RunAttemptId == runAttemptId)
             .ToListAsync(cancellationToken);
-        var statusByNodeId = nodes.ToDictionary(
-            node => node.NodeId,
-            node => node.Status,
-            StringComparer.Ordinal);
-        foreach (var candidate in nodes.Where(node => node.Status == AgentNodeRunStatus.Pending))
+        var changed = true;
+        while (changed)
         {
-            string[] dependencies;
-            try
+            changed = false;
+            var byNodeId = nodes.ToDictionary(node => node.NodeId, StringComparer.Ordinal);
+            foreach (var candidate in nodes.Where(node => node.Status is
+                         AgentNodeRunStatus.Pending or
+                         AgentNodeRunStatus.WaitingApproval))
             {
-                dependencies = JsonSerializer.Deserialize<string[]>(candidate.DependenciesJson) ?? [];
-            }
-            catch (JsonException exception)
-            {
-                throw new InvalidOperationException(
-                    $"NodeRun '{candidate.NodeId}' contains invalid dependency JSON.",
-                    exception);
-            }
+                string[] dependencies;
+                try
+                {
+                    dependencies = JsonSerializer.Deserialize<string[]>(candidate.DependenciesJson) ?? [];
+                }
+                catch (JsonException exception)
+                {
+                    throw new InvalidOperationException(
+                        $"NodeRun '{candidate.NodeId}' contains invalid dependency JSON.",
+                        exception);
+                }
 
-            if (dependencies.All(dependency =>
-                    statusByNodeId.TryGetValue(dependency, out var status) &&
-                    status == AgentNodeRunStatus.Succeeded))
-            {
-                candidate.MakeRunnable(nowUtc);
+                var parents = dependencies.Select(dependency =>
+                    byNodeId.TryGetValue(dependency, out var parent)
+                        ? parent
+                        : throw new InvalidOperationException(
+                            $"NodeRun '{candidate.NodeId}' references unknown dependency '{dependency}'."))
+                    .ToArray();
+                var failedRequired = parents.FirstOrDefault(parent =>
+                    parent.IsRequired &&
+                    (parent.Status is AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled));
+                var failedStrict = candidate.JoinPolicy != "OptionalBestEffort"
+                    ? parents.FirstOrDefault(parent => parent.Status is
+                        AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled)
+                    : null;
+                var failedParent = failedRequired ?? failedStrict;
+                if (failedParent is not null)
+                {
+                    candidate.CancelFromDependencyFailure(failedParent.NodeId, nowUtc);
+                    changed = true;
+                    continue;
+                }
+
+                var dependenciesSatisfied = parents.All(parent =>
+                    parent.Status == AgentNodeRunStatus.Succeeded ||
+                    candidate.JoinPolicy == "OptionalBestEffort" &&
+                    !parent.IsRequired &&
+                    (parent.Status is AgentNodeRunStatus.Failed or AgentNodeRunStatus.Cancelled));
+                if (dependenciesSatisfied && candidate.Status == AgentNodeRunStatus.Pending)
+                {
+                    candidate.MakeRunnable(nowUtc);
+                    changed = true;
+                }
             }
         }
     }

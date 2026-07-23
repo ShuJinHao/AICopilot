@@ -5,6 +5,8 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
@@ -240,19 +242,19 @@ public sealed class AgentPlanContractV2Tests
     }
 
     [Fact]
-    public void IntentAdapter_ShouldRejectTypedQueryBeforeDomWhenRawUtf8ExceedsBoundary()
+    public void IntentRegistryProjector_ShouldRejectTypedQueryBeforeDomWhenRawUtf8ExceedsBoundary()
     {
         var query = "{}" + new string(' ', AgentStructuredPayloadPolicyV1.MaxNodeToolInputUtf8Bytes - 1);
 
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [new IntentResult { Intent = "Analysis.DeviceLog.Latest", Confidence = 0.9, Query = query }],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         ProblemCode(result).Should().Be(AppProblemCodes.AgentPlanSchemaInvalid);
     }
 
     [Fact]
-    public void CloudAiReadSchema_ShouldBeSingleEightOperationFieldAuthorityForProviderAndAdapter()
+    public void CloudAiReadSchema_ShouldBeSingleEightOperationFieldAuthorityForProviderAndRegistry()
     {
         var schemas = CloudAiReadSemanticSchemaRegistry.GetOperationSchemas()
             .ToDictionary(schema => schema.Operation);
@@ -283,19 +285,19 @@ public sealed class AgentPlanContractV2Tests
                 .ToHashSet(StringComparer.Ordinal);
             foreach (var field in schemas.Values.SelectMany(schema => schema.Filters).Select(rule => rule.Field).Distinct())
             {
-                IntentResultToCandidateAdapter.IsAllowedPredicateField(intent.IntentCode, field).Should()
+                AgentIntentRegistryProjector.IsAllowedPredicateField(intent.IntentCode, field).Should()
                     .Be(expectedFields.Contains(field));
             }
         }
 
-        var keywordOnlyDetail = new IntentResultToCandidateAdapter().Adapt(
+        var keywordOnlyDetail = new AgentIntentRegistryProjector().Project(
             [new IntentResult
             {
                 Intent = "Analysis.Process.Detail",
                 Confidence = 1,
                 Query = """{"filters":[{"field":"keyword","operator":"contains","value":"CUT"}],"limit":1}"""
             }],
-            CreateAdapterContext());
+            CreateRegistryContext());
         ProblemCode(keywordOnlyDetail).Should().Be(AppProblemCodes.AgentPlanSchemaInvalid);
     }
 
@@ -304,16 +306,16 @@ public sealed class AgentPlanContractV2Tests
     [InlineData("WARNING")]
     [InlineData("DEBUG")]
     [InlineData("TRACE")]
-    public void IntentAdapter_ShouldRejectNonCanonicalOrUnsupportedLogLevels(string level)
+    public void IntentRegistryProjector_ShouldRejectNonCanonicalOrUnsupportedLogLevels(string level)
     {
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [new IntentResult
             {
                 Intent = "Analysis.DeviceLog.ByLevel",
                 Confidence = 1,
                 Query = $$"""{"filters":[{"field":"deviceId","operator":"eq","value":"{{DeviceId:D}}"},{"field":"preset","operator":"eq","value":"last_24h"},{"field":"level","operator":"eq","value":"{{level}}"}]}"""
             }],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         ProblemCode(result).Should().Be(AppProblemCodes.AgentPlanSchemaInvalid);
     }
@@ -323,7 +325,7 @@ public sealed class AgentPlanContractV2Tests
     {
         var canonicalizer = new AgentPlanCanonicalizer();
         var sealedPlan = canonicalizer.Seal(CreatePlan()).Value!;
-        var changed = sealedPlan.Document with { PlannerMode = "ChangedAfterSeal" };
+        var changed = sealedPlan.Document with { PlannerTemplateCode = "changed-after-seal" };
         var changedJson = CanonicalJson.Serialize(changed);
 
         var result = canonicalizer.ValidatePersisted(changedJson);
@@ -336,7 +338,7 @@ public sealed class AgentPlanContractV2Tests
     public void SealExecutable_ShouldPromoteAuthoritativeGapFreeDraft()
     {
         var result = new AgentPlanDraftContractAuthority(
-                new IntentResultToCandidateAdapter(),
+                new AgentIntentRegistryProjector(),
                 new AgentPlanCanonicalizer())
             .SealExecutable(CreatePlan());
 
@@ -391,9 +393,9 @@ public sealed class AgentPlanContractV2Tests
     public void Seal_ShouldRequireProducerNodeOnlyForRequiredAvailableCandidate()
     {
         var plan = CreatePlan();
-        var processCandidate = new IntentResultToCandidateAdapter().Adapt(
+        var processCandidate = new AgentIntentRegistryProjector().Project(
             [new IntentResult { Intent = "Analysis.Process.List", Confidence = 1, Query = "{}" }],
-            CreateAdapterContext()).Value!.Single();
+            CreateRegistryContext()).Value!.Single();
         var optionalGeneralCandidate = plan.IntentCandidates!.Single() with
         {
             Required = new AgentIntentRequiredDocument(false, AgentIntentRequiredSource.DerivedDependency, "optional-upper-bound:v1")
@@ -591,7 +593,7 @@ public sealed class AgentPlanContractV2Tests
         snapshot.PlanContractDigest.Should().Be(AgentPlanContractSchemaAuthority.PlanContractDigest);
         snapshot.NodeContractVersion.Should().Be(AgentPlanContractVersions.NodeV1);
         snapshot.NodeContractDigest.Should().Be(AgentPlanContractSchemaAuthority.NodeContractDigest);
-        snapshot.ConcurrencyPolicyVersion.Should().Be(AgentPlanContractVersions.ConcurrencyPolicyV1);
+        snapshot.ConcurrencyPolicyVersion.Should().Be(AgentPlanContractVersions.LinearConcurrencyPolicyV1);
         snapshot.PluginCatalogDigest.Should().Be(AgentPlanCatalogSnapshotAuthority.CanonicalEmptyInventoryDigest);
         snapshot.McpCatalogDigest.Should().Be(AgentPlanCatalogSnapshotAuthority.CanonicalEmptyInventoryDigest);
         AgentPlanCatalogSnapshotAuthority.Matches(snapshot, catalog, authority).Should().BeTrue();
@@ -696,14 +698,14 @@ public sealed class AgentPlanContractV2Tests
     public void P0DraftAuthority_ShouldSealContractWithoutSelectingOrCompilingExecutionGraph()
     {
         var authority = new AgentPlanDraftContractAuthority(
-            new IntentResultToCandidateAdapter(),
+            new AgentIntentRegistryProjector(),
             new AgentPlanCanonicalizer());
         var current = CreatePlan();
         var result = authority.SealDraft(new AgentPlanDraftContractRequest(
             "raw user goal that must not be persisted in Plan JSON",
             current,
             [new IntentResult { Intent = "General.Chat", Confidence = 1 }],
-            CreateAdapterContext(),
+            CreateRegistryContext(),
             new PlannerToolCatalog(PlannerToolCatalog.CurrentVersion, 0, []),
             AgentPluginSelectionMode.BuiltInOnly,
             [],
@@ -725,13 +727,13 @@ public sealed class AgentPlanContractV2Tests
     public void P0DraftAuthority_ShouldFailClosedForPluginGraphSelectionOwnedByLaterStage()
     {
         var result = new AgentPlanDraftContractAuthority(
-                new IntentResultToCandidateAdapter(),
+                new AgentIntentRegistryProjector(),
                 new AgentPlanCanonicalizer())
             .SealDraft(new AgentPlanDraftContractRequest(
                 "goal",
                 CreatePlan(),
                 [new IntentResult { Intent = "General.Chat", Confidence = 1 }],
-                CreateAdapterContext(),
+                CreateRegistryContext(),
                 new PlannerToolCatalog(PlannerToolCatalog.CurrentVersion, 0, []),
                 AgentPluginSelectionMode.ExplicitAllowlist,
                 [Guid.Parse("33333333-3333-3333-3333-333333333333")],
@@ -793,25 +795,185 @@ public sealed class AgentPlanContractV2Tests
     }
 
     [Fact]
-    public void IntentAdapter_ShouldDropRouterReasoningAndKeepDeviceDirectedRequestAsGap()
+    public void CloudHealthAssessment_ShouldReplayDeterministicallyAsDerivedFact()
     {
-        var adapter = new IntentResultToCandidateAdapter();
-        var context = CreateAdapterContext() with
+        var asOfUtc = DateTimeOffset.Parse("2026-07-22T08:00:00Z");
+        var inputEvidence = CreateDeviceStatusEvidence(asOfUtc);
+        var cloudIntent = new AgentTaskPlanCloudReadonlyIntentDocument(
+                "cloud-readonly-semantic-plan:v1",
+                "Analysis.Device.Status",
+                Hash("device-status-semantic-plan"),
+                0.98,
+                SemanticQueryTarget.Device,
+                SemanticQueryKind.Status,
+                ["deviceId", "lastRuntimeHeartbeatAtUtc", "runtimeStatus"],
+                [],
+                null,
+                null,
+                100,
+                ["device-status"]);
+        var basePlan = CreatePlan();
+        var cloudNode = basePlan.Nodes!.Single() with
+        {
+            NodeId = "cloud-device-status",
+            NodeKind = "CloudReadNode",
+            Input = basePlan.Nodes.Single().Input with
+            {
+                SemanticIntent = cloudIntent.Intent,
+                SemanticPlanDigest = cloudIntent.SemanticPlanDigest,
+                TypedProvider = "CloudAiRead"
+            }
+        };
+        var plan = basePlan with
+        {
+            CloudReadonlyIntents = [cloudIntent],
+            Nodes = [cloudNode]
+        };
+
+        var first = AgentCloudHealthAssessmentTool.Assess(
+            plan,
+            new AgentTaskRunState(),
+            [inputEvidence]);
+        var second = AgentCloudHealthAssessmentTool.Assess(
+            plan,
+            new AgentTaskRunState(),
+            [inputEvidence]);
+        var firstCanonical = CanonicalJson.Serialize(first);
+
+        CanonicalJson.Serialize(second).Should().Be(firstCanonical);
+        first.TruthClass.Should().Be("DerivedFact");
+        first.AlgorithmVersion.Should().Be(AgentCloudHealthAssessmentTool.AlgorithmVersion);
+        first.SourceAsOfUtc.Should().Be(asOfUtc);
+        first.InputEvidenceCount.Should().Be(1);
+        first.EvidenceSetDigest.Should().MatchRegex("^[0-9a-f]{64}$");
+        first.SafeSummary.ToLowerInvariant().Should().NotContain("fault probability");
+        first.Findings.Should().Contain(item => item.Contains("不提供故障概率", StringComparison.Ordinal));
+        AgentCloudHealthAssessmentOutputAuthority.TryRead(firstCanonical, out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public void RunStateCheckpoint_ShouldMergeParallelCloudEvidenceWithoutLastWriterLoss()
+    {
+        var firstState = CreateCloudCheckpointState(
+            "Analysis.Capacity.ByDevice",
+            "capacity",
+            12);
+        var secondState = CreateCloudCheckpointState(
+            "Analysis.Device.Status",
+            "status",
+            2);
+        var merged = new AgentTaskRunState();
+
+        _ = AgentTaskRunStateCheckpointCodec.MergeEvidencePayload(
+            merged,
+            AgentTaskRunStateCheckpointCodec.CaptureEvidencePayload(
+                firstState,
+                CanonicalJson.Canonicalize("{\"status\":\"completed\"}")));
+        _ = AgentTaskRunStateCheckpointCodec.MergeEvidencePayload(
+            merged,
+            AgentTaskRunStateCheckpointCodec.CaptureEvidencePayload(
+                secondState,
+                CanonicalJson.Canonicalize("{\"status\":\"completed\"}")));
+
+        merged.CloudReadonlyResults.Select(result => result.Intent).Should().Equal(
+            "Analysis.Capacity.ByDevice",
+            "Analysis.Device.Status");
+        merged.CloudReadonlyResults.Sum(result => result.RowCount).Should().Be(14);
+        AgentTaskRunStateCheckpointCodec.Capture(merged).Should()
+            .Contain("agent-run-state-checkpoint:v3");
+    }
+
+    [Fact]
+    public void AgentReasoningOutput_ShouldRequireEvidenceBindingAndSanitizeProductText()
+    {
+        var modelResult = new AgentReasoningModelResult(
+            "Completed",
+            "<think>hidden chain</think> https://internal.example DB1.DBX0.0",
+            ["SELECT * FROM secret_table"],
+            0.7,
+            true);
+        var emptyProfile = new AgentReasoningEvidenceProfile([], [], "None");
+        var boundProfile = new AgentReasoningEvidenceProfile(
+            ["evidence:0123456789abcdef"],
+            ["source-truncated"],
+            "None");
+
+        AgentReasoningOutputAuthority.TryNormalize(
+            modelResult,
+            Guid.Parse("91000000-0000-4000-8000-000000000001"),
+            false,
+            1,
+            emptyProfile,
+            out _).Should().BeFalse("a factual Agent conclusion cannot exist without Evidence citations");
+        AgentReasoningOutputAuthority.TryNormalize(
+            modelResult,
+            Guid.Parse("91000000-0000-4000-8000-000000000001"),
+            false,
+            1,
+            boundProfile,
+            out var output).Should().BeTrue();
+
+        output!.CitationRefs.Should().Equal("evidence:0123456789abcdef");
+        output.EvidenceWarnings.Should().Equal("source-truncated");
+        output.SafeSummary.Should().Contain("[redacted-model-reasoning]");
+        output.SafeSummary.Should().Contain("[redacted-endpoint]");
+        output.SafeSummary.Should().Contain("[redacted-plc-address]");
+        output.Findings.Should().ContainSingle().Which.Should().Contain("[redacted-sql]");
+        AgentReasoningOutputAuthority.TryRead(CanonicalJson.Serialize(output), out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AgentReasoningEvidenceProfile_ShouldExposeTruncationStalenessAndMetricConflict()
+    {
+        var asOfUtc = DateTimeOffset.Parse("2026-07-22T08:00:00Z");
+        var first = CreateDeviceStatusEvidence(
+            asOfUtc,
+            nodeId: "cloud-status-a",
+            comparableMetric: 82,
+            isTruncated: false,
+            freshness: "source-stale",
+            qualityFlags: ["source-stale"]);
+        var second = CreateDeviceStatusEvidence(
+            asOfUtc,
+            nodeId: "cloud-status-b",
+            comparableMetric: 61,
+            isTruncated: true,
+            freshness: "source-as-of",
+            qualityFlags: ["source-truncated"]);
+
+        var profile = AgentReasoningEvidenceProfileAuthority.Create([first, second]);
+
+        profile.ConflictStatus.Should().Be("PotentialConflict");
+        profile.EvidenceWarnings.Should().Equal(
+            "metric-conflict",
+            "source-stale",
+            "source-truncated");
+        profile.CitationRefs.Should().HaveCount(2).And.OnlyContain(reference =>
+            reference.StartsWith("evidence:", StringComparison.Ordinal) && reference.Length == 25);
+        profile.CitationRefs.Should().NotContain(reference =>
+            reference.Contains(first.Id.Value.ToString("D"), StringComparison.OrdinalIgnoreCase) ||
+            reference.Contains(second.Id.Value.ToString("D"), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void IntentRegistryProjector_ShouldDropRouterReasoningAndKeepDeviceDirectedRequestAsGap()
+    {
+        var projector = new AgentIntentRegistryProjector();
+        var context = CreateRegistryContext() with
         {
             AuthorizedDeviceIdsByCode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["DEV-001"] = DeviceId.ToString("D")
             }
         };
-        var result = adapter.Adapt(
+        var result = projector.Project(
             [
                 new IntentResult
                 {
                     Intent = "Analysis.Device.Status",
                     Confidence = 0.91,
                     Query = """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}]}""",
-                    Reasoning = "SECRET MODEL REASONING",
-                    Reason = "SECRET ROUTER REASON"
+                    RoutingNote = "SECRET MODEL REASONING"
                 }
             ],
             context);
@@ -824,21 +986,20 @@ public sealed class AgentPlanContractV2Tests
         candidate.CapabilityGap!.Code.Should().Be(AgentPlanCapabilityGapCodes.ResourceResolutionRequired);
         var json = CanonicalJson.Serialize(candidate);
         json.Should().NotContain("SECRET MODEL REASONING");
-        json.Should().NotContain("SECRET ROUTER REASON");
     }
 
     [Fact]
-    public void IntentAdapter_ShouldMergeDuplicatesDeterministically()
+    public void IntentRegistryProjector_ShouldMergeDuplicatesDeterministically()
     {
-        var adapter = new IntentResultToCandidateAdapter();
+        var projector = new AgentIntentRegistryProjector();
         var results = new[]
         {
-            new IntentResult { Intent = "General.Chat", Confidence = 0.51, Reasoning = "first" },
+            new IntentResult { Intent = "General.Chat", Confidence = 0.51, RoutingNote = "first" },
             new IntentResult { Intent = "General.Chat", Confidence = 0.88, Query = "second" }
         };
 
-        var first = adapter.Adapt(results, CreateAdapterContext());
-        var second = adapter.Adapt(results.Reverse(), CreateAdapterContext());
+        var first = projector.Project(results, CreateRegistryContext());
+        var second = projector.Project(results.Reverse(), CreateRegistryContext());
 
         first.IsSuccess.Should().BeTrue();
         first.Value.Should().ContainSingle();
@@ -850,13 +1011,13 @@ public sealed class AgentPlanContractV2Tests
     [InlineData("Prediction.Device.FailureRisk", "known_capability_unavailable")]
     [InlineData("Prediction.Device.RemainingUsefulLife", "known_capability_unavailable")]
     [InlineData("Analysis.Unregistered.Source", "unknown_intent")]
-    public void IntentAdapter_ShouldKeepUnavailableAndUnknownAsNonExecutableGaps(
+    public void IntentRegistryProjector_ShouldKeepUnavailableAndUnknownAsNonExecutableGaps(
         string intent,
         string expectedGap)
     {
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [new IntentResult { Intent = intent, Confidence = 0.9 }],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         result.IsSuccess.Should().BeTrue();
         var candidate = result.Value!.Single();
@@ -864,36 +1025,30 @@ public sealed class AgentPlanContractV2Tests
         candidate.CapabilityGap!.Code.Should().Be(expectedGap);
     }
 
-    [Theory]
-    [InlineData("Skill.AuthorizedReport", "TransitionSkill", "TransitionSkillRoster")]
-    [InlineData("Action.AuthorizedAnalytics", "PluginAction", "PluginActionRoster")]
-    public void IntentAdapter_ShouldClassifyAuthorizedTransitionRostersAsStableNonExecutableGaps(
-        string intentCode,
-        string expectedClass,
-        string expectedProvider)
+    [Fact]
+    public void IntentRegistryProjector_ShouldClassifyAuthorizedActionRosterAsStableNonExecutableGap()
     {
-        var context = CreateAdapterContext() with
+        var context = CreateRegistryContext() with
         {
-            KnownSkillCodes = ["AuthorizedReport"],
             KnownActionIntentCodes = ["Action.AuthorizedAnalytics"]
         };
 
-        var result = new IntentResultToCandidateAdapter().Adapt(
-            [new IntentResult { Intent = intentCode, Confidence = 0.9 }],
+        var result = new AgentIntentRegistryProjector().Project(
+            [new IntentResult { Intent = "Action.AuthorizedAnalytics", Confidence = 0.9 }],
             context);
 
         result.IsSuccess.Should().BeTrue(FailureSummary(result));
         var candidate = result.Value!.Single();
-        candidate.IntentClass.Should().Be(Enum.Parse<AgentIntentClass>(expectedClass));
-        candidate.ProviderCode.Should().Be(expectedProvider);
+        candidate.IntentClass.Should().Be(AgentIntentClass.PluginAction);
+        candidate.ProviderCode.Should().Be("PluginActionRoster");
         candidate.Availability.Should().Be(AgentIntentAvailability.KnownButUnavailable);
         candidate.CapabilityGap!.Code.Should().Be(AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
     }
 
     [Fact]
-    public void IntentAdapter_ShouldKeepUtcBoundariesAndOriginalNamedTimeZone()
+    public void IntentRegistryProjector_ShouldKeepUtcBoundariesAndOriginalNamedTimeZone()
     {
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [new IntentResult
             {
                 Intent = "Analysis.DeviceLog.Range",
@@ -901,7 +1056,7 @@ public sealed class AgentPlanContractV2Tests
                 Query = BuildDeviceScopedTimeRangeQuery(
                     """{"fromUtc":"2026-07-01T00:00:00Z","toUtc":"2026-07-02T00:00:00Z","timeZone":"Asia/Shanghai"}""")
             }],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         result.IsSuccess.Should().BeTrue(FailureSummary(result));
         var range = result.Value!.Single().Filters.TimeRange!;
@@ -911,9 +1066,9 @@ public sealed class AgentPlanContractV2Tests
     }
 
     [Fact]
-    public void IntentAdapter_ShouldValidateBothSidesOfNamedTimeZoneDst()
+    public void IntentRegistryProjector_ShouldValidateBothSidesOfNamedTimeZoneDst()
     {
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [new IntentResult
             {
                 Intent = "Analysis.DeviceLog.Range",
@@ -921,7 +1076,7 @@ public sealed class AgentPlanContractV2Tests
                 Query = BuildDeviceScopedTimeRangeQuery(
                     """{"start":"2026-01-15T08:00:00-05:00","end":"2026-07-15T08:00:00-04:00","timeZone":"America/New_York"}""")
             }],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         result.IsSuccess.Should().BeTrue(FailureSummary(result));
         var range = result.Value!.Single().Filters.TimeRange!;
@@ -934,23 +1089,23 @@ public sealed class AgentPlanContractV2Tests
     [InlineData("{\"timeRange\":{\"start\":\"2026-07-15T08:00:00-05:00\",\"timeZone\":\"America/New_York\"}}")]
     [InlineData("{\"timeRange\":{\"fromUtc\":\"2026-07-15T08:00:00+08:00\",\"timeZone\":\"Asia/Shanghai\"}}")]
     [InlineData("{\"timeRange\":{\"fromUtc\":\"2026-07-15T00:00:00Z\",\"timeZone\":\"Not/AZone\"}}")]
-    public void IntentAdapter_ShouldRejectInvalidTimeZoneOrUtcBoundary(string query)
+    public void IntentRegistryProjector_ShouldRejectInvalidTimeZoneOrUtcBoundary(string query)
     {
         var scopedQuery = query.Replace(
             "{\"timeRange\"",
             $"{{\"filters\":[{{\"field\":\"deviceId\",\"operator\":\"eq\",\"value\":\"{DeviceId:D}\"}}],\"timeRange\"",
             StringComparison.Ordinal);
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [new IntentResult { Intent = "Analysis.DeviceLog.Range", Confidence = 0.9, Query = scopedQuery }],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         ProblemCode(result).Should().Be(AppProblemCodes.AgentPlanSchemaInvalid);
     }
 
     [Fact]
-    public void IntentAdapter_ShouldDefaultPureUtcRangeToUtcZone()
+    public void IntentRegistryProjector_ShouldDefaultPureUtcRangeToUtcZone()
     {
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [new IntentResult
             {
                 Intent = "Analysis.DeviceLog.Range",
@@ -958,15 +1113,15 @@ public sealed class AgentPlanContractV2Tests
                 Query = BuildDeviceScopedTimeRangeQuery(
                     """{"fromUtc":"2026-07-15T00:00:00Z","toUtc":"2026-07-16T00:00:00Z"}""")
             }],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         result.Value!.Single().Filters.TimeRange!.TimeZone.Should().Be("UTC");
     }
 
     [Fact]
-    public void IntentAdapter_ShouldRequireStableResourceResolution()
+    public void IntentRegistryProjector_ShouldRequireStableResourceResolution()
     {
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [
                 new IntentResult
                 {
@@ -975,7 +1130,7 @@ public sealed class AgentPlanContractV2Tests
                     Query = """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-404"}]}"""
                 }
             ],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         result.IsSuccess.Should().BeTrue();
         var candidate = result.Value!.Single();
@@ -986,21 +1141,21 @@ public sealed class AgentPlanContractV2Tests
     [Theory]
     [InlineData("Action.PlcWrite", null)]
     [InlineData("General.Chat", "please update cloud recipe")]
-    public void IntentAdapter_ShouldRejectPlcAndCloudWriteSemantics(string intent, string? query)
+    public void IntentRegistryProjector_ShouldRejectPlcAndCloudWriteSemantics(string intent, string? query)
     {
-        var result = new IntentResultToCandidateAdapter().Adapt(
+        var result = new AgentIntentRegistryProjector().Project(
             [new IntentResult { Intent = intent, Confidence = 0.9, Query = query }],
-            CreateAdapterContext());
+            CreateRegistryContext());
 
         ProblemCode(result).Should().Be(AppProblemCodes.ControlActionBlocked);
     }
 
     [Fact]
-    public void IntentCatalog_ShouldHaveFrozenDigest()
+    public void IntentRegistry_ShouldHaveVersionedDigest()
     {
-        AgentIntentCatalogV1.CatalogVersion.Should().Be("intent-catalog:v1");
-        AgentIntentCatalogV1.CatalogDigest.Should()
-            .Be("3194f57f1b57f454d846d4549ac8350d6dfa7062596b6708d38a5d8513b9a830");
+        AgentIntentRegistryV1.RegistryVersion.Should().Be("intent-registry:v1");
+        AgentIntentRegistryV1.RegistryDigest.Should()
+            .MatchRegex("^[0-9a-f]{64}$");
     }
 
     private static AgentTaskPlanDocument CreatePlan()
@@ -1017,10 +1172,10 @@ public sealed class AgentPlanContractV2Tests
             new AgentIntentFiltersDocument(null, []),
             [],
             new AgentIntentProvenanceDocument(
-                "intent-router:v1",
-                "intent-prompt:v1",
-                AgentIntentCatalogV1.CatalogVersion,
-                AgentIntentCatalogV1.CatalogDigest),
+                AgentIntentRegistryV1.RouterVersion,
+                AgentIntentRegistryV1.PromptVersion,
+                AgentIntentRegistryV1.RegistryVersion,
+                AgentIntentRegistryV1.RegistryDigest),
             null);
         var node = new AgentPlanNodeDocument(
             SchemaVersion: AgentPlanContractVersions.NodeV1,
@@ -1075,7 +1230,7 @@ public sealed class AgentPlanContractV2Tests
             RiskLevel: AgentTaskRiskLevel.Low.ToString(),
             UploadIds: [],
             KnowledgeBaseIds: [],
-            CloudReadonlyIntent: null,
+            CloudReadonlyIntents: [],
             Steps:
             [
                 new AgentTaskPlanStepDocument(
@@ -1086,8 +1241,6 @@ public sealed class AgentPlanContractV2Tests
                     false)
             ],
             RuntimeSettings: new AgentTaskPlanRuntimeSettingsDocument(0, 0),
-            PlannerMode: "PlanDraft",
-            PlannerFallbackReason: null,
             PlannerModelId: AgentPlanV2TestData.RoutingConfiguration.ModelId,
             PlannerToolCatalogVersion: PlannerToolCatalog.CurrentVersion,
             PlannerAvailableToolCount: 1,
@@ -1095,11 +1248,8 @@ public sealed class AgentPlanContractV2Tests
             BusinessDomains: [],
             QueryMode: "TextToSql",
             RequiresDataApproval: false,
-            ArtifactTypes: [],
             PlannerSafetySummary: new AgentTaskPlanSafetySummaryDocument(
                 "PlanV2Contract",
-                "PlanDraft",
-                null,
                 PlannerToolCatalog.CurrentVersion,
                 1,
                 false,
@@ -1145,6 +1295,9 @@ public sealed class AgentPlanContractV2Tests
                 AgentPlanContractVersions.DefaultMaxArtifactCount,
                 AgentPlanContractVersions.DefaultMaxArtifactBytes,
                 AgentPlanContractVersions.MaxPlanCanonicalBytes),
+            ConcurrencyPolicy: new AgentPlanConcurrencyPolicyDocument(
+                AgentPlanContractVersions.LinearConcurrencyPolicyV1,
+                1),
             ApprovalSummary: new AgentPlanApprovalSummaryDocument(true, []),
             ExecutionSnapshot: AgentPlanCatalogSnapshotAuthority.CreateSnapshot(
                 catalog,
@@ -1168,11 +1321,11 @@ public sealed class AgentPlanContractV2Tests
         var minimalPlan = basePlan with
         {
             PlannerTemplateCode = "p",
-            PlannerMode = "p",
             Nodes =
             [
                 baseNode with
                 {
+                    NodeId = "n",
                     OutputSchemaRef = "evidence::v1",
                     ApprovalPolicy = baseNode.ApprovalPolicy! with { PolicyCode = "p" }
                 }
@@ -1190,7 +1343,7 @@ public sealed class AgentPlanContractV2Tests
         }
 
         var plannerTemplatePadding = TakeCanonicalPadding(ref remaining, "p".Length);
-        var plannerModePadding = TakeCanonicalPadding(ref remaining, "p".Length);
+        var nodeIdPadding = TakeCanonicalPadding(ref remaining, "n".Length);
         var outputSchemaPadding = TakeCanonicalPadding(ref remaining, "evidence::v1".Length);
         var approvalPolicyPadding = TakeCanonicalPadding(ref remaining, "p".Length);
         if (remaining != 0)
@@ -1201,11 +1354,11 @@ public sealed class AgentPlanContractV2Tests
         return minimalPlan with
         {
             PlannerTemplateCode = "p" + new string('x', plannerTemplatePadding),
-            PlannerMode = "p" + new string('x', plannerModePadding),
             Nodes =
             [
                 baseNode with
                 {
+                    NodeId = "n" + new string('x', nodeIdPadding),
                     OutputSchemaRef = "evidence:" + new string('x', outputSchemaPadding) + ":v1",
                     ApprovalPolicy = baseNode.ApprovalPolicy! with
                     {
@@ -1302,7 +1455,8 @@ public sealed class AgentPlanContractV2Tests
             new AgentEvidenceLineageDocument(
                 [Guid.Parse("88888888-8888-4888-8888-888888888888")],
                 Hash("input"),
-                Hash(canonicalPayload)),
+                Hash(canonicalPayload),
+                Hash("evidence-set")),
             new AgentEvidenceGovernanceDocument(
                 "Internal",
                 "NotRequired",
@@ -1311,6 +1465,197 @@ public sealed class AgentPlanContractV2Tests
             null,
             DateTimeOffset.Parse("2026-07-17T00:00:00Z"),
             string.Empty);
+    }
+
+    private static AgentEvidenceRecord CreateDeviceStatusEvidence(
+        DateTimeOffset asOfUtc,
+        string nodeId = "cloud-device-status",
+        decimal? comparableMetric = null,
+        bool isTruncated = false,
+        string freshness = "checkpoint-current",
+        IReadOnlyCollection<string>? qualityFlags = null)
+    {
+        var sourceState = new AgentTaskRunState
+        {
+            CloudReadonlyRows =
+            [
+                new Dictionary<string, object?>
+                {
+                    ["deviceId"] = "device-a",
+                    ["lastRuntimeHeartbeatAtUtc"] = asOfUtc.AddMinutes(-2),
+                    ["runtimeStatus"] = "Running"
+                },
+                new Dictionary<string, object?>
+                {
+                    ["deviceId"] = "device-b",
+                    ["lastRuntimeHeartbeatAtUtc"] = asOfUtc.AddMinutes(-30),
+                    ["runtimeStatus"] = "Degraded"
+                }
+            ],
+            CloudReadonlySourceMode = "CloudReadOnly",
+            CloudReadonlyIsSimulation = false,
+            CloudReadonlyRowCount = 2,
+            CloudReadonlyIsTruncated = isTruncated,
+            CloudReadonlyQueriedAtUtc = asOfUtc
+        };
+        sourceState.CloudReadonlyResults.Add(new AgentCloudReadonlyQuerySnapshot(
+            "Analysis.Device.Status",
+            Hash("device-status-semantic-plan"),
+            "Cloud device status returned 2 rows.",
+            sourceState.CloudReadonlyRows,
+            "AuthorizedDataSource",
+            "CloudReadOnly",
+            false,
+            2,
+            isTruncated,
+            asOfUtc));
+        var durableOutput = CanonicalJson.Canonicalize("""{"rowCount":2,"status":"completed"}""");
+        var payloadJson = AgentTaskRunStateCheckpointCodec.CaptureEvidencePayload(sourceState, durableOutput);
+        var payloadDigest = Hash(payloadJson);
+        var evidenceId = AgentEvidenceRecordId.New();
+        var userId = Guid.Parse("90000000-0000-4000-8000-000000000001");
+        var sessionId = new SessionId(Guid.Parse("90000000-0000-4000-8000-000000000002"));
+        var taskId = new AgentTaskId(Guid.Parse("90000000-0000-4000-8000-000000000003"));
+        var runAttemptId = new AgentTaskRunAttemptId(Guid.Parse("90000000-0000-4000-8000-000000000004"));
+        var nodeRunId = new AgentNodeRunId(Guid.Parse("90000000-0000-4000-8000-000000000005"));
+        var allowedConsumerScope = new[]
+        {
+            $"session:{sessionId.Value:D}",
+            $"task:{taskId.Value:D}",
+            $"user:{userId:D}"
+        }.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var document = new AgentEvidenceEnvelopeDocument(
+            AgentPlanContractVersions.EvidenceV1,
+            evidenceId.Value,
+            null,
+            userId,
+            sessionId.Value,
+            taskId.Value,
+            runAttemptId.Value,
+            nodeId,
+            "DataQuery",
+            "ObservedFact",
+            new AgentEvidenceProducerDocument(
+                "CloudReadNode",
+                "built-in:query_cloud_data_readonly",
+                "query_cloud_data_readonly",
+                Hash("query-cloud-output-schema"),
+                null,
+                null,
+                null),
+            new AgentEvidenceSourceDocument(
+                "CloudReadNode",
+                "opaque:device-status",
+                "CloudReadOnly",
+                false,
+                asOfUtc,
+                asOfUtc,
+                null,
+                ["device-status"],
+                "CloudAiRead",
+                "CloudAiRead.Device.Status",
+                "Analysis.Device.Status",
+                ["device-status"]),
+            new AgentEvidenceQualityDocument(
+                2,
+                isTruncated,
+                freshness,
+                0,
+                1,
+                AgentPlanCanonicalCollections.Strings(qualityFlags ?? [])),
+            new AgentEvidencePayloadDocument(
+                AgentPlanContractVersions.InlineEvidencePolicyV1,
+                "InlineCanonicalJson",
+                null,
+                "application/json",
+                Encoding.UTF8.GetByteCount(payloadJson),
+                payloadDigest,
+                true,
+                payloadJson),
+            new AgentEvidenceContentDocument(
+                "Cloud device status returned 2 rows.",
+                comparableMetric is null
+                    ? new Dictionary<string, decimal> { ["rowCount"] = 2 }
+                    : new Dictionary<string, decimal>
+                    {
+                        ["healthScore"] = comparableMetric.Value,
+                        ["rowCount"] = 2
+                    },
+                [],
+                [],
+                []),
+            new AgentEvidenceLineageDocument([], Hash("cloud-input"), payloadDigest),
+            new AgentEvidenceGovernanceDocument(
+                "Internal",
+                "Redacted",
+                allowedConsumerScope,
+                "TaskLifetime"),
+            null,
+            asOfUtc,
+            string.Empty);
+        var sealedEvidence = AgentEvidenceCanonicalizer.Seal(document);
+        sealedEvidence.IsSuccess.Should().BeTrue(FailureSummary(sealedEvidence));
+
+        return new AgentEvidenceRecord(
+            evidenceId,
+            null,
+            userId,
+            sessionId,
+            taskId,
+            runAttemptId,
+            nodeRunId,
+            nodeId,
+            AgentEvidenceKind.DataQuery,
+            AgentEvidenceTruthClass.ObservedFact,
+            AgentEvidenceStorageMode.InlineCanonicalJson,
+            sealedEvidence.Value!.CanonicalJson,
+            sealedEvidence.Value.Digest,
+            payloadDigest,
+            payloadJson,
+            null,
+            "application/json",
+            Encoding.UTF8.GetByteCount(payloadJson),
+            payloadDigest,
+            CanonicalJson.Serialize(allowedConsumerScope),
+            1,
+            1,
+            asOfUtc);
+    }
+
+    private static AgentTaskRunState CreateCloudCheckpointState(
+        string intent,
+        string metricName,
+        int rowCount)
+    {
+        var queriedAtUtc = DateTimeOffset.Parse("2026-07-22T08:00:00Z");
+        var summary = $"{intent} returned {rowCount} rows.";
+        const string sourceLabel = "AuthorizedDataSource";
+        const string sourceMode = "CloudReadOnly";
+        var rows = new List<Dictionary<string, object?>>
+        {
+            new() { [metricName] = rowCount }
+        };
+        var state = new AgentTaskRunState
+        {
+            CloudReadonlySummary = summary,
+            CloudReadonlyRows = rows,
+            CloudReadonlySourceLabel = sourceLabel,
+            CloudReadonlySourceMode = sourceMode,
+            CloudReadonlyRowCount = rowCount,
+            CloudReadonlyQueriedAtUtc = queriedAtUtc
+        };
+        state.CloudReadonlyResults.Add(new AgentCloudReadonlyQuerySnapshot(
+            intent,
+            Hash(intent),
+            summary,
+            rows,
+            sourceLabel,
+            sourceMode,
+            false,
+            rowCount,
+            false,
+            queriedAtUtc));
+        return state;
     }
 
     private static PlannerToolCatalog CreateCatalog(params string[] toolCodes)
@@ -1336,10 +1681,55 @@ public sealed class AgentPlanContractV2Tests
         return new PlannerToolCatalog(PlannerToolCatalog.CurrentVersion, tools.Length, tools);
     }
 
-    private static AgentIntentAdapterContext CreateAdapterContext()
+    [Fact]
+    public async Task NodeExecutionPlane_ShouldRetryOnlyTransientReplaySafeFailures()
     {
-        return new AgentIntentAdapterContext(
-            [],
+        var contract = new AgentNodeExecutionContract(
+            "Durable",
+            "cloud-read",
+            "CloudReadNode",
+            true,
+            "evidence:cloud-read:v1",
+            TimeoutSeconds: 30,
+            MaxAttempts: 2,
+            BackoffClass: "None",
+            SideEffectClass: "ReadOnly");
+        var transientAttempts = 0;
+
+        var result = await AgentNodeExecutionPlane.ExecuteAsync(
+            contract,
+            _ => ++transientAttempts == 1
+                ? Task.FromException<string>(new AgentToolExecutionException(
+                    AppProblemCodes.ToolExecutionTimeout,
+                    "safe timeout"))
+                : Task.FromResult("completed"),
+            CancellationToken.None);
+
+        result.Should().Be("completed");
+        transientAttempts.Should().Be(2);
+
+        var permanentAttempts = 0;
+        Func<Task> permanent = async () =>
+        {
+            await AgentNodeExecutionPlane.ExecuteAsync(
+                contract,
+                _ =>
+                {
+                    permanentAttempts++;
+                    return Task.FromException<string>(new AgentToolExecutionException(
+                        AppProblemCodes.AgentPlanSchemaInvalid,
+                        "safe schema rejection"));
+                },
+                CancellationToken.None);
+        };
+
+        await permanent.Should().ThrowAsync<AgentToolExecutionException>();
+        permanentAttempts.Should().Be(1);
+    }
+
+    private static AgentIntentRegistryContext CreateRegistryContext()
+    {
+        return new AgentIntentRegistryContext(
             [],
             [],
             [],

@@ -17,7 +17,10 @@ internal static class AgentPlanContractVersions
     public const string EvidenceV1 = "evidence:v1";
     public const string ExecutionSnapshotV1 = "execution-snapshot:v1";
     public const string PlanPolicyV1 = "plan-contract-policy:v1";
-    public const string ConcurrencyPolicyV1 = "linear-sequential-concurrency:v1";
+    public const string LinearConcurrencyPolicyV1 = "linear-sequential-concurrency:v1";
+    public const string DagConcurrencyPolicyV1 = "dag-bounded-concurrency:v1";
+    public const int DagMinParallelism = 2;
+    public const int DagMaxParallelism = 4;
     public const string BudgetPolicyV1 = "budget-policy:v1";
     public const string InlineEvidencePolicyV1 = "inline-evidence-policy:v1";
     public const string ArtifactReferenceEvidencePolicyV1 = "artifact-reference-evidence-policy:v1";
@@ -46,30 +49,6 @@ internal static class AgentPlanContractVersions
     public const long DefaultNodeMaxArtifactBytes = 134_217_728;
 }
 
-internal static class AgentPlanRetiredSelectionContract
-{
-    public const string SkillCodeDetail =
-        "skillCode is retired for Plan v2 and cannot be used as a planning selection input.";
-    public const string PreferredToolCodesDetail =
-        "preferredToolCodes is retired for Plan v2 and cannot be used as a planning selection input.";
-    public const string UserFacingMessage =
-        "当前计划入口不再接受 Skill 或工具选择，请清除旧选择后重试。";
-
-    public static ApiProblemDescriptor? Validate(
-        string? skillCode,
-        IReadOnlyCollection<string>? preferredToolCodes)
-    {
-        if (!string.IsNullOrWhiteSpace(skillCode))
-        {
-            return new ApiProblemDescriptor(AppProblemCodes.AgentPlanSchemaInvalid, SkillCodeDetail);
-        }
-
-        return preferredToolCodes is { Count: > 0 }
-            ? new ApiProblemDescriptor(AppProblemCodes.AgentPlanSchemaInvalid, PreferredToolCodesDetail)
-            : null;
-    }
-}
-
 internal static class AgentPlanContractSchemaAuthority
 {
     public static readonly IReadOnlySet<string> DigestExcludedRootProperties = new HashSet<string>(
@@ -83,8 +62,11 @@ internal static class AgentPlanContractSchemaAuthority
         "KnowledgeRetrievalNode",
         "FileAnalysisNode",
         "DeterministicComputeNode",
+        "ArtifactGenerationNode",
         "ApprovalCheckpointNode",
-        "PolicyValidationNode"
+        "PolicyValidationNode",
+        "JoinNode",
+        "AgentReasoningNode"
     ], StringComparer.Ordinal);
 
     private static readonly Type[] PlanContractTypes =
@@ -108,6 +90,7 @@ internal static class AgentPlanContractSchemaAuthority
         typeof(AgentIntentProvenanceDocument),
         typeof(AgentCapabilityGapDocument),
         typeof(AgentPlanBudgetDocument),
+        typeof(AgentPlanConcurrencyPolicyDocument),
         typeof(AgentPlanApprovalSummaryDocument),
         typeof(AgentExecutionSnapshotDocument),
         typeof(AgentPlanSecuritySummaryDocument)
@@ -129,7 +112,7 @@ internal static class AgentPlanContractSchemaAuthority
     {
         schemaVersion = AgentPlanContractVersions.PlanV2,
         typeSchema = DescribeTypes(PlanContractTypes),
-        topologyProfiles = new[] { "LinearV1" },
+        topologyProfiles = new[] { "DagV1", "LinearV1" },
         planKinds = new[] { "ExecutablePlan", "PlanDraft" },
         lifecycleTuples = new[] { "PlanDraft|false|0000", "ExecutablePlan|true|" },
         queryModes = new[] { "CloudReadonly", "TextToSql" },
@@ -138,21 +121,20 @@ internal static class AgentPlanContractSchemaAuthority
         artifactTargets = new[] { "chart", "html", "markdown", "pdf", "pptx", "xlsx" },
         canonicalSetProperties = new[]
         {
-            "approvalCheckpoints", "artifactTargets", "artifactTypes", "businessDomains", "capabilityGaps",
+            "approvalCheckpoints", "artifactTargets", "businessDomains", "capabilityGaps",
             "dataSourceIds", "forcedStepCodes", "knowledgeBaseIds", "requestedCapabilityCodes",
             "selectedPluginIds", "toolApprovalCheckpoints", "uploadIds"
         },
         sequenceProperties = new[] { "intentCandidates", "nodes", "steps" },
         digestExcludedRootProperties = DigestExcludedRootProperties.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
-        forbiddenLegacyProperties = new[] { "skillCode", "skillName", "skillRoutingReason" },
         goalFormat = "{taskType} task; goalSha256={lowercase-sha256}",
         plannerFallbackReason = "null",
         compilerPolicy = new
         {
-            phase = "P2-deterministic-linear-v1",
-            trustedCompiler = DeterministicLinearAgentPlanCompiler.CompilerVersion,
+            phase = "P7-evidence-health-visible-runtime",
+            trustedCompiler = DeterministicAgentPlanCompiler.CompilerVersion,
             missingExecutionSnapshotGap = AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable,
-            executablePolicy = "gap-free-snapshot-bound-linear-v1-only",
+            executablePolicy = "gap-free-snapshot-bound-explicit-linear-or-bounded-dag",
             productionSimulation = "disabled",
             fallbackPolicy = "real-cloud-never-falls-back-to-simulation",
             requiredCandidateCoverage = "every-required-available-candidate-needs-producer-node",
@@ -164,6 +146,13 @@ internal static class AgentPlanContractSchemaAuthority
             maxNodes = 16,
             maxElapsedSeconds = 1800,
             maxCanonicalBytes = AgentPlanContractVersions.MaxPlanCanonicalBytes
+        },
+        concurrencyPolicy = new
+        {
+            linear = AgentPlanContractVersions.LinearConcurrencyPolicyV1,
+            dag = AgentPlanContractVersions.DagConcurrencyPolicyV1,
+            dagMinParallelism = AgentPlanContractVersions.DagMinParallelism,
+            dagMaxParallelism = AgentPlanContractVersions.DagMaxParallelism
         },
         maxCanonicalBytes = AgentPlanContractVersions.MaxPlanCanonicalBytes,
         canonicalJsonPolicy = new
@@ -231,14 +220,14 @@ internal static class AgentPlanContractSchemaAuthority
         schemaVersion = AgentPlanContractVersions.NodeV1,
         typeSchema = DescribeTypes(NodeContractTypes),
         nodeKinds = AllowedNodeKinds.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
-        disabledNodeKinds = new[] { "ArtifactGenerationNode" },
-        dependencyPolicy = "strict-immediate-predecessor:v1",
+        disabledNodeKinds = new[] { "PredictionReadNode" },
+        dependencyPolicy = "explicit-stable-dag-dependencies:v1|linear-immediate-predecessor:v1",
         inputSchemaRef = "node-input:v1",
         outputSchemaPrefix = "evidence:",
-        sideEffectClasses = new[] { "ArtifactDraftOnly", "ReadOnly" },
+        sideEffectClasses = new[] { "ArtifactDraftOnly", "DeterministicInternal", "ReadOnly" },
         canonicalSetProperties = new[]
         {
-            "businessDomains", "dataScopes", "evidenceSelectors", "knowledgeScopes", "requestedCapabilityCodes",
+            "allowedToolCodes", "businessDomains", "dataScopes", "evidenceSelectors", "knowledgeScopes", "requestedCapabilityCodes",
             "requestedScope", "requestedToolCodes"
         },
         policyRanges = new
@@ -248,8 +237,26 @@ internal static class AgentPlanContractSchemaAuthority
             idempotency = "idempotency-policy:v1|Deterministic,ReadOnly,Fenced",
             maxRows = "0..200"
         },
-        cloudInput = $"CloudAiRead|semanticIntent+semanticPlanDigest+requestedScope+maxRows=1..{CloudAiReadRowLimitPolicy.MaxRows}|no-sql-no-dataSource",
+        cloudInput = $"CloudAiRead|semanticIntent+semanticPlanDigest+requestedScope+timeRange+maxRows=1..{CloudAiReadRowLimitPolicy.MaxRows}|no-sql-no-dataSource",
+        healthAssessment = new
+        {
+            algorithmVersion = AgentCloudHealthAssessmentTool.AlgorithmVersion,
+            semanticIntent = "Analysis.Device.Status",
+            input = "one-sealed-CloudReadNode-Evidence",
+            output = "DerivedFact-only",
+            prohibited = new[] { "fault-probability", "remaining-useful-life", "automatic-repair" }
+        },
         governedInput = "dataSourceId+GovernedSql/TextToSql+governedSchemaDigest+requestedPermission+maxRows|no-CloudAiRead",
+        reasoningPolicy = new
+        {
+            version = AgentReasoningPolicyAuthority.PolicyVersion,
+            context = AgentReasoningPolicyAuthority.ContextPolicy,
+            derivationDepth = AgentReasoningPolicyAuthority.DerivationDepth,
+            maxTurns = AgentReasoningPolicyAuthority.MaxTurns,
+            recoveryTurns = AgentReasoningPolicyAuthority.RecoveryTurns,
+            tools = "filtered-empty-v1",
+            outputTruthClass = AgentReasoningPolicyAuthority.OutputTruthClass
+        },
         capabilityToolBinding = "strict-intersection:v1",
         canonicalJsonPolicy = AgentCanonicalJsonV1.PolicyVersion,
         canonicalNumberPolicy = AgentCanonicalNumberPolicyV1.Version,
@@ -312,7 +319,6 @@ internal static class AgentPlanContractSchemaAuthority
 
 internal static class AgentPlanCapabilityGapCodes
 {
-    public const string SkillSelectionUnresolved = "skill_selection_unresolved";
     public const string ToolCatalogUnavailable = "tool_catalog_unavailable";
     public const string PlannedToolUnavailable = "planned_tool_unavailable";
     public const string CloudReadonlyResolverUnavailable = "cloud_readonly_resolver_unavailable";
@@ -323,10 +329,10 @@ internal static class AgentPlanCapabilityGapCodes
     public const string UnknownIntent = "unknown_intent";
     public const string CapabilitySelectionEmpty = "capability_selection_empty";
     public const string PlanCompilerUnavailable = "plan_compiler_unavailable";
+    public const string UnsupportedNodeKind = "unsupported_node_kind";
 
     private static readonly IReadOnlySet<string> Frozen = new HashSet<string>(
     [
-        SkillSelectionUnresolved,
         ToolCatalogUnavailable,
         PlannedToolUnavailable,
         CloudReadonlyResolverUnavailable,
@@ -336,7 +342,8 @@ internal static class AgentPlanCapabilityGapCodes
         KnownCapabilityUnavailable,
         UnknownIntent,
         CapabilitySelectionEmpty,
-        PlanCompilerUnavailable
+        PlanCompilerUnavailable,
+        UnsupportedNodeKind
     ], StringComparer.Ordinal);
 
     public static bool IsFrozen(string value) => Frozen.Contains(value);
@@ -345,14 +352,13 @@ internal static class AgentPlanCapabilityGapCodes
 internal enum AgentIntentClass
 {
     General = 1,
-    TransitionSkill = 2,
-    PluginAction = 3,
-    Knowledge = 4,
-    Policy = 5,
-    CloudOnly = 6,
-    GovernedExploration = 7,
-    KnownButUnavailable = 8,
-    Unknown = 9
+    PluginAction = 2,
+    Knowledge = 3,
+    Policy = 4,
+    CloudOnly = 5,
+    GovernedExploration = 6,
+    KnownButUnavailable = 7,
+    Unknown = 8
 }
 
 internal enum AgentIntentAvailability
@@ -510,11 +516,22 @@ internal sealed record AgentPlanNodeInputDocument(
     [property: JsonPropertyName("businessDomains")] IReadOnlyCollection<string> BusinessDomains,
     [property: JsonPropertyName("governedSchemaDigest")] string? GovernedSchemaDigest,
     [property: JsonPropertyName("requestedPermission")] string? RequestedPermission,
-    [property: JsonPropertyName("canonicalInputJson")] string? CanonicalInputJson);
+    [property: JsonPropertyName("canonicalInputJson")] string? CanonicalInputJson,
+    [property: JsonPropertyName("timeRange")] AgentIntentTimeRangeDocument? TimeRange = null);
 
 internal sealed record AgentPlanModelPolicyDocument(
     [property: JsonPropertyName("modelId")] Guid? ModelId,
-    [property: JsonPropertyName("policyVersion")] string PolicyVersion);
+    [property: JsonPropertyName("policyVersion")] string PolicyVersion,
+    [property: JsonPropertyName("templateCode")] string TemplateCode,
+    [property: JsonPropertyName("templateVersion")] string TemplateVersion,
+    [property: JsonPropertyName("promptHash")] string PromptHash,
+    [property: JsonPropertyName("modelParametersHash")] string ModelParametersHash,
+    [property: JsonPropertyName("contextPolicy")] string ContextPolicy,
+    [property: JsonPropertyName("maxTurns")] int MaxTurns,
+    [property: JsonPropertyName("recoveryTurns")] int RecoveryTurns,
+    [property: JsonPropertyName("derivationDepth")] int DerivationDepth,
+    [property: JsonPropertyName("allowedToolCodes")] IReadOnlyCollection<string> AllowedToolCodes,
+    [property: JsonPropertyName("outputTruthClass")] string OutputTruthClass);
 
 internal sealed record AgentPlanTimeoutPolicyDocument(
     [property: JsonPropertyName("policyVersion")] string PolicyVersion,
@@ -557,6 +574,10 @@ internal sealed record AgentPlanBudgetDocument(
     [property: JsonPropertyName("maxArtifactCount")] int MaxArtifactCount,
     [property: JsonPropertyName("maxArtifactBytes")] long MaxArtifactBytes,
     [property: JsonPropertyName("maxCanonicalBytes")] int MaxCanonicalBytes);
+
+internal sealed record AgentPlanConcurrencyPolicyDocument(
+    [property: JsonPropertyName("policyVersion")] string PolicyVersion,
+    [property: JsonPropertyName("maxParallelism")] int MaxParallelism);
 
 internal sealed record AgentPlanApprovalSummaryDocument(
     [property: JsonPropertyName("requiresPlanConfirmation")] bool RequiresPlanConfirmation,
@@ -680,7 +701,8 @@ internal sealed record AgentEvidenceContentDocument(
 internal sealed record AgentEvidenceLineageDocument(
     [property: JsonPropertyName("parentEvidenceIds")] IReadOnlyCollection<Guid> ParentEvidenceIds,
     [property: JsonPropertyName("inputDigest")] string InputDigest,
-    [property: JsonPropertyName("outputDigest")] string OutputDigest);
+    [property: JsonPropertyName("outputDigest")] string OutputDigest,
+    [property: JsonPropertyName("evidenceSetDigest")] string? EvidenceSetDigest = null);
 
 internal sealed record AgentEvidenceGovernanceDocument(
     [property: JsonPropertyName("sensitivity")] string Sensitivity,

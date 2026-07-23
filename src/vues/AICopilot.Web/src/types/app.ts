@@ -197,24 +197,6 @@ export interface SessionTimelinePage {
   hasMoreAfter: boolean
 }
 
-export interface SkillDefinition {
-  id: string
-  skillCode: string
-  displayName: string
-  description: string
-  allowedToolCodes: string[]
-  riskLevel: string
-  approvalPolicy: string
-  allowedDataSourceModes: string[]
-  allowedKnowledgeScopes: string[]
-  outputComponentTypes: string[]
-  isEnabled: boolean
-  isBuiltIn: boolean
-  version: number
-  createdAt: string
-  updatedAt: string
-}
-
 export interface PlannerToolPropertySummary {
   name: string
   type: string

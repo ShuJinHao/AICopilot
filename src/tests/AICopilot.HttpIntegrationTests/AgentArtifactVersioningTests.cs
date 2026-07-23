@@ -263,7 +263,6 @@ public sealed class AgentArtifactVersioningTests
         var planJson = AgentPlanV2TestData.CreateCanonicalBuiltInPlanDraft(
             [generationPlanStep],
             AgentTaskType.CloudDataReport,
-            skillCode: null,
             knowledgeBaseIds: null);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),

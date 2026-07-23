@@ -37,6 +37,7 @@ public sealed record AgentNodeRunSeed(
     int MaxAttempts,
     int TimeoutSeconds,
     AgentNodeBudgetLimits Budget,
+    string? JoinPolicy,
     bool IsInitiallyRunnable);
 
 public sealed record AgentNodeRunClaim(
@@ -288,6 +289,10 @@ public interface IAgentNodeRunStore
         AgentTaskRunAttemptId runAttemptId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyCollection<AgentRunUsageLedgerEntry>> ListUsageByAttemptAsync(
+        AgentTaskRunAttemptId runAttemptId,
+        CancellationToken cancellationToken = default);
+
     Task<AgentFencedWriteResult> TryReleaseApprovalAsync(
         AgentNodeRunId nodeRunId,
         AgentTaskRunAttemptId runAttemptId,
@@ -298,6 +303,15 @@ public interface IAgentNodeRunStore
 
 public interface IAgentNodeRunClaimStore
 {
+    Task<AgentNodeRunClaimOutcome> TryClaimAsync(
+        AgentNodeRunId nodeRunId,
+        AgentTaskRunAttemptId runAttemptId,
+        long taskFencingToken,
+        string leaseOwner,
+        TimeSpan leaseDuration,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken = default);
+
     Task<AgentNodeRunClaimOutcome> TryClaimNextAsync(
         AgentTaskRunAttemptId runAttemptId,
         long taskFencingToken,

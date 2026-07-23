@@ -5,7 +5,6 @@ using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.SharedKernel.Ai;
@@ -128,41 +127,6 @@ public sealed class FreshDatabaseSeedTests
             tool.ToolCode.Contains("shell", StringComparison.OrdinalIgnoreCase) ||
             tool.ToolCode.Contains("cloud_write", StringComparison.OrdinalIgnoreCase) ||
             tool.Description.Contains("写入 Cloud", StringComparison.OrdinalIgnoreCase));
-
-        var registeredToolCodes = tools
-            .Select(tool => tool.ToolCode)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var missingSeedToolCodes = BuiltInSkillDefinitions.All
-            .SelectMany(skill => skill.AllowedToolCodes)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(toolCode => !registeredToolCodes.Contains(toolCode))
-            .ToArray();
-        missingSeedToolCodes.Should().BeEmpty("built-in skills may only narrow already governed tool registrations");
-
-        var skills = await aiGatewayDbContext.SkillDefinitions
-            .OrderBy(skill => skill.SkillCode)
-            .ToListAsync();
-        skills.Should().HaveCount(BuiltInSkillDefinitions.All.Count);
-        skills.Should().OnlyContain(skill => skill.IsBuiltIn);
-        skills.SelectMany(skill => skill.AllowedToolCodes)
-            .Should()
-            .OnlyContain(toolCode => registeredToolCodes.Contains(toolCode));
-        skills.SelectMany(skill => skill.AllowedToolCodes)
-            .Should()
-            .NotIntersectWith(BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes);
-
-        var toolByCode = tools.ToDictionary(tool => tool.ToolCode, StringComparer.OrdinalIgnoreCase);
-        var cloudReadonlySkill = skills.Single(skill => skill.SkillCode == "cloud_readonly");
-        cloudReadonlySkill.AllowedToolCodes
-            .Where(toolCode => toolByCode[toolCode].ProviderType == ToolProviderType.CloudReadonly)
-            .Should()
-            .BeEquivalentTo("query_cloud_data_readonly");
-        cloudReadonlySkill.AllowedToolCodes
-            .Should()
-            .OnlyContain(toolCode =>
-                toolByCode[toolCode].ProviderType != ToolProviderType.CloudReadonly ||
-                !toolCode.Contains("write", StringComparison.OrdinalIgnoreCase),
-                "Cloud write tools must never enter a built-in skill allowlist");
 
         var activeRoutingConfiguration = await aiGatewayDbContext.RoutingModelConfigurations.SingleAsync(configuration => configuration.IsActive);
         activeRoutingConfiguration.Name.Should().Be(PrivateMiniMaxRoutingConfigurationName);

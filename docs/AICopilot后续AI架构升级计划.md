@@ -59,6 +59,8 @@
 - 已经授权修改 CloudPlatform 或 EdgeClient。
 - 已经完成生产部署或线上验收。
 
+2026-07-22 实施状态注记：当前独立产品 worktree 已形成 `AI-OVERALL-P0-P7-SOURCE-CANDIDATE / NOT-VERIFIED`。该口径只表示 P0–P7 生产/前端/测试源码候选已按本文接线；本批未获准运行 build、test、canonical、coverage、mutation、Playwright 或 demo，因此不改变本文任一退出门，不得据此宣称完成、可合并、可部署或已生产验收。
+
 ### 1.3 结论分级
 
 本文使用三种结论口径：

@@ -8,12 +8,11 @@ import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
 const chatServiceMock = vi.hoisted(() => ({
-  getSkills: vi.fn(),
-  getToolCatalog: vi.fn(),
   getKnowledgeBases: vi.fn(),
   getAgentTasksBySession: vi.fn(),
   getAgentTaskApprovals: vi.fn(),
   getAgentTaskAuditSummary: vi.fn(),
+  getAgentTaskRuntimeSnapshot: vi.fn(),
   getTimeline: vi.fn(),
 }))
 
@@ -57,6 +56,7 @@ describe('agent state stores', () => {
     store.agentApprovals = [{ id: 'approval-1', status: 'Pending' } as never]
     store.agentAuditSummary = [{ id: 'audit-1' } as never]
     store.timelineEvents = [{ sequence: 1, eventType: 'AgentTaskPlanCreated' } as never]
+    store.runtimeSnapshot = { taskId: 'task-1', nodes: [], evidence: [], metrics: [] } as never
     store.isAgentBusy = true
 
     store.reset()
@@ -65,7 +65,29 @@ describe('agent state stores', () => {
     expect(store.agentApprovals).toEqual([])
     expect(store.agentAuditSummary).toEqual([])
     expect(store.timelineEvents).toEqual([])
+    expect(store.runtimeSnapshot).toBeNull()
     expect(store.isAgentBusy).toBe(false)
+  })
+
+  it('loads only the typed safe runtime snapshot projection', async () => {
+    chatServiceMock.getAgentTaskRuntimeSnapshot.mockResolvedValue({
+      taskId: 'task-1',
+      runAttemptId: 'attempt-1',
+      status: 'Running',
+      generatedAt: '2026-07-22T08:00:00Z',
+      nodes: [{ nodeId: 'node-1', label: 'Cloud 只读查询', kind: 'CloudRead', status: 'Completed' }],
+      evidence: [{ nodeId: 'node-1', truthClass: 'ObservedFact', truthLabel: '事实', findings: [] }],
+      metrics: [{ code: 'queue_wait_ms', label: '排队等待', value: 12, unit: 'ms', status: 'Recorded' }],
+    })
+    const store = useAgentTaskStore()
+
+    await store.loadRuntimeSnapshot('task-1')
+
+    expect(store.runtimeSnapshot?.taskId).toBe('task-1')
+    expect(store.runtimeSnapshot?.evidence[0]?.truthClass).toBe('ObservedFact')
+    expect(store.runtimeSnapshot).not.toHaveProperty('rawToolArguments')
+    expect(store.runtimeSnapshot).not.toHaveProperty('sql')
+    expect(store.runtimeSnapshot).not.toHaveProperty('reasoning')
   })
 
   it('resets artifact workspace state through artifactWorkspaceStore', () => {
@@ -84,36 +106,16 @@ describe('agent state stores', () => {
     expect(store.chartPreview).toBeNull()
   })
 
-  it('keeps global skill and knowledge catalogs while invalidating the skill-filtered tool catalog', () => {
+  it('keeps the knowledge catalog while clearing the selected knowledge scope', () => {
     const store = useAgentCatalogStore()
 
-    store.availableSkills = [{ skillCode: 'general_report' } as never]
-    store.availablePluginTools = [{ toolCode: 'rag_search' } as never]
     store.availableKnowledgeBases = [{ id: 'kb-1' } as never]
-    store.selectedSkillCode = 'general_report'
-    store.selectedToolCodes = ['rag_search']
     store.selectedKnowledgeBaseId = 'kb-1'
 
     store.resetSelections()
 
-    expect(store.availableSkills).toHaveLength(1)
-    expect(store.availablePluginTools).toEqual([])
     expect(store.availableKnowledgeBases).toHaveLength(1)
-    expect(store.selectedSkillCode).toBeNull()
-    expect(store.selectedToolCodes).toEqual([])
     expect(store.selectedKnowledgeBaseId).toBeNull()
-  })
-
-  it('routes catalog load failures through the current chat session error', async () => {
-    chatServiceMock.getSkills.mockRejectedValue(new ApiError('API Error: 403', 403, null))
-    const sessionStore = useSessionStore()
-    sessionStore.persistCurrentSession('session-1')
-    const store = useChatStore()
-
-    await store.loadSkills()
-
-    expect(store.availableSkills).toEqual([])
-    expect(store.errorMessage).toBe('加载 Skill 列表失败：当前账号没有访问该功能的权限。')
   })
 
   it('routes task timeline load failures through the current chat session error', async () => {

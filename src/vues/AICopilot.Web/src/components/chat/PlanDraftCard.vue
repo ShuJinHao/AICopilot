@@ -45,13 +45,6 @@ function planStepTag(step: { requiresApproval: boolean }) {
       <span>{{ previewPlanSteps.length }} / {{ totalPreviewPlanStepCount }} 个步骤</span>
     </div>
     <p class="agent-plan-goal">{{ latestTask.goal }}</p>
-    <p v-if="latestPlan?.skillRoutingReason" class="agent-skill-reason">
-      {{ latestPlan.skillRoutingReason }}
-    </p>
-    <div v-if="latestPlan?.plannerFallbackReason" class="planner-warning">
-      <TriangleAlert :size="15" />
-      <span>{{ latestPlan.plannerFallbackReason }}</span>
-    </div>
     <div v-if="latestPlanCapabilityGaps.length" class="planner-warning capability-gap-list">
       <TriangleAlert :size="15" />
       <div>

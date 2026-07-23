@@ -10,6 +10,8 @@ For HTTP `ProblemDetails`, `extensions.code` and `extensions.traceId` are reserv
 
 For `agent_plan_invalid`, `agent_plan_schema_invalid`, and `plan_payload_too_large`, the backend owns fixed `detail` and `userFacingMessage` values across REST, SSE, AgentEvent, and queued-run projections. These plan failures drop every incoming extension except an exact non-empty GUID `taskId`; a multi-error result selects the first publicly disclosable plan descriptor rather than leaking an earlier internal error. `AgentEvent` JSON uses the exact camelCase fields `stage`, `code`, `detail`, `recoverable`, `suggestedAction`, and `metadata`.
 
+`POST /aigateway/chat` accepts optional `referencedAgentTaskId`. The frontend may send it only after the user explicitly selects a `Completed` task result in the current resolved session, and must clear the reference after one send, session change/delete/reset, or switching to Plan mode. The backend is authoritative: it validates the current user/session, succeeded attempt, finalization checkpoint, sealed Evidence lineage and exact `EvidenceSetDigest`. `task_evidence_reused` means the current answer uses that fixed evidence set without a new query; `task_evidence_refresh_required` means the old task evidence was not injected because the current request needs a new read-only path, but the event alone does not prove a query ran. If a changed device/process/level/time scope is still routed as `General.Chat`, the backend must fail closed and ask for an explicit query scope instead of answering from old evidence. The frontend must never auto-select the latest task or treat the digest as authorization.
+
 ## Auth Problem Codes
 
 | Code | Meaning |
@@ -63,7 +65,6 @@ For `agent_plan_invalid`, `agent_plan_schema_invalid`, and `plan_payload_too_lar
 | `planner_model_unavailable` | Planner model is unavailable. |
 | `planner_tool_catalog_empty` | Planner tool catalog is empty. |
 | `planner_tool_schema_unsupported` | Planner tool schema is unsupported. |
-| `agent_skill_selection_required` | Agent plan requires a selected or auto-routed Skill. |
 | `agent_plan_invalid` | Agent plan is invalid. |
 | `plan_payload_too_large` | Canonical Plan v2 payload exceeds the fixed 262,144-byte UTF-8 limit and was not persisted. |
 | `evidence_payload_too_large` | Inline canonical Evidence payload exceeds the fixed 65,536-byte UTF-8 limit and was not accepted. |

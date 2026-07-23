@@ -74,7 +74,6 @@ public static class AgentPlanV2TestData
         string toolCode,
         bool executable = false,
         bool requiresApproval = false,
-        string? skillCode = null,
         string? inputJson = null,
         AgentTaskType taskType = AgentTaskType.ReportGeneration,
         IReadOnlyCollection<Guid>? knowledgeBaseIds = null)
@@ -89,7 +88,6 @@ public static class AgentPlanV2TestData
                 InputJson: inputJson)],
             executable,
             taskType,
-            skillCode,
             knowledgeBaseIds);
     }
 
@@ -111,7 +109,6 @@ public static class AgentPlanV2TestData
             ],
             executable,
             AgentTaskType.CloudDataReport,
-            skillCode: null,
             knowledgeBaseIds: null);
     }
 
@@ -132,7 +129,6 @@ public static class AgentPlanV2TestData
             ],
             executable,
             AgentTaskType.DataAnalysis,
-            skillCode: null,
             [knowledgeBaseId]);
     }
 
@@ -140,14 +136,12 @@ public static class AgentPlanV2TestData
         IReadOnlyCollection<AgentPlanV2TestStep> steps,
         bool executable,
         AgentTaskType taskType,
-        string? skillCode,
         IReadOnlyCollection<Guid>? knowledgeBaseIds)
     {
         return CreateCore(
             steps,
             executable,
             taskType,
-            skillCode,
             knowledgeBaseIds,
             requireCanonicalBuiltInCatalog: false);
     }
@@ -160,14 +154,12 @@ public static class AgentPlanV2TestData
     public static string CreateCanonicalBuiltInPlanDraft(
         IReadOnlyCollection<AgentPlanV2TestStep> steps,
         AgentTaskType taskType,
-        string? skillCode = null,
         IReadOnlyCollection<Guid>? knowledgeBaseIds = null)
     {
         return CreateCore(
             steps,
             executable: false,
             taskType,
-            skillCode,
             knowledgeBaseIds,
             requireCanonicalBuiltInCatalog: true);
     }
@@ -252,7 +244,6 @@ public static class AgentPlanV2TestData
         IReadOnlyCollection<AgentPlanV2TestStep> steps,
         bool executable,
         AgentTaskType taskType,
-        string? skillCode,
         IReadOnlyCollection<Guid>? knowledgeBaseIds,
         bool requireCanonicalBuiltInCatalog)
     {
@@ -293,10 +284,10 @@ public static class AgentPlanV2TestData
             new AgentIntentFiltersDocument(null, []),
             [],
             new AgentIntentProvenanceDocument(
-                AgentIntentCatalogV1.RouterVersion,
-                AgentIntentCatalogV1.PromptVersion,
-                AgentIntentCatalogV1.CatalogVersion,
-                AgentIntentCatalogV1.CatalogDigest),
+                AgentIntentRegistryV1.RouterVersion,
+                AgentIntentRegistryV1.PromptVersion,
+                AgentIntentRegistryV1.RegistryVersion,
+                AgentIntentRegistryV1.RegistryDigest),
             null);
         var requestedStepArray = steps.ToArray();
         var artifactTargets = requestedStepArray
@@ -374,7 +365,7 @@ public static class AgentPlanV2TestData
             RiskLevel: riskLevel.ToString(),
             UploadIds: [],
             KnowledgeBaseIds: canonicalKnowledgeBaseIds,
-            CloudReadonlyIntent: cloudIntent,
+            CloudReadonlyIntents: cloudIntent is null ? [] : [cloudIntent],
             Steps: stepArray.Select(step => new AgentTaskPlanStepDocument(
                 step.Title,
                 step.Description,
@@ -383,8 +374,6 @@ public static class AgentPlanV2TestData
                 step.RequiresApproval,
                 step.InputJson is null ? null : CanonicalJson.Canonicalize(step.InputJson))).ToArray(),
             RuntimeSettings: new AgentTaskPlanRuntimeSettingsDocument(30, 12000),
-            PlannerMode: "PlanDraft",
-            PlannerFallbackReason: null,
             PlannerModelId: RoutingConfiguration.ModelId,
             PlannerToolCatalogVersion: PlannerToolCatalog.CurrentVersion,
             PlannerAvailableToolCount: toolCatalog.AvailableToolCount,
@@ -392,11 +381,8 @@ public static class AgentPlanV2TestData
             BusinessDomains: [],
             QueryMode: isCloud ? "CloudReadonly" : "TextToSql",
             RequiresDataApproval: false,
-            ArtifactTypes: artifactTargets,
             PlannerSafetySummary: new AgentTaskPlanSafetySummaryDocument(
                 "PlanV2Contract",
-                "PlanDraft",
-                null,
                 PlannerToolCatalog.CurrentVersion,
                 toolCatalog.AvailableToolCount,
                 false,
@@ -411,7 +397,6 @@ public static class AgentPlanV2TestData
             ToolRiskSummary: riskSummary,
             MockMcpOnly: false,
             ToolApprovalCheckpoints: approvals,
-            SkillCode: skillCode,
             PlanKind: AgentTaskPlanKinds.PlanDraft,
             IsExecutable: false,
             LifecycleSealPadding: "0000",
@@ -443,6 +428,9 @@ public static class AgentPlanV2TestData
                 AgentPlanContractVersions.DefaultMaxArtifactCount,
                 AgentPlanContractVersions.DefaultMaxArtifactBytes,
                 AgentPlanContractVersions.MaxPlanCanonicalBytes),
+            ConcurrencyPolicy: new AgentPlanConcurrencyPolicyDocument(
+                AgentPlanContractVersions.LinearConcurrencyPolicyV1,
+                1),
             ApprovalSummary: new AgentPlanApprovalSummaryDocument(true, approvals),
             ExecutionSnapshot: AgentPlanCatalogSnapshotAuthority.CreateSnapshot(
                 toolCatalog,

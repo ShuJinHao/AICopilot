@@ -1,4 +1,5 @@
 using AICopilot.AiGatewayService.Approvals;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging;
@@ -12,19 +13,22 @@ public class ToolsPackExecutor(
     public const string ExecutorId = nameof(ToolsPackExecutor);
     private const string ActionIntentPrefix = "Action.";
 
-    public static bool IsRelevant(IEnumerable<IntentResult> intentResults)
+    internal static bool IsRelevant(
+        IEnumerable<IntentResult> intentResults,
+        AgentIntentRegistrySnapshot registry)
     {
-        return intentResults.Any(IsActionIntent);
+        return intentResults.Any(intent => IsActionIntent(intent, registry));
     }
 
     public async Task<BranchResult> DiscoverAsync(
         List<IntentResult> intentResults,
+        AgentIntentRegistrySnapshot registry,
         CancellationToken ct = default)
     {
         try
         {
             var actionIntents = intentResults
-                .Where(IsActionIntent)
+                .Where(intent => IsActionIntent(intent, registry))
                 .ToList();
 
             if (actionIntents.Count == 0)
@@ -61,9 +65,14 @@ public class ToolsPackExecutor(
         }
     }
 
-    private static bool IsActionIntent(IntentResult intent)
+    private static bool IsActionIntent(
+        IntentResult intent,
+        AgentIntentRegistrySnapshot registry)
     {
-        return intent.Intent.StartsWith(ActionIntentPrefix, StringComparison.OrdinalIgnoreCase)
-               && intent.Confidence > 0.8;
+        return intent.Confidence > 0.8 &&
+               AgentIntentRegistryV1.IsIntentClass(
+                   registry,
+                   intent.Intent,
+                   AgentIntentClass.PluginAction);
     }
 }

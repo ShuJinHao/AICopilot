@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
@@ -34,11 +33,6 @@ internal sealed class AgentArtifactReferenceEvidenceResolver(
             return Invalid("ArtifactReference Evidence identity or lifetime is invalid.");
         }
 
-        if (!TryValidateEnvelope(evidence) || !HasExactConsumerAuthority(evidence, task))
-        {
-            return Invalid("ArtifactReference Evidence envelope or consumer authority is invalid.");
-        }
-
         var snapshot = await operationStore.GetByCommitAsync(commitId, cancellationToken);
         if (snapshot is null ||
             snapshot.Operation.Status != ArtifactFileSetOperationStatus.Completed ||
@@ -70,53 +64,6 @@ internal sealed class AgentArtifactReferenceEvidenceResolver(
         return durableOutput is null
             ? Invalid("ArtifactReference Evidence cannot reconstruct the frozen node output contract.")
             : Result.Success(durableOutput);
-    }
-
-    private static bool TryValidateEnvelope(AgentEvidenceRecord evidence)
-    {
-        try
-        {
-            var document = JsonSerializer.Deserialize<AgentEvidenceEnvelopeDocument>(
-                evidence.CanonicalEnvelopeJson,
-                CanonicalJson.SerializerOptions);
-            if (document is null)
-            {
-                return false;
-            }
-
-            var sealedEnvelope = AgentEvidenceCanonicalizer.Seal(document);
-            return sealedEnvelope.IsSuccess &&
-                   string.Equals(sealedEnvelope.Value!.CanonicalJson, evidence.CanonicalEnvelopeJson, StringComparison.Ordinal) &&
-                   string.Equals(sealedEnvelope.Value.Digest, evidence.EnvelopeDigest, StringComparison.Ordinal) &&
-                   string.Equals(sealedEnvelope.Value.Document.Payload.PayloadRef, evidence.PayloadRef, StringComparison.Ordinal) &&
-                   sealedEnvelope.Value.Document.Payload.ByteLength == evidence.ByteLength &&
-                   string.Equals(sealedEnvelope.Value.Document.Payload.Sha256, evidence.PayloadSha256, StringComparison.Ordinal);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    private static bool HasExactConsumerAuthority(AgentEvidenceRecord evidence, AgentTask task)
-    {
-        try
-        {
-            var scopes = JsonSerializer.Deserialize<string[]>(
-                evidence.AllowedConsumerScopeJson,
-                CanonicalJson.SerializerOptions) ?? [];
-            var expected = new[]
-            {
-                $"session:{task.SessionId.Value:D}",
-                $"task:{task.Id.Value:D}",
-                $"user:{task.UserId:D}"
-            }.OrderBy(value => value, StringComparer.Ordinal).ToArray();
-            return scopes.SequenceEqual(expected, StringComparer.Ordinal);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
     }
 
     private static Result<string> Invalid(string detail) =>

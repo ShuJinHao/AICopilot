@@ -10,19 +10,16 @@ public sealed class AgentPlanDraftConfirmationService(
     AgentPlanToolGuard planToolGuard,
     AgentTaskPlanFreshReadGate freshReadGate,
     IAgentRoutingConfigurationSnapshotReader routingSnapshotReader,
-    ICloudReadonlyAgentPlanService? legacyCloudReadonlyPlanService = null,
     IAgentPlanIntegrityValidator? planIntegrityValidator = null,
     AgentPlanDraftContractAuthority? planContractAuthority = null,
-    IAgentPlanAuthorizationFreshVerifier? authorizationFreshVerifier = null)
+    IAgentPlanAuthorizationFreshVerifier? authorizationFreshVerifier = null,
+    ConfiguredAgentRuntimeFactory? reasoningConfigurationFactory = null)
 {
     public async Task<Result> ConfirmAsync(
         AgentTask task,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        // Cloud semantic intent is resolved while the PlanDraft is created. Confirmation
-        // only validates the sealed snapshot and must not reinterpret the user's goal.
-        _ = legacyCloudReadonlyPlanService;
         var planResult = DeserializePlan(task.PlanJson);
         if (!planResult.IsSuccess)
         {
@@ -55,7 +52,7 @@ public sealed class AgentPlanDraftConfirmationService(
         if (plan.Nodes is not { Count: > 0 })
         {
             return InvalidPlan(
-                "A gap-free PlanDraft requires a non-empty authoritative LinearV1 compiler graph before confirmation.");
+                "A gap-free PlanDraft requires a non-empty authoritative compiler graph before confirmation.");
         }
 
         if (plan.Steps.Count == 0 || plan.RequestedCapabilityCodes is null || plan.RequestedCapabilityCodes.Count == 0)
@@ -80,7 +77,6 @@ public sealed class AgentPlanDraftConfirmationService(
             simulationOnly,
             plan.BusinessDomains,
             cancellationToken,
-            plan.SkillCode,
             plan.PluginSelectionMode);
         if (!guardedStepsResult.IsSuccess)
         {
@@ -114,9 +110,10 @@ public sealed class AgentPlanDraftConfirmationService(
             }
         }
 
-        if (task.TaskType == AgentTaskType.CloudDataReport && plan.CloudReadonlyIntent is null)
+        if (task.TaskType == AgentTaskType.CloudDataReport &&
+            (plan.CloudReadonlyIntents is null || plan.CloudReadonlyIntents.Count == 0))
         {
-            return InvalidPlan("CloudDataReport PlanDraft requires a typed Cloud readonly intent before confirmation.");
+            return InvalidPlan("CloudDataReport PlanDraft requires at least one typed Cloud readonly intent before confirmation.");
         }
 
         var catalogResult = await planToolGuard.GetAvailableToolCatalogAsync(
@@ -124,7 +121,6 @@ public sealed class AgentPlanDraftConfirmationService(
             simulationOnly,
             plan.BusinessDomains,
             cancellationToken,
-            plan.SkillCode,
             plan.PluginSelectionMode);
         if (!catalogResult.IsSuccess)
         {
@@ -149,14 +145,24 @@ public sealed class AgentPlanDraftConfirmationService(
                 currentRoutingConfiguration,
                 plan.DataSourceIds,
                 plan.KnowledgeBaseIds,
-                plan.IntentCandidates))
+                plan.IntentCandidates,
+                plan.ConcurrencyPolicy?.PolicyVersion))
         {
             return ReconfirmationRequired(
                 "Tool/provider/prompt/model configuration changed after PlanDraft sealing; generate and confirm a new PlanDraft.");
         }
 
+        var reasoningConfiguration = await AgentReasoningPolicyAuthority.VerifyCurrentConfigurationAsync(
+            plan,
+            reasoningConfigurationFactory,
+            cancellationToken);
+        if (!reasoningConfiguration.IsSuccess)
+        {
+            return Result.From(reasoningConfiguration);
+        }
+
         var authority = planContractAuthority ?? new AgentPlanDraftContractAuthority(
-            new IntentResultToCandidateAdapter(),
+            new AgentIntentRegistryProjector(),
             new AgentPlanCanonicalizer());
         var executableResult = authority.SealExecutable(plan);
         if (!executableResult.IsSuccess)

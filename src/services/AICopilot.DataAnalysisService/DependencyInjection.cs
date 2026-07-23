@@ -25,7 +25,7 @@ public static class DependencyInjection
             provider.GetRequiredService<VisualizationContext>());
         builder.Services.AddSingleton<ISqlDialectInstructionProvider, SqlDialectInstructionProvider>();
         builder.Services.AddSingleton<ISemanticDefinitionCatalog, SemanticDefinitionCatalog>();
-        builder.Services.AddSingleton<ISemanticIntentCatalog, SemanticIntentCatalog>();
+        builder.Services.AddSingleton<ISemanticQuerySchemaRegistry, SemanticQuerySchemaRegistry>();
         builder.Services.AddSingleton<ISemanticPhysicalMappingProvider, ConfiguredSemanticPhysicalMappingProvider>();
         builder.Services.AddScoped<ISemanticSourceInspector, SemanticSourceInspector>();
         builder.Services.AddScoped<ISemanticQueryPlanner, SemanticQueryPlanner>();

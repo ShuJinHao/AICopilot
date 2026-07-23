@@ -8,6 +8,7 @@ namespace AICopilot.ApplicationTests;
 public sealed class AgentReportComposerTests
 {
     private const string SimulationLabel = "\u6a21\u62df Cloud \u53ea\u8bfb\u6570\u636e";
+    private const string EvidenceSetDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -34,6 +35,11 @@ public sealed class AgentReportComposerTests
         sourceInfo.GetProperty("sourceLabel").GetString().Should().Be(SimulationLabel);
         sourceInfo.GetProperty("rowCount").GetInt32().Should().Be(2);
         sourceInfo.GetProperty("isTruncated").GetBoolean().Should().BeFalse();
+        root.GetProperty("evidenceSetDigest").GetString().Should().Be(EvidenceSetDigest);
+        root.GetProperty("truthClasses").EnumerateArray().Select(item => item.GetString()).Should()
+            .Equal("DerivedFact", "ObservedFact");
+        root.GetProperty("evidenceAsOfUtc").GetDateTimeOffset().Should()
+            .Be(DateTimeOffset.Parse("2026-07-22T08:00:00Z"));
     }
 
     [Fact]
@@ -52,18 +58,76 @@ public sealed class AgentReportComposerTests
         report.Tables.Should().Contain(table => table.Name == SimulationLabel);
         report.Metrics.Should().Contain(metric => metric.Name == "sourceMode" && metric.Value == "Simulation");
         report.Metrics.Should().Contain(metric => metric.Name == "avg.plannedOutput");
+        report.CloudReadonlySource.SourcePath.Should().BeNull("endpoint-like source paths are not export-safe");
+        report.EvidenceSetDigest.Should().Be(EvidenceSetDigest);
+        report.TruthClasses.Should().Equal("DerivedFact", "ObservedFact");
 
         markdown.Should().Contain("sourceMode=Simulation");
         markdown.Should().Contain("isSimulation=true");
         markdown.Should().Contain(SimulationLabel);
         markdown.Should().Contain("plannedOutput");
         markdown.Should().Contain("avg.plannedOutput");
+        markdown.Should().Contain(EvidenceSetDigest);
+        markdown.Should().Contain("DerivedFact, ObservedFact");
 
         html.Should().Contain("sourceMode=Simulation");
         html.Should().Contain("isSimulation=true");
         html.Should().Contain(SimulationLabel);
         html.Should().Contain("plannedOutput");
         html.Should().Contain("avg.plannedOutput");
+        html.Should().Contain(EvidenceSetDigest);
+        html.Should().Contain("DerivedFact, ObservedFact");
+    }
+
+    [Fact]
+    public void ReportSurfaces_ShouldPreserveCloudQueryRosterAndEvidenceBoundInference()
+    {
+        var task = CreateTask();
+        var state = CreateSimulationState();
+        state.CloudReadonlyResults.Add(new AgentCloudReadonlyQuerySnapshot(
+            "Analysis.Capacity.ByDevice",
+            new string('b', 64),
+            state.CloudReadonlySummary!,
+            state.CloudReadonlyRows,
+            SimulationLabel,
+            "Simulation",
+            true,
+            2,
+            false,
+            DateTimeOffset.Parse("2026-07-22T08:00:00Z")));
+        state.ReasoningOutcome = new AgentReasoningToolOutput(
+            "completed",
+            "agent-reasoning",
+            Guid.Parse("22222222-2222-4222-8222-222222222222"),
+            "Completed",
+            "LlmInference",
+            "Capacity remained close to plan in the authorized evidence window.",
+            ["Both lines remained within the reviewed variance band."],
+            ["evidence:0123456789abcdef"],
+            ["source-truncated"],
+            "None",
+            0.82,
+            true,
+            false,
+            1);
+
+        var report = AgentReportComposer.BuildReportDocument(task, state);
+        var markdown = AgentReportComposer.BuildMarkdownReport(task, state);
+        var html = AgentReportComposer.BuildHtmlReport(task, state);
+        using var chart = JsonDocument.Parse(JsonSerializer.Serialize(
+            AgentReportComposer.BuildChartPayload(state),
+            JsonOptions));
+
+        report.CloudReadonlyQueries.Should().ContainSingle(query =>
+            query.Intent == "Analysis.Capacity.ByDevice");
+        report.AiInference.Should().NotBeNull();
+        report.AiInference!.TruthClass.Should().Be("LlmInference");
+        markdown.Should().Contain("AI Evidence Inference");
+        markdown.Should().Contain("evidence:0123456789abcdef");
+        html.Should().Contain("AI Evidence Inference");
+        chart.RootElement.GetProperty("cloudReadonlyQueries").GetArrayLength().Should().Be(1);
+        chart.RootElement.GetProperty("aiInference").GetProperty("truthClass").GetString()
+            .Should().Be("LlmInference");
     }
 
     private static AgentTask CreateTask()
@@ -91,6 +155,9 @@ public sealed class AgentReportComposerTests
             CloudReadonlyIsSimulation = true,
             CloudReadonlyRowCount = 2,
             CloudReadonlyIsTruncated = false,
+            ReportEvidenceSetDigest = EvidenceSetDigest,
+            ReportTruthClasses = ["DerivedFact", "ObservedFact"],
+            ReportEvidenceAsOfUtc = DateTimeOffset.Parse("2026-07-22T08:00:00Z"),
             CloudReadonlyRows =
             [
                 new Dictionary<string, object?>

@@ -120,4 +120,26 @@ describe('chatService bounded requests', () => {
       expect.objectContaining({ message: 'connection lost after partial output' }),
     )
   })
+
+  it('sends an explicit completed AgentTask reference only when requested', async () => {
+    serviceMocks.fetchEventSource.mockImplementation(async (_url, options) => {
+      const streamOptions = options as { body?: string; onclose?: () => void }
+      expect(JSON.parse(streamOptions.body ?? '{}')).toEqual({
+        sessionId: 'session-1',
+        message: '继续解释',
+        referencedAgentTaskId: 'task-1',
+      })
+      streamOptions.onclose?.()
+    })
+    const callbacks = {
+      onChunkReceived: vi.fn(),
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    }
+
+    await chatService.sendMessageStream('session-1', '继续解释', callbacks, 'task-1')
+
+    expect(serviceMocks.fetchEventSource).toHaveBeenCalledTimes(1)
+    expect(callbacks.onComplete).toHaveBeenCalledTimes(1)
+  })
 })

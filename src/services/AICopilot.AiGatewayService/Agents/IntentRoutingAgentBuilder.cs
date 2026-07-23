@@ -1,12 +1,9 @@
-using System.Text;
 using AICopilot.AgentPlugin;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.BusinessSemantics;
 using AICopilot.AiGatewayService.RoutingModels;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
-using AICopilot.Core.AiGateway.Specifications.Skills;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
-using AICopilot.SharedKernel.Repository;
 
 namespace AICopilot.AiGatewayService.Agents;
 
@@ -25,116 +22,39 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
     private readonly ConfiguredAgentRuntimeFactory _agentFactory;
     private readonly IKnowledgeBaseReadService _knowledgeBaseReadService;
     private readonly IBusinessDatabaseReadService _businessDatabaseReadService;
-    private readonly IntentRoutingPromptComposer _promptComposer;
+    private readonly IBusinessSemanticsCatalog _businessSemanticsCatalog;
     private readonly IAgentPluginCatalog _pluginCatalog;
     private readonly IRoutingModelResolver _routingModelResolver;
     private readonly IAgentExecutionMetadataAccessor _executionMetadataAccessor;
-    private readonly IReadRepository<SkillDefinition> _skillRepository;
 
     public IntentRoutingAgentBuilder(
         ConfiguredAgentRuntimeFactory agentFactory,
         IAgentPluginCatalog pluginCatalog,
         IKnowledgeBaseReadService knowledgeBaseReadService,
         IBusinessDatabaseReadService businessDatabaseReadService,
-        IntentRoutingPromptComposer promptComposer,
+        IBusinessSemanticsCatalog businessSemanticsCatalog,
         IRoutingModelResolver routingModelResolver,
-        IAgentExecutionMetadataAccessor executionMetadataAccessor,
-        IReadRepository<SkillDefinition> skillRepository)
+        IAgentExecutionMetadataAccessor executionMetadataAccessor)
     {
         _agentFactory = agentFactory;
         _pluginCatalog = pluginCatalog;
         _knowledgeBaseReadService = knowledgeBaseReadService;
         _businessDatabaseReadService = businessDatabaseReadService;
-        _promptComposer = promptComposer;
+        _businessSemanticsCatalog = businessSemanticsCatalog;
         _routingModelResolver = routingModelResolver;
         _executionMetadataAccessor = executionMetadataAccessor;
-        _skillRepository = skillRepository;
-    }
-
-    private async Task<string> GetSkillIntentListAsync()
-    {
-        var skills = await _skillRepository.ListAsync(new EnabledSkillDefinitionsSpec());
-        if (skills.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var builder = new StringBuilder();
-        builder.AppendLine("Available Skills:");
-        foreach (var skill in skills)
-        {
-            var outputs = skill.OutputComponentTypes.Length == 0
-                ? "text"
-                : string.Join(",", skill.OutputComponentTypes);
-            var dataModes = skill.AllowedDataSourceModes.Length == 0
-                ? "none"
-                : string.Join(",", skill.AllowedDataSourceModes);
-            var knowledgeScopes = skill.AllowedKnowledgeScopes.Length == 0
-                ? "none"
-                : string.Join(",", skill.AllowedKnowledgeScopes);
-            builder.AppendLine(
-                $"- Skill.{skill.SkillCode}: {skill.DisplayName}. {skill.Description} risk={skill.RiskLevel}; approval={skill.ApprovalPolicy}; data={dataModes}; knowledge={knowledgeScopes}; outputs={outputs}.");
-        }
-
-        builder.AppendLine("  Routing rule: choose only one enabled Skill that best fits the user goal. If no Skill fits, choose General.Chat.");
-        builder.AppendLine("  Routing rule: Skill selection narrows allowed tools; it never expands ToolRegistry or Cloud readonly safety policy.");
-        return builder.ToString();
-    }
-
-    private string GetToolIntentList()
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine("- General.Chat: 闲聊、打招呼、知识解释、诊断建议类自由问答，或无法归类的问题。");
-
-        foreach (var plugin in _pluginCatalog.GetAllPlugin().Where(plugin => plugin.ChatExposureMode.CanExposeInChat()))
-        {
-            builder.AppendLine($"- Action.{plugin.Name}: {plugin.Description}");
-        }
-
-        builder.AppendLine("  Routing rule: restart, reboot, shutdown, write parameter, recipe download, PLC write, state change, or any control request must not be routed to Action intents.");
-        builder.AppendLine("  Routing rule: Cloud business mutations such as modifying recipes, disabling devices, backfilling capacity, deleting logs, uploading production data, approving, dispatching, or submitting must not be routed to Action intents.");
-        builder.AppendLine("  Routing rule: if the user requests a control or Cloud write action, fall back to General.Chat and explain that the assistant only supports observation, diagnosis, suggestion, and knowledge answers.");
-
-        return builder.ToString();
-    }
-
-    private async Task<string> GetKnowledgeIntentListAsync()
-    {
-        var builder = new StringBuilder();
-        var knowledgeBases = await _knowledgeBaseReadService.ListAsync();
-
-        foreach (var knowledgeBase in knowledgeBases.OrderBy(knowledgeBase => knowledgeBase.Name))
-        {
-            builder.AppendLine($"- Knowledge.{knowledgeBase.Name}: {knowledgeBase.Description}");
-        }
-
-        return builder.ToString();
-    }
-
-    private string GetBusinessPolicyIntentList()
-    {
-        return _promptComposer.BuildBusinessPolicyIntentSection();
-    }
-
-    private async Task<string> GetDataAnalysisIntentListAsync()
-    {
-        var builder = new StringBuilder();
-        builder.Append(_promptComposer.BuildStructuredIntentSection());
-
-        var businessDatabases = await _businessDatabaseReadService.ListEnabledAsync();
-
-        foreach (var businessDatabase in businessDatabases)
-        {
-            builder.AppendLine($"- Analysis.{businessDatabase.Name}: {businessDatabase.Description}");
-        }
-
-        return builder.ToString();
     }
 
     public async Task<ScopedRuntimeAgent> BuildAsync()
     {
-        var intentInventory = await BuildIntentInventoryAsync();
-        string ComposeInstructions(string systemPrompt) => ComposeRoutingInstructions(systemPrompt, intentInventory);
+        var registry = await ReadRegistrySnapshotAsync();
+        return await BuildAsync(registry);
+    }
+
+    internal async Task<ScopedRuntimeAgent> BuildAsync(AgentIntentRegistrySnapshot registry)
+    {
+        string ComposeInstructions(string systemPrompt) =>
+            ComposeRoutingInstructions(systemPrompt, registry.PromptInventory);
         var activeRoutingModel = await _routingModelResolver.ResolveActiveModelAsync();
         var agent = activeRoutingModel is null
             ? await _agentFactory.CreateAgentAsync(AgentName, ComposeInstructions, ConfigureRoutingOptions)
@@ -153,8 +73,9 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
     public async Task<RuntimeAgentConfigurationSnapshot> ReadCurrentAsync(
         CancellationToken cancellationToken = default)
     {
-        var intentInventory = await BuildIntentInventoryAsync();
-        string ComposeInstructions(string systemPrompt) => ComposeRoutingInstructions(systemPrompt, intentInventory);
+        var registry = await ReadRegistrySnapshotAsync(cancellationToken);
+        string ComposeInstructions(string systemPrompt) =>
+            ComposeRoutingInstructions(systemPrompt, registry.PromptInventory);
         var activeRoutingModel = await _routingModelResolver.ResolveActiveModelAsync();
         return await _agentFactory.ReadConfigurationSnapshotAsync(
             AgentName,
@@ -164,15 +85,77 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
             cancellationToken);
     }
 
-    private async Task<string> BuildIntentInventoryAsync()
+    internal async Task<AgentIntentRegistrySnapshot> ReadRegistrySnapshotAsync(
+        CancellationToken cancellationToken = default)
     {
-        var intents = new StringBuilder();
-        intents.Append(await GetSkillIntentListAsync());
-        intents.Append(GetToolIntentList());
-        intents.Append(await GetKnowledgeIntentListAsync());
-        intents.Append(GetBusinessPolicyIntentList());
-        intents.Append(await GetDataAnalysisIntentListAsync());
-        return intents.ToString();
+        var definitions = new List<AgentIntentRegistryPromptDefinition>
+        {
+            new(
+                "General.Chat",
+                "闲聊、打招呼、知识解释、诊断建议类自由问答，或无法归类的问题。")
+        };
+
+        var exposedPlugins = _pluginCatalog.GetAllPlugin()
+            .Where(plugin => plugin.ChatExposureMode.CanExposeInChat())
+            .ToArray();
+        EnsureDynamicCodesDoNotShadowFrozenRegistry(
+            exposedPlugins.Select(plugin => $"Action.{plugin.Name}"));
+        definitions.AddRange(exposedPlugins
+            .Select(plugin => new AgentIntentRegistryPromptDefinition(
+                $"Action.{plugin.Name}",
+                NormalizeDescription(plugin.Description, "Registered read-only plugin capability."),
+                AllowedToolCodes: (plugin.GetTools() ?? [])
+                    .Select(tool => tool.Name)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(name => name, StringComparer.Ordinal)
+                    .ToArray())));
+
+        var knowledgeBases = await _knowledgeBaseReadService.ListAsync(cancellationToken);
+        EnsureDynamicCodesDoNotShadowFrozenRegistry(
+            knowledgeBases.Select(knowledgeBase => $"Knowledge.{knowledgeBase.Name}"));
+        definitions.AddRange(knowledgeBases.Select(knowledgeBase =>
+            new AgentIntentRegistryPromptDefinition(
+                $"Knowledge.{knowledgeBase.Name}",
+                NormalizeDescription(knowledgeBase.Description, "Registered knowledge-base retrieval capability."))));
+
+        var policyIntents = _businessSemanticsCatalog.GetPolicyIntents();
+        EnsureFrozenCodesMatchClass(policyIntents.Select(descriptor => descriptor.Policy.Intent), AgentIntentClass.Policy);
+        definitions.AddRange(policyIntents.Select(descriptor =>
+            new AgentIntentRegistryPromptDefinition(
+                descriptor.Policy.Intent,
+                NormalizeDescription(descriptor.Policy.Description, "Registered business-policy capability."),
+                descriptor.Policy.ExampleQuestions.FirstOrDefault())));
+
+        var structuredIntents = _businessSemanticsCatalog.GetStructuredIntents();
+        EnsureFrozenStructuredCodes(structuredIntents.Select(descriptor => descriptor.Intent.Intent));
+        definitions.AddRange(structuredIntents.Select(descriptor =>
+            new AgentIntentRegistryPromptDefinition(
+                descriptor.Intent.Intent,
+                NormalizeDescription(descriptor.Intent.Description, "Registered typed read-only Cloud capability."),
+                descriptor.ExampleQuestions.FirstOrDefault(),
+                descriptor.QueryJsonExample)));
+
+        var businessDatabases = await _businessDatabaseReadService.ListEnabledAsync(cancellationToken);
+        var selectableDatabases = businessDatabases
+            .Where(database => database.IsEnabled && database.IsReadOnly && database.IsSelectableInChat)
+            .ToArray();
+        EnsureDynamicCodesDoNotShadowFrozenRegistry(
+            selectableDatabases.Select(database => $"Analysis.{database.Name}"));
+        definitions.AddRange(selectableDatabases
+            .Select(database => new AgentIntentRegistryPromptDefinition(
+                $"Analysis.{database.Name}",
+                NormalizeDescription(database.Description, "Registered governed read-only data source."))));
+
+        var guidance = new List<string>
+        {
+            "restart, reboot, shutdown, write parameter, recipe download, PLC write, state change, or any control request must not be routed to Action intents.",
+            "Cloud business mutations such as modifying recipes, disabling devices, backfilling capacity, deleting logs, uploading production data, approving, dispatching, or submitting must not be routed to Action intents.",
+            "if the user requests a control or Cloud write action, fall back to General.Chat and explain that the assistant only supports observation, diagnosis, suggestion, and knowledge answers."
+        };
+        AppendGuidance(guidance, _businessSemanticsCatalog.PolicyRoutingGuidance);
+        AppendGuidance(guidance, _businessSemanticsCatalog.StructuredRoutingGuidance);
+        return AgentIntentRegistryV1.CreateRoutingSnapshot(definitions, guidance);
     }
 
     private static string ComposeRoutingInstructions(string systemPrompt, string intentInventory)
@@ -185,5 +168,52 @@ public class IntentRoutingAgentBuilder : IAgentRoutingConfigurationSnapshotReade
         options.MaxOutputTokens = RoutingMaxOutputTokens;
         options.Temperature = RoutingTemperature;
         options.Tools = [];
+    }
+
+    private static string NormalizeDescription(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+    private static void AppendGuidance(List<string> target, RoutingGuidance guidance)
+    {
+        target.AddRange(guidance.Rules);
+        target.AddRange(guidance.PriorityRules.Select(rule => $"Priority: {rule}"));
+        target.AddRange(guidance.Notes);
+    }
+
+    private static void EnsureDynamicCodesDoNotShadowFrozenRegistry(IEnumerable<string> intentCodes)
+    {
+        var collision = intentCodes.FirstOrDefault(code =>
+            AgentIntentRegistryV1.TryGetDescriptor(code, out _));
+        if (collision is not null)
+        {
+            throw new InvalidOperationException(
+                $"Dynamic intent '{collision}' shadows a frozen IntentRegistry definition.");
+        }
+    }
+
+    private static void EnsureFrozenCodesMatchClass(
+        IEnumerable<string> intentCodes,
+        AgentIntentClass expectedClass)
+    {
+        var invalid = intentCodes.FirstOrDefault(code =>
+            !AgentIntentRegistryV1.TryGetDescriptor(code, out var descriptor) ||
+            descriptor.IntentClass != expectedClass);
+        if (invalid is not null)
+        {
+            throw new InvalidOperationException(
+                $"Intent '{invalid}' is missing its versioned IntentRegistry mapping.");
+        }
+    }
+
+    private static void EnsureFrozenStructuredCodes(IEnumerable<string> intentCodes)
+    {
+        var invalid = intentCodes.FirstOrDefault(code =>
+            !AgentIntentRegistryV1.TryGetDescriptor(code, out var descriptor) ||
+            descriptor.IntentClass is not (AgentIntentClass.CloudOnly or AgentIntentClass.KnownButUnavailable));
+        if (invalid is not null)
+        {
+            throw new InvalidOperationException(
+                $"Structured intent '{invalid}' is missing its versioned read-only IntentRegistry mapping.");
+        }
     }
 }

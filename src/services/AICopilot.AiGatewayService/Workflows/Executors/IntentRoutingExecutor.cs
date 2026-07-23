@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Queries.Sessions;
@@ -19,7 +20,10 @@ public sealed record IntentRoutingStepResult(
     List<IntentResult> Intents,
     ManufacturingSceneType Scene,
     string? ResponseText,
-    ChatExecutionMetadataSnapshot ExecutionMetadata);
+    ChatExecutionMetadataSnapshot ExecutionMetadata)
+{
+    internal required AgentIntentRegistrySnapshot RegistrySnapshot { get; init; }
+}
 
 internal sealed record IntentRoutingResponseLogMetadata(
     int ResponseLength,
@@ -53,16 +57,21 @@ public class IntentRoutingExecutor(
         var history = result.Value!;
         history.Add(new AiChatMessage(AiChatRole.User, request.Message));
 
-        var responseText = await RunRoutingAsPlainJsonTextAsync(history, cancellationToken);
+        var registry = await agentBuilder.ReadRegistrySnapshotAsync(cancellationToken);
+        var responseText = await RunRoutingAsPlainJsonTextAsync(history, registry, cancellationToken);
         logger.LogInformation("Manufacturing scene classified as {Scene} for session {SessionId}.", sceneDecision.Scene, request.SessionId);
 
-        var parsed = IntentRoutingResultParser.TryParse(responseText, out var intentResults);
+        var parsed = IntentRoutingResultParser.TryParse(responseText, out var intentResults) &&
+                     AgentIntentRegistryV1.ValidateRoutedResults(registry, intentResults);
         LogResponseMetadata(logger, responseText, parsed);
 
         if (!parsed)
         {
             logger.LogWarning("Intent routing returned unparsable JSON. Falling back to General.Chat.");
-            intentResults = CreateFallbackIntents(request.Message, "routing JSON parse failed");
+            intentResults = CreateFallbackIntents(
+                request.Message,
+                "routing JSON parse or Registry validation failed",
+                registry);
         }
 
         DeviceLogFollowUpIntentRewriter.Rewrite(intentResults, history);
@@ -72,11 +81,15 @@ public class IntentRoutingExecutor(
             intentResults,
             sceneDecision.Scene,
             normalizedResponseText,
-            executionMetadataAccessor.Snapshot());
+            executionMetadataAccessor.Snapshot())
+        {
+            RegistrySnapshot = registry
+        };
     }
 
     private async Task<string?> RunRoutingAsPlainJsonTextAsync(
         List<AiChatMessage> history,
+        AgentIntentRegistrySnapshot registry,
         CancellationToken cancellationToken)
     {
         var timeout = (modelCallTimeoutOptions?.Value ?? new AgentModelCallTimeoutOptions()).RoutingTimeout;
@@ -85,7 +98,7 @@ public class IntentRoutingExecutor(
 
         try
         {
-            await using var scopedAgent = await agentBuilder.BuildAsync();
+            await using var scopedAgent = await agentBuilder.BuildAsync(registry);
             var timeoutToken = timeoutCts.Token;
             var session = await scopedAgent.Agent.CreateSessionAsync(timeoutToken);
             var builder = new StringBuilder();
@@ -128,19 +141,40 @@ public class IntentRoutingExecutor(
                 "Intent routing model call failed. Falling back to General.Chat. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 ex.GetType().Name);
             return JsonSerializer.Serialize(
-                CreateFallbackIntents(history.LastOrDefault()?.Text, "routing model call failed"),
+                CreateFallbackIntents(
+                    history.LastOrDefault()?.Text,
+                    "routing model call failed",
+                    registry),
                 JsonSerializerOptions.Web);
         }
     }
 
-    private static List<IntentResult> CreateFallbackIntents(string? message, string reasoning)
+    private static List<IntentResult> CreateFallbackIntents(
+        string? message,
+        string routingNote,
+        AgentIntentRegistrySnapshot registry)
     {
-        if (IntentRoutingFallbackClassifier.TryClassify(message, reasoning, out var semanticFallback))
+        if (IntentRoutingFallbackClassifier.TryClassify(
+                message,
+                routingNote,
+                registry,
+                out var semanticFallback))
         {
             return semanticFallback;
         }
 
-        return [new IntentResult { Intent = "General.Chat", Confidence = 1.0, Reasoning = reasoning }];
+        if (!registry.TryGet("General.Chat", out _))
+        {
+            throw new InvalidOperationException(
+                "The active IntentRegistry is missing the fail-closed General.Chat fallback.");
+        }
+
+        return [new IntentResult
+        {
+            Intent = "General.Chat",
+            Confidence = 1.0,
+            RoutingNote = routingNote
+        }];
     }
 
     internal static IntentRoutingResponseLogMetadata CreateResponseLogMetadata(string? responseText, bool parsed)

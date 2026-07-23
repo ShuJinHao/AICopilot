@@ -7,7 +7,6 @@ using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
@@ -63,8 +62,6 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
 
     public DbSet<ToolRegistration> ToolRegistrations => Set<ToolRegistration>();
 
-    public DbSet<SkillDefinition> SkillDefinitions => Set<SkillDefinition>();
-
     public DbSet<ToolExecutionRecord> ToolExecutionRecords => Set<ToolExecutionRecord>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -95,7 +92,6 @@ public sealed class AiGatewayDbContext(DbContextOptions<AiGatewayDbContext> opti
         builder.ApplyConfiguration(new ChatRuntimeSettingsConfiguration());
         builder.ApplyConfiguration(new UploadRecordConfiguration());
         builder.ApplyConfiguration(new ToolRegistrationConfiguration());
-        builder.ApplyConfiguration(new SkillDefinitionConfiguration());
         builder.ApplyConfiguration(new ToolExecutionRecordConfiguration());
     }
 }

@@ -59,11 +59,11 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
 
     public BusinessSemanticsCatalog(
         IBusinessPolicyCatalog businessPolicyCatalog,
-        ISemanticIntentCatalog semanticIntentCatalog,
+        ISemanticQuerySchemaRegistry semanticQuerySchemaRegistry,
         ISemanticSummaryProfileCatalog summaryProfileCatalog)
     {
         ArgumentNullException.ThrowIfNull(businessPolicyCatalog);
-        ArgumentNullException.ThrowIfNull(semanticIntentCatalog);
+        ArgumentNullException.ThrowIfNull(semanticQuerySchemaRegistry);
         ArgumentNullException.ThrowIfNull(summaryProfileCatalog);
 
         _policyDescriptors = businessPolicyCatalog
@@ -71,7 +71,7 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
             .Select(policy => new BusinessPolicySemanticDescriptor(policy, DefaultPolicyResponseTemplate))
             .ToDictionary(item => item.Policy.Intent, StringComparer.OrdinalIgnoreCase);
 
-        _structuredDescriptors = semanticIntentCatalog
+        _structuredDescriptors = semanticQuerySchemaRegistry
             .GetAll()
             .Select(CreateStructuredDescriptor)
             .ToDictionary(item => item.Intent.Intent, StringComparer.OrdinalIgnoreCase);

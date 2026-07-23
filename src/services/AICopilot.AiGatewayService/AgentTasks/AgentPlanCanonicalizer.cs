@@ -33,17 +33,6 @@ internal sealed record CanonicalAgentPlan(
 
 internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 {
-    private static readonly string[] DevelopmentSimulationToolSequence =
-    [
-        "query_business_database_readonly",
-        "summarize_business_query_result",
-        "generate_markdown_report",
-        "finalize_artifacts"
-    ];
-
-    private static readonly string[] DevelopmentSimulationCapabilitySequence =
-        ["Analysis.GovernedQuery", "General.Chat"];
-
     private static readonly IReadOnlySet<string> FrozenCoreToolCodes = new HashSet<string>(
         [
             "read_uploaded_file",
@@ -51,22 +40,11 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             "query_cloud_data_readonly",
             "query_business_database_readonly",
             "summarize_business_query_result",
+            "join_evidence",
+            "assess_cloud_health",
+            "agent_reasoning",
             "rag_search",
             "generate_business_chart",
-            "generate_chart_data",
-            "generate_markdown_report",
-            "generate_html_report",
-            "generate_pdf",
-            "generate_pptx",
-            "generate_xlsx",
-            "finalize_artifacts"
-        ],
-        StringComparer.Ordinal);
-
-    private static readonly IReadOnlySet<string> CommonReadAndArtifactToolCodes = new HashSet<string>(
-        [
-            "read_uploaded_file",
-            "parse_table_file",
             "generate_chart_data",
             "generate_markdown_report",
             "generate_html_report",
@@ -285,9 +263,9 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("Active Plan v2 requires a lowercase SHA-256 planDigest.");
         }
 
-        if (!string.Equals(plan.TopologyProfile, "LinearV1", StringComparison.Ordinal))
+        if (plan.TopologyProfile is not ("LinearV1" or "DagV1"))
         {
-            return InvalidResult("P0-P3 only support topologyProfile=LinearV1; DagV1 and implicit DAG plans are rejected.");
+            return InvalidResult("Plan v2 requires an explicit topologyProfile of LinearV1 or DagV1.");
         }
 
         var validDraftLifecycle =
@@ -311,11 +289,11 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 
         if (plan.UploadIds is null ||
             plan.KnowledgeBaseIds is null ||
+            plan.CloudReadonlyIntents is null ||
             plan.Steps is null ||
             plan.RuntimeSettings is null ||
             plan.DataSourceIds is null ||
             plan.BusinessDomains is null ||
-            plan.ArtifactTypes is null ||
             plan.ForcedStepCodes is null ||
             plan.ApprovalCheckpoints is null ||
             plan.DataSourceSummaries is null ||
@@ -329,6 +307,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             plan.Nodes is null ||
             plan.JoinPolicies is null ||
             plan.Budgets is null ||
+            plan.ConcurrencyPolicy is null ||
             plan.ApprovalSummary is null ||
             plan.ExecutionSnapshot is null ||
             plan.SecuritySummary is null ||
@@ -350,20 +329,14 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("Plan v2 contains an unknown task, risk, or selection-mode enum value.");
         }
 
-        if (plan.SkillCode is not null ||
-            plan.SkillName is not null ||
-            plan.SkillRoutingReason is not null ||
-            plan.PlannerSafetySummary is null ||
-            !string.Equals(plan.PlannerSafetySummary.PlanSource, "PlanV2Contract", StringComparison.Ordinal) ||
-            plan.PlannerSafetySummary.PlanSource.StartsWith("Skill.", StringComparison.OrdinalIgnoreCase))
+        if (plan.PlannerSafetySummary is null ||
+            !string.Equals(plan.PlannerSafetySummary.PlanSource, "PlanV2Contract", StringComparison.Ordinal))
         {
-            return InvalidResult("Plan v2 must not serialize or consume retired Skill fields or planSource=Skill.*.");
+            return InvalidResult("Plan v2 requires the single PlanV2Contract source authority.");
         }
 
         if (!IsCanonicalGoalSummary(plan.TaskType, plan.Goal) ||
             string.IsNullOrWhiteSpace(plan.PlannerTemplateCode) ||
-            string.IsNullOrWhiteSpace(plan.PlannerMode) ||
-            plan.PlannerFallbackReason is not null ||
             plan.RuntimeSettings.AgentPlanningHistoryCount < 0 ||
             plan.RuntimeSettings.ContextTokenLimit < 0)
         {
@@ -376,7 +349,6 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             ValidateCanonicalGuidSet(plan.KnowledgeBaseIds, "knowledgeBaseIds"),
             ValidateCanonicalGuidSet(plan.DataSourceIds, "dataSourceIds"),
             ValidateCanonicalStringSet(plan.BusinessDomains, "businessDomains"),
-            ValidateCanonicalStringSet(plan.ArtifactTypes, "artifactTypes"),
             ValidateCanonicalStringSet(plan.ForcedStepCodes, "forcedStepCodes"),
             ValidateCanonicalStringSet(plan.ApprovalCheckpoints, "approvalCheckpoints"),
             ValidateCanonicalStringSet(plan.ToolApprovalCheckpoints, "toolApprovalCheckpoints"),
@@ -412,22 +384,6 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 "plannerSafetySummary.isSimulationOnly must exactly match one marked SimulationBusiness source.");
         }
 
-        var isDevelopmentSimulationGraph =
-            plan.PlannerSafetySummary.IsSimulationOnly &&
-            hasExactSimulationSourceBoundary &&
-            taskType == AgentTaskType.ReportGeneration &&
-            string.Equals(plan.QueryMode, "TextToSql", StringComparison.Ordinal) &&
-            plan.UploadIds.Count == 0 &&
-            plan.KnowledgeBaseIds.Count == 0 &&
-            plan.ArtifactTargets.SequenceEqual(["markdown"], StringComparer.Ordinal) &&
-            plan.Steps.Select(step => step?.ToolCode ?? string.Empty).SequenceEqual(
-                DevelopmentSimulationToolSequence,
-                StringComparer.Ordinal) &&
-            plan.IntentCandidates.Select(candidate => candidate?.IntentCode ?? string.Empty).SequenceEqual(
-                DevelopmentSimulationCapabilitySequence,
-                StringComparer.Ordinal) &&
-            plan.Nodes.Count == DevelopmentSimulationToolSequence.Length &&
-            plan.CapabilityGaps.Count == 0;
         var hasUnresolvedCapabilityGaps = plan.CapabilityGaps.Count != 0;
         if (validDraftLifecycle && hasUnresolvedCapabilityGaps && plan.Nodes.Count != 0)
         {
@@ -438,21 +394,13 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         if (validDraftLifecycle && !hasUnresolvedCapabilityGaps && plan.Nodes.Count == 0)
         {
             return InvalidResult(
-                "A gap-free PlanDraft must contain the authoritative LinearV1 compiler graph.");
-        }
-
-        if (plan.PlannerSafetySummary.IsSimulationOnly &&
-            !hasUnresolvedCapabilityGaps &&
-            !isDevelopmentSimulationGraph)
-        {
-            return InvalidResult(
-                "A gap-free Development Simulation plan must match the fixed governed four-step graph.");
+                "A gap-free PlanDraft must contain the authoritative compiler graph.");
         }
 
         if (validExecutableLifecycle && (hasUnresolvedCapabilityGaps || plan.Nodes.Count == 0))
         {
             return InvalidResult(
-                "ExecutablePlan v2 requires a gap-free authoritative LinearV1 compiler graph.");
+                "ExecutablePlan v2 requires a gap-free authoritative compiler graph.");
         }
 
         if (plan.QueryMode is not ("CloudReadonly" or "TextToSql") ||
@@ -460,11 +408,6 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             string.Equals(plan.QueryMode, "CloudReadonly", StringComparison.Ordinal))
         {
             return InvalidResult("queryMode must be the exact task-bound CloudReadonly/TextToSql value.");
-        }
-
-        if (!plan.ArtifactTypes.SequenceEqual(plan.ArtifactTargets, StringComparer.Ordinal))
-        {
-            return InvalidResult("artifactTypes and artifactTargets must be the same canonical set.");
         }
 
         var expectedArtifactTools = plan.ArtifactTargets
@@ -578,9 +521,29 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("An explicit empty capability allowlist cannot contain executable nodes.");
         }
 
-        if (plan.JoinPolicies.Count != 0)
+        var expectedJoinPolicies = AgentPlanCanonicalCollections.Strings(
+            plan.Nodes.Select(node => node.JoinPolicy).Where(policy => policy is not null).Select(policy => policy!));
+        if (!plan.JoinPolicies.SequenceEqual(expectedJoinPolicies, StringComparer.Ordinal))
         {
-            return InvalidResult("LinearV1 requires joinPolicies=[].");
+            return InvalidResult("joinPolicies must exactly match the canonical policies used by Plan nodes.");
+        }
+
+        if (plan.TopologyProfile == "LinearV1" &&
+            (plan.JoinPolicies.Count != 0 ||
+             plan.ConcurrencyPolicy.MaxParallelism != 1 ||
+             !string.Equals(
+                 plan.ConcurrencyPolicy.PolicyVersion,
+                 AgentPlanContractVersions.LinearConcurrencyPolicyV1,
+                 StringComparison.Ordinal)) ||
+            plan.TopologyProfile == "DagV1" &&
+            (plan.ConcurrencyPolicy.MaxParallelism is < AgentPlanContractVersions.DagMinParallelism
+                or > AgentPlanContractVersions.DagMaxParallelism ||
+             !string.Equals(
+                 plan.ConcurrencyPolicy.PolicyVersion,
+                 AgentPlanContractVersions.DagConcurrencyPolicyV1,
+                 StringComparison.Ordinal)))
+        {
+            return InvalidResult("Topology profile and bounded concurrency policy do not match.");
         }
 
         if (plan.Budgets.MaxNodes != AgentPlanContractVersions.DefaultMaxNodes ||
@@ -611,7 +574,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             plan.Nodes.Count > 0 && plan.Nodes.Count != plan.Steps.Count)
         {
             return InvalidResult(
-                "Plan v2 Steps/Nodes must stay within maxNodes and use a one-to-one LinearV1 execution projection.");
+                "Plan v2 Steps/Nodes must stay within maxNodes and use a one-to-one execution projection.");
         }
 
         if (plan.ExecutionSnapshot.ToolCatalogVersion <= 0 ||
@@ -626,7 +589,11 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 plan.ExecutionSnapshot,
                 plan.DataSourceIds,
                 plan.KnowledgeBaseIds,
-                plan.IntentCandidates))
+                plan.IntentCandidates) ||
+            !string.Equals(
+                plan.ExecutionSnapshot.ConcurrencyPolicyVersion,
+                plan.ConcurrencyPolicy.PolicyVersion,
+                StringComparison.Ordinal))
         {
             return InvalidResult("ExecutionSnapshot is incomplete, stale, or outside the frozen P0 snapshot contract.");
         }
@@ -708,17 +675,46 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult("ExecutablePlan requires every requested IntentCandidate to be available and gap-free.");
         }
 
-        if (plan.CloudReadonlyIntent is not null)
+        var orderedCloudIntentCodes = plan.CloudReadonlyIntents
+            .Select(intent => intent.Intent)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        if (!plan.CloudReadonlyIntents
+                .Select(intent => intent.Intent)
+                .SequenceEqual(orderedCloudIntentCodes, StringComparer.Ordinal) ||
+            orderedCloudIntentCodes.Length != orderedCloudIntentCodes.Distinct(StringComparer.Ordinal).Count())
         {
-            var cloudIntent = ValidateCloudReadonlyIntent(plan.CloudReadonlyIntent, candidateCodes);
+            return InvalidResult("Cloud readonly typed semantic plans must be unique and ordered by canonical intent code.");
+        }
+
+        foreach (var intent in plan.CloudReadonlyIntents)
+        {
+            var cloudIntent = ValidateCloudReadonlyIntent(intent, candidateCodes);
             if (!cloudIntent.IsSuccess)
             {
                 return cloudIntent;
             }
         }
-        else if (validExecutableLifecycle && taskType == AgentTaskType.CloudDataReport)
+
+        var expectedCloudIntentCodes = plan.IntentCandidates
+            .Where(candidate =>
+                candidate.IntentClass == AgentIntentClass.CloudOnly &&
+                candidate.Availability == AgentIntentAvailability.Available &&
+                candidate.CapabilityGap is null)
+            .Select(candidate => candidate.IntentCode)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        if (validExecutableLifecycle &&
+            !orderedCloudIntentCodes.SequenceEqual(expectedCloudIntentCodes, StringComparer.Ordinal))
         {
-            return InvalidResult("Executable CloudDataReport requires a frozen typed Cloud readonly semantic plan.");
+            return InvalidResult("Executable Plan Cloud intents must exactly match its available Cloud-only IntentCandidates.");
+        }
+
+        if (validExecutableLifecycle &&
+            taskType == AgentTaskType.CloudDataReport &&
+            plan.CloudReadonlyIntents.Count == 0)
+        {
+            return InvalidResult("Executable CloudDataReport requires at least one frozen typed Cloud readonly semantic plan.");
         }
 
         var nodesResult = ValidateNodes(
@@ -726,7 +722,12 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             plan.Steps,
             plan.RequestedCapabilityCodes,
             plan.IntentCandidates,
-            plan.Budgets);
+            plan.Budgets,
+            plan.TopologyProfile,
+            plan.ConcurrencyPolicy,
+            plan.ExecutionSnapshot.ModelId,
+            plan.ExecutionSnapshot.ModelParametersHash,
+            plan.CloudReadonlyIntents);
         if (!nodesResult.IsSuccess)
         {
             return nodesResult;
@@ -747,13 +748,17 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 .Where(node => node.RequestedCapabilityCodes.Contains(candidate.IntentCode, StringComparer.Ordinal))
                 .ToArray();
             if (candidate.IntentClass == AgentIntentClass.CloudOnly &&
-                matchingNodes.Any(node => !string.Equals(node.NodeKind, "CloudReadNode", StringComparison.Ordinal)))
+                matchingNodes
+                    .Where(IsDataProducerNode)
+                    .Any(node => !string.Equals(node.NodeKind, "CloudReadNode", StringComparison.Ordinal)))
             {
                 return InvalidResult($"Cloud-only intent '{candidate.IntentCode}' can only map to CloudReadNode.");
             }
 
             if (candidate.IntentClass == AgentIntentClass.GovernedExploration &&
-                matchingNodes.Any(node => !string.Equals(node.NodeKind, "GovernedDataReadNode", StringComparison.Ordinal)))
+                matchingNodes
+                    .Where(IsDataProducerNode)
+                    .Any(node => !string.Equals(node.NodeKind, "GovernedDataReadNode", StringComparison.Ordinal)))
             {
                 return InvalidResult($"Governed exploration intent '{candidate.IntentCode}' can only map to GovernedDataReadNode.");
             }
@@ -862,7 +867,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         }
 
         if (candidate.Filters.TimeRange is { } timeRange &&
-            (!IntentResultToCandidateAdapter.IsCanonicalTimeZone(timeRange.TimeZone) ||
+            (!AgentIntentRegistryProjector.IsCanonicalTimeZone(timeRange.TimeZone) ||
              timeRange.FromUtc is null && timeRange.ToUtc is null ||
              timeRange.FromUtc > timeRange.ToUtc ||
              timeRange.FromUtc?.Offset != TimeSpan.Zero ||
@@ -877,8 +882,8 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 string.IsNullOrWhiteSpace(predicate.Operator) ||
                 string.IsNullOrWhiteSpace(predicate.Value) ||
                 predicate.Operator is not ("eq" or "contains" or "gte" or "lte" or "in") ||
-                !IntentResultToCandidateAdapter.IsAllowedPredicateField(candidate.IntentCode, predicate.FieldCode) ||
-                !IntentResultToCandidateAdapter.IsCanonicalPredicate(
+                !AgentIntentRegistryProjector.IsAllowedPredicateField(candidate.IntentCode, predicate.FieldCode) ||
+                !AgentIntentRegistryProjector.IsCanonicalPredicate(
                     candidate.IntentCode,
                     predicate.FieldCode,
                     predicate.Operator,
@@ -896,9 +901,9 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult($"IntentCandidate '{candidate.IntentCode}' predicates are not in canonical order.");
         }
 
-        if (!MatchesFrozenIntentCatalog(candidate))
+        if (!MatchesVersionedIntentRegistry(candidate))
         {
-            return InvalidResult($"IntentCandidate '{candidate.IntentCode}' is not a valid member of its frozen catalog/provider family.");
+            return InvalidResult($"IntentCandidate '{candidate.IntentCode}' is not a valid member of its versioned Registry/provider family.");
         }
 
         if (candidate.Availability != AgentIntentAvailability.Available)
@@ -907,7 +912,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 string.IsNullOrWhiteSpace(candidate.CapabilityGap.Code) ||
                 string.IsNullOrWhiteSpace(candidate.CapabilityGap.Detail) ||
                 string.IsNullOrWhiteSpace(candidate.CapabilityGap.SuggestedAction) ||
-                !IntentResultToCandidateAdapter.MatchesCanonicalCapabilityGap(candidate))
+                !AgentIntentRegistryProjector.MatchesCanonicalCapabilityGap(candidate))
             {
                 return InvalidResult($"Unavailable/unknown IntentCandidate '{candidate.IntentCode}' requires its exact server-owned capability gap.");
             }
@@ -917,10 +922,10 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return InvalidResult($"Available IntentCandidate '{candidate.IntentCode}' cannot carry a capability gap.");
         }
 
-        if (!string.Equals(candidate.Provenance.RouterVersion, AgentIntentCatalogV1.RouterVersion, StringComparison.Ordinal) ||
-            !string.Equals(candidate.Provenance.PromptVersion, AgentIntentCatalogV1.PromptVersion, StringComparison.Ordinal) ||
-            !string.Equals(candidate.Provenance.CatalogVersion, AgentIntentCatalogV1.CatalogVersion, StringComparison.Ordinal) ||
-            !string.Equals(candidate.Provenance.CatalogDigest, AgentIntentCatalogV1.CatalogDigest, StringComparison.Ordinal))
+        if (!string.Equals(candidate.Provenance.RouterVersion, AgentIntentRegistryV1.RouterVersion, StringComparison.Ordinal) ||
+            !string.Equals(candidate.Provenance.PromptVersion, AgentIntentRegistryV1.PromptVersion, StringComparison.Ordinal) ||
+            !string.Equals(candidate.Provenance.CatalogVersion, AgentIntentRegistryV1.RegistryVersion, StringComparison.Ordinal) ||
+            !IsSha256(candidate.Provenance.CatalogDigest))
         {
             return InvalidResult($"IntentCandidate '{candidate.IntentCode}' has stale or unknown catalog provenance.");
         }
@@ -966,31 +971,14 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return false;
         }
 
-        if (CommonReadAndArtifactToolCodes.Contains(toolCode))
-        {
-            return candidate.IntentClass is AgentIntentClass.General or
-                AgentIntentClass.Knowledge or
-                AgentIntentClass.Policy or
-                AgentIntentClass.CloudOnly or
-                AgentIntentClass.GovernedExploration;
-        }
-
-        return candidate.IntentClass switch
-        {
-            AgentIntentClass.CloudOnly =>
-                string.Equals(toolCode, "query_cloud_data_readonly", StringComparison.Ordinal),
-            AgentIntentClass.GovernedExploration => toolCode is
-                "query_business_database_readonly" or
-                "summarize_business_query_result" or
-                "generate_business_chart",
-            AgentIntentClass.Knowledge => string.Equals(toolCode, "rag_search", StringComparison.Ordinal),
-            _ => false
-        };
+        return AgentIntentRegistryV1.TryGetDescriptor(candidate.IntentCode, out var descriptor) &&
+               descriptor.IntentClass == candidate.IntentClass &&
+               descriptor.AllowedToolCodes.Contains(toolCode, StringComparer.Ordinal);
     }
 
-    private static bool MatchesFrozenIntentCatalog(AgentIntentCandidateDocument candidate)
+    private static bool MatchesVersionedIntentRegistry(AgentIntentCandidateDocument candidate)
     {
-        if (AgentIntentCatalogV1.TryGetFrozenDescriptor(candidate.IntentCode, out var frozen))
+        if (AgentIntentRegistryV1.TryGetDescriptor(candidate.IntentCode, out var frozen))
         {
             var resourceResolutionDowngrade =
                 candidate.Availability == AgentIntentAvailability.Unknown &&
@@ -998,14 +986,6 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             return candidate.IntentClass == frozen.IntentClass &&
                    string.Equals(candidate.ProviderCode, frozen.ProviderCode, StringComparison.Ordinal) &&
                    (candidate.Availability == frozen.Availability || resourceResolutionDowngrade);
-        }
-
-        if (candidate.IntentCode.StartsWith("Skill.", StringComparison.Ordinal))
-        {
-            return candidate.IntentClass == AgentIntentClass.TransitionSkill &&
-                   candidate.Availability == AgentIntentAvailability.KnownButUnavailable &&
-                   string.Equals(candidate.ProviderCode, "TransitionSkillRoster", StringComparison.Ordinal) &&
-                   string.Equals(candidate.CapabilityGap?.Code, AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable, StringComparison.Ordinal);
         }
 
         if (candidate.IntentCode.StartsWith("Action.", StringComparison.Ordinal))
@@ -1033,7 +1013,7 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             !Enum.IsDefined(intent.Kind) ||
             intent.Target == SemanticQueryTarget.Recipe ||
             !string.Equals(intent.Intent, $"Analysis.{intent.Target}.{intent.Kind}", StringComparison.Ordinal) ||
-            !AgentIntentCatalogV1.TryGetFrozenDescriptor(intent.Intent, out var descriptor) ||
+            !AgentIntentRegistryV1.TryGetDescriptor(intent.Intent, out var descriptor) ||
             descriptor.IntentClass != AgentIntentClass.CloudOnly ||
             descriptor.Availability != AgentIntentAvailability.Available ||
             intent.ProjectionFields is null ||
@@ -1107,7 +1087,12 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
         IReadOnlyCollection<AgentTaskPlanStepDocument> steps,
         IReadOnlyCollection<string> topLevelCapabilities,
         IReadOnlyCollection<AgentIntentCandidateDocument> candidates,
-        AgentPlanBudgetDocument planBudgets)
+        AgentPlanBudgetDocument planBudgets,
+        string topologyProfile,
+        AgentPlanConcurrencyPolicyDocument concurrencyPolicy,
+        Guid? snapshotModelId,
+        string? snapshotModelParametersHash,
+        IReadOnlyCollection<AgentTaskPlanCloudReadonlyIntentDocument> cloudReadonlyIntents)
     {
         var orderedNodes = nodes.ToArray();
         var orderedSteps = steps.ToArray();
@@ -1126,6 +1111,9 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             .ToDictionary(candidate => candidate.IntentCode, StringComparer.Ordinal);
         var allowedDataScopes = candidates.SelectMany(candidate => candidate.RequestedResources.DataSourceIds).ToHashSet();
         var allowedKnowledgeScopes = candidates.SelectMany(candidate => candidate.RequestedResources.KnowledgeBaseIds).ToHashSet();
+        var cloudIntentsByCode = cloudReadonlyIntents.ToDictionary(
+            intent => intent.Intent,
+            StringComparer.Ordinal);
         var nodeIds = new HashSet<string>(StringComparer.Ordinal);
         long totalToolCalls = 0;
         long totalModelCalls = 0;
@@ -1155,25 +1143,34 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 string.IsNullOrWhiteSpace(node.NodeId) ||
                 !nodeIds.Add(node.NodeId) ||
                 !AgentPlanContractSchemaAuthority.AllowedNodeKinds.Contains(node.NodeKind) ||
-                node.JoinPolicy is not null ||
                 !string.Equals(node.InputSchemaRef, "node-input:v1", StringComparison.Ordinal) ||
                 string.IsNullOrWhiteSpace(node.OutputSchemaRef) ||
                 !node.OutputSchemaRef.StartsWith("evidence:", StringComparison.Ordinal) ||
                 !node.OutputSchemaRef.EndsWith(":v1", StringComparison.Ordinal))
             {
-                return InvalidResult($"Node at index {index} violates the frozen Node v1/LinearV1 contract.");
+                return InvalidResult($"Node at index {index} violates the active Node v1 contract.");
             }
+
+            var cloudReadonlyIntent = node.Input.SemanticIntent is { } semanticIntent &&
+                                      cloudIntentsByCode.TryGetValue(semanticIntent, out var matchedCloudIntent)
+                ? matchedCloudIntent
+                : null;
 
             if (node.Input.RequestedScope is null ||
                 node.Input.BusinessDomains is null ||
                 !IsCanonicalOrder(node.Input.RequestedScope) ||
                 !IsCanonicalOrder(node.Input.BusinessDomains) ||
+                node.Input.TimeRange is { } inputRange &&
+                    (string.IsNullOrWhiteSpace(inputRange.TimeZone) ||
+                     inputRange.FromUtc is null && inputRange.ToUtc is null ||
+                     inputRange.FromUtc > inputRange.ToUtc) ||
                 node.TimeoutPolicy.TimeoutSeconds is < 1 or > 3_600 ||
                 !string.Equals(node.TimeoutPolicy.PolicyVersion, "timeout-policy:v1", StringComparison.Ordinal) ||
                 node.RetryPolicy.MaxAttempts is < 1 or > 5 ||
                 !string.Equals(node.RetryPolicy.PolicyVersion, "retry-policy:v1", StringComparison.Ordinal) ||
                 node.RetryPolicy.BackoffClass is not ("None" or "Fixed" or "Exponential") ||
-                node.Budget.MaxToolCalls is < 0 or > 1 ||
+                node.Budget.MaxToolCalls is < 0 or > 5 ||
+                node.Budget.MaxToolCalls < node.RetryPolicy.MaxAttempts ||
                 node.Budget.MaxModelCalls < 0 ||
                 node.Budget.MaxInputTokens < 0 ||
                 node.Budget.MaxOutputTokens < 0 ||
@@ -1185,16 +1182,22 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 string.IsNullOrWhiteSpace(node.ApprovalPolicy.PolicyCode) ||
                 !string.Equals(node.IdempotencyPolicy.PolicyVersion, "idempotency-policy:v1", StringComparison.Ordinal) ||
                 node.IdempotencyPolicy.Mode is not ("Deterministic" or "ReadOnly" or "Fenced") ||
-                node.SideEffectClass is not ("ReadOnly" or "ArtifactDraftOnly"))
+                node.SideEffectClass is not ("ReadOnly" or "DeterministicInternal" or "ArtifactDraftOnly"))
             {
                 return InvalidResult($"Node '{node.NodeId}' has an invalid input/policy/range/side-effect contract.");
             }
 
-            if (node.SideEffectClass == "ReadOnly" &&
+            var maxNodeArtifactCount = node.NodeKind == "ApprovalCheckpointNode"
+                ? planBudgets.MaxArtifactCount
+                : AgentPlanContractVersions.DefaultNodeMaxArtifactCount;
+            var maxNodeArtifactBytes = node.NodeKind == "ApprovalCheckpointNode"
+                ? planBudgets.MaxArtifactBytes
+                : AgentPlanContractVersions.DefaultNodeMaxArtifactBytes;
+            if ((node.SideEffectClass is "ReadOnly" or "DeterministicInternal") &&
                 (node.Budget.MaxArtifactCount != 0 || node.Budget.MaxArtifactBytes != 0) ||
                 node.SideEffectClass == "ArtifactDraftOnly" &&
-                (node.Budget.MaxArtifactCount is < 1 or > AgentPlanContractVersions.DefaultNodeMaxArtifactCount ||
-                 node.Budget.MaxArtifactBytes is < 1 or > AgentPlanContractVersions.DefaultNodeMaxArtifactBytes))
+                (node.Budget.MaxArtifactCount < 1 || node.Budget.MaxArtifactCount > maxNodeArtifactCount ||
+                 node.Budget.MaxArtifactBytes < 1 || node.Budget.MaxArtifactBytes > maxNodeArtifactBytes))
             {
                 return InvalidResult($"Node '{node.NodeId}' artifact budget does not match its side-effect class.");
             }
@@ -1224,15 +1227,37 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             var expectedDependencies = index == 0
                 ? Array.Empty<string>()
                 : [orderedNodes[index - 1].NodeId];
-            if (!node.DependsOn.SequenceEqual(expectedDependencies, StringComparer.Ordinal))
+            if (topologyProfile == "LinearV1" &&
+                (!node.Required ||
+                 node.JoinPolicy is not null ||
+                 !node.DependsOn.SequenceEqual(expectedDependencies, StringComparer.Ordinal)))
             {
-                return InvalidResult($"Node '{node.NodeId}' is not a strict immediate-predecessor LinearV1 node.");
+                return InvalidResult($"Node '{node.NodeId}' is not a strict required immediate-predecessor LinearV1 node.");
+            }
+
+            if (topologyProfile == "DagV1" &&
+                (node.DependsOn.Contains(node.NodeId, StringComparer.Ordinal) ||
+                 node.DependsOn.Any(dependency => !orderedNodes.Take(index).Any(parent =>
+                     string.Equals(parent.NodeId, dependency, StringComparison.Ordinal))) ||
+                 node.DependsOn.Count <= 1 && node.JoinPolicy is not null ||
+                 node.DependsOn.Count > 1 && node.JoinPolicy is not ("AllRequired" or "OptionalBestEffort") ||
+                 node.NodeKind == "JoinNode" &&
+                 (node.DependsOn.Count < 2 || node.JoinPolicy is not ("AllRequired" or "OptionalBestEffort")) ||
+                 node.NodeKind != "JoinNode" && node.RequestedToolCodes.Contains("join_evidence", StringComparer.Ordinal)))
+            {
+                return InvalidResult($"Node '{node.NodeId}' violates bounded DagV1 dependency/join semantics.");
+            }
+
+            if (!node.EvidenceSelectors.SequenceEqual(node.DependsOn, StringComparer.Ordinal))
+            {
+                return InvalidResult($"Node '{node.NodeId}' Evidence selectors must exactly match its dependencies.");
             }
 
             var sets = new[]
             {
                 ValidateCanonicalStringSet(node.RequestedToolCodes, $"{node.NodeId}.requestedToolCodes"),
                 ValidateCanonicalStringSet(node.RequestedCapabilityCodes, $"{node.NodeId}.requestedCapabilityCodes"),
+                ValidateCanonicalStringSet(node.DependsOn, $"{node.NodeId}.dependsOn"),
                 ValidateCanonicalGuidSet(node.DataScopes, $"{node.NodeId}.dataScopes"),
                 ValidateCanonicalGuidSet(node.KnowledgeScopes, $"{node.NodeId}.knowledgeScopes"),
                 ValidateCanonicalStringSet(node.EvidenceSelectors, $"{node.NodeId}.evidenceSelectors")
@@ -1272,10 +1297,16 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             if (node.NodeKind == "CloudReadNode" &&
                 (!string.Equals(node.Input.TypedProvider, "CloudAiRead", StringComparison.Ordinal) ||
                  string.IsNullOrWhiteSpace(node.Input.SemanticIntent) ||
+                 cloudReadonlyIntent is null ||
+                 !string.Equals(node.Input.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
                  !node.RequestedCapabilityCodes.Contains(node.Input.SemanticIntent, StringComparer.Ordinal) ||
                  !IsSha256(node.Input.SemanticPlanDigest) ||
+                 !string.Equals(node.Input.SemanticPlanDigest, cloudReadonlyIntent.SemanticPlanDigest, StringComparison.Ordinal) ||
                  node.Input.RequestedScope.Count == 0 ||
+                 !node.Input.RequestedScope.SequenceEqual(cloudReadonlyIntent.QueryScope, StringComparer.Ordinal) ||
+                 !MatchesTimeRange(node.Input.TimeRange, cloudReadonlyIntent.TimeRange) ||
                  !CloudAiReadRowLimitPolicy.IsWithinBounds(node.Input.MaxRows ?? 0) ||
+                 node.Input.MaxRows != cloudReadonlyIntent.Limit ||
                  !string.IsNullOrWhiteSpace(node.Input.ExecutionMode) ||
                  node.Input.DataSourceId is not null ||
                  node.Input.BusinessDomains.Count != 0 ||
@@ -1283,6 +1314,50 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                  !string.Equals(node.SideEffectClass, "ReadOnly", StringComparison.Ordinal)))
             {
                 return InvalidResult($"CloudReadNode '{node.NodeId}' must use the typed CloudAiRead input without SQL/data-source fallback.");
+            }
+
+            if (node.RequestedToolCodes.Contains("assess_cloud_health", StringComparer.Ordinal) &&
+                (node.NodeKind != "DeterministicComputeNode" ||
+                 node.RequestedToolCodes.Count != 1 ||
+                 !string.Equals(node.OutputSchemaRef, "evidence:assess_cloud_health:v1", StringComparison.Ordinal) ||
+                 node.DependsOn.Count != 1 ||
+                 orderedNodes.Take(index).SingleOrDefault(parent =>
+                     string.Equals(parent.NodeId, node.DependsOn.Single(), StringComparison.Ordinal)) is not { NodeKind: "CloudReadNode" } parentNode ||
+                 !parentNode.RequestedToolCodes.Contains("query_cloud_data_readonly", StringComparer.Ordinal) ||
+                 cloudReadonlyIntent is null ||
+                 !string.Equals(cloudReadonlyIntent.Intent, "Analysis.Device.Status", StringComparison.Ordinal) ||
+                 !string.Equals(parentNode.Input.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
+                 !string.Equals(parentNode.Input.SemanticPlanDigest, cloudReadonlyIntent.SemanticPlanDigest, StringComparison.Ordinal) ||
+                 !string.Equals(node.Input.TypedProvider, "DeterministicHealthAssessment", StringComparison.Ordinal) ||
+                 !string.Equals(node.Input.SemanticIntent, cloudReadonlyIntent.Intent, StringComparison.Ordinal) ||
+                 !string.Equals(node.Input.SemanticPlanDigest, cloudReadonlyIntent.SemanticPlanDigest, StringComparison.Ordinal) ||
+                 !node.Input.RequestedScope.SequenceEqual(cloudReadonlyIntent.QueryScope, StringComparer.Ordinal) ||
+                 node.Input.MaxRows != cloudReadonlyIntent.Limit ||
+                 !MatchesTimeRange(node.Input.TimeRange, cloudReadonlyIntent.TimeRange) ||
+                 node.Input.ExecutionMode is not null ||
+                 node.Input.DataSourceId is not null ||
+                 node.Input.BusinessDomains.Count != 0 ||
+                 node.Input.GovernedSchemaDigest is not null ||
+                 node.Input.RequestedPermission is not null ||
+                 node.Input.CanonicalInputJson is not null ||
+                 node.SideEffectClass != "DeterministicInternal" ||
+                 node.ApprovalPolicy.Required ||
+                 node.ModelPolicy is not null ||
+                 node.Budget.MaxModelCalls != 0 ||
+                 node.Budget.MaxRows != cloudReadonlyIntent.Limit ||
+                 node.Budget.MaxArtifactCount != 0 ||
+                 node.Budget.MaxArtifactBytes != 0 ||
+                 node.IdempotencyPolicy.Mode != "Deterministic"))
+            {
+                return InvalidResult(
+                    $"Deterministic health node '{node.NodeId}' must consume exactly one Device.Status Cloud Evidence input under the frozen algorithm contract.");
+            }
+
+            if (node.NodeKind != "CloudReadNode" &&
+                !node.RequestedToolCodes.Contains("assess_cloud_health", StringComparer.Ordinal) &&
+                node.Input.TimeRange is not null)
+            {
+                return InvalidResult($"Node '{node.NodeId}' cannot carry a Cloud Evidence time range.");
             }
 
             if (node.NodeKind == "GovernedDataReadNode" &&
@@ -1297,6 +1372,50 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
                 return InvalidResult($"GovernedDataReadNode '{node.NodeId}' must use its distinct governed data input contract.");
             }
 
+            if (node.NodeKind == "JoinNode" &&
+                (node.RequestedToolCodes.Count != 1 ||
+                 !node.RequestedToolCodes.Contains("join_evidence", StringComparer.Ordinal) ||
+                 node.SideEffectClass != "DeterministicInternal" ||
+                 node.ApprovalPolicy.Required ||
+                 node.ModelPolicy is not null))
+            {
+                return InvalidResult($"JoinNode '{node.NodeId}' must use the deterministic join_evidence executor without approval or model access.");
+            }
+
+            if (node.NodeKind == "AgentReasoningNode" &&
+                (!AgentReasoningPolicyAuthority.Matches(node.ModelPolicy) ||
+                 node.ModelPolicy!.ModelId != snapshotModelId ||
+                 !string.Equals(
+                     node.ModelPolicy.ModelParametersHash,
+                     snapshotModelParametersHash,
+                     StringComparison.Ordinal) ||
+                 node.DependsOn.Count < 2 ||
+                 node.JoinPolicy is not ("AllRequired" or "OptionalBestEffort") ||
+                 node.RequestedToolCodes.Count != 1 ||
+                 !node.RequestedToolCodes.Contains("agent_reasoning", StringComparer.Ordinal) ||
+                 !string.Equals(node.OutputSchemaRef, "evidence:agent_reasoning:v1", StringComparison.Ordinal) ||
+                 node.SideEffectClass != "ReadOnly" ||
+                 node.ApprovalPolicy.Required ||
+                 node.RetryPolicy.MaxAttempts != 1 ||
+                 node.RetryPolicy.BackoffClass != "None" ||
+                 node.Budget.MaxToolCalls != 1 ||
+                 node.Budget.MaxModelCalls != AgentReasoningPolicyAuthority.MaxTurns + AgentReasoningPolicyAuthority.RecoveryTurns ||
+                 node.Budget.MaxInputTokens != AgentReasoningPolicyAuthority.MaxInputTokens ||
+                 node.Budget.MaxOutputTokens != AgentReasoningPolicyAuthority.MaxOutputTokens ||
+                 node.Budget.MaxCostAmount != AgentReasoningPolicyAuthority.MaxCostAmount ||
+                 node.Budget.MaxArtifactCount != 0 ||
+                 node.Budget.MaxArtifactBytes != 0 ||
+                 node.IdempotencyPolicy.Mode != "ReadOnly"))
+            {
+                return InvalidResult(
+                    $"AgentReasoningNode '{node.NodeId}' violates the depth-1 evidence-only model policy or independent budget.");
+            }
+
+            if (node.NodeKind != "AgentReasoningNode" && node.ModelPolicy is not null)
+            {
+                return InvalidResult($"Non-reasoning node '{node.NodeId}' cannot carry a model policy.");
+            }
+
 
             var step = orderedSteps[index];
             if (step is null ||
@@ -1308,6 +1427,12 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
             {
                 return InvalidResult($"Runtime Step at index {index} does not match its frozen Node/tool contract.");
             }
+        }
+
+        var topology = ValidateTopology(orderedNodes, topologyProfile, concurrencyPolicy.MaxParallelism);
+        if (!topology.IsSuccess)
+        {
+            return topology;
         }
 
         if (totalToolCalls > planBudgets.MaxToolCalls ||
@@ -1359,6 +1484,122 @@ internal sealed class AgentPlanCanonicalizer : IAgentPlanIntegrityValidator
 
         return Result.Success();
     }
+
+    private static Result ValidateTopology(
+        IReadOnlyList<AgentPlanNodeDocument> nodes,
+        string topologyProfile,
+        int maxParallelism)
+    {
+        if (nodes.Count == 0)
+        {
+            return Result.Success();
+        }
+
+        var byId = nodes.ToDictionary(node => node.NodeId, StringComparer.Ordinal);
+        var visiting = new HashSet<string>(StringComparer.Ordinal);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var levels = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        Result Visit(AgentPlanNodeDocument node)
+        {
+            if (visited.Contains(node.NodeId))
+            {
+                return Result.Success();
+            }
+
+            if (!visiting.Add(node.NodeId))
+            {
+                return InvalidResult($"DagV1 contains a dependency cycle at node '{node.NodeId}'.");
+            }
+
+            var level = 0;
+            foreach (var dependencyId in node.DependsOn)
+            {
+                if (!byId.TryGetValue(dependencyId, out var dependency))
+                {
+                    return InvalidResult($"Node '{node.NodeId}' references unknown dependency '{dependencyId}'.");
+                }
+
+                var dependencyResult = Visit(dependency);
+                if (!dependencyResult.IsSuccess)
+                {
+                    return dependencyResult;
+                }
+
+                level = Math.Max(level, levels[dependencyId] + 1);
+            }
+
+            visiting.Remove(node.NodeId);
+            visited.Add(node.NodeId);
+            levels[node.NodeId] = level;
+            return Result.Success();
+        }
+
+        foreach (var node in nodes)
+        {
+            var result = Visit(node);
+            if (!result.IsSuccess)
+            {
+                return result;
+            }
+        }
+
+        if (topologyProfile == "LinearV1")
+        {
+            return Result.Success();
+        }
+
+        var childCounts = nodes
+            .SelectMany(node => node.DependsOn)
+            .GroupBy(nodeId => nodeId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var hasDagShape = nodes.Count(node => node.DependsOn.Count == 0) > 1 ||
+                          nodes.Any(node => node.DependsOn.Count > 1 || !node.Required) ||
+                          childCounts.Values.Any(count => count > 1);
+        if (!hasDagShape)
+        {
+            return InvalidResult("DagV1 must contain an explicit branch, join, parallel root, or optional node; LinearV1 is not silently relabelled.");
+        }
+
+        var maximumLevelWidth = levels.Values
+            .GroupBy(level => level)
+            .Select(group => group.Count())
+            .DefaultIfEmpty(1)
+            .Max();
+        if (maximumLevelWidth > maxParallelism)
+        {
+            return InvalidResult(
+                $"DagV1 runnable width {maximumLevelWidth} exceeds bounded maxParallelism {maxParallelism}.");
+        }
+
+        foreach (var join in nodes.Where(node => node.DependsOn.Count > 1))
+        {
+            var dependencies = join.DependsOn.Select(dependencyId => byId[dependencyId]).ToArray();
+            if (!dependencies.Any(dependency => dependency.Required))
+            {
+                return InvalidResult($"Join node '{join.NodeId}' must retain at least one required Evidence dependency.");
+            }
+        }
+
+        return Result.Success();
+    }
+
+    private static bool MatchesTimeRange(
+        AgentIntentTimeRangeDocument? nodeRange,
+        AgentTaskPlanSemanticTimeRangeDocument? planRange)
+    {
+        if (nodeRange is null || planRange is null)
+        {
+            return nodeRange is null && planRange is null;
+        }
+
+        return nodeRange.FromUtc == planRange.Start &&
+               nodeRange.ToUtc == planRange.End &&
+               string.Equals(nodeRange.TimeZone, planRange.TimeZone, StringComparison.Ordinal);
+    }
+
+    private static bool IsDataProducerNode(AgentPlanNodeDocument node) =>
+        node.NodeKind is "CloudReadNode" or "GovernedDataReadNode";
 
     private static bool IsExactBoundedText(string? value, int maximumCharacters)
     {
@@ -1601,6 +1842,10 @@ internal static class AgentEvidenceCanonicalizer
 
             if (!IsSha256(evidence.Lineage.InputDigest) ||
                 !IsSha256(evidence.Lineage.OutputDigest) ||
+                evidence.Lineage.EvidenceSetDigest is not null &&
+                    !IsSha256(evidence.Lineage.EvidenceSetDigest) ||
+                evidence.Lineage.ParentEvidenceIds.Count == 0 &&
+                    evidence.Lineage.EvidenceSetDigest is not null ||
                 string.IsNullOrWhiteSpace(evidence.Governance.Sensitivity) ||
                 string.IsNullOrWhiteSpace(evidence.Governance.RedactionStatus) ||
                 string.IsNullOrWhiteSpace(evidence.Governance.RetentionClass))
@@ -1632,6 +1877,32 @@ internal static class AgentEvidenceCanonicalizer
                     "DerivedFact Evidence requires parent evidence and a versioned deterministic tool producer.");
             }
 
+            if (evidence.EvidenceKind is not ("LlmInference" or "ModelPrediction") &&
+                (evidence.Producer.ModelId is not null ||
+                 evidence.Producer.ModelVersion is not null ||
+                 evidence.Producer.PromptVersion is not null))
+            {
+                return InvalidEvidence(
+                    "Non-model Evidence cannot claim model or Prompt provenance.");
+            }
+
+            if (string.Equals(evidence.EvidenceKind, "LlmInference", StringComparison.Ordinal) &&
+                (!string.Equals(evidence.Producer.NodeKind, "AgentReasoningNode", StringComparison.Ordinal) ||
+                 !evidence.Producer.ExecutorId.StartsWith("agent-child:", StringComparison.Ordinal) ||
+                 evidence.Producer.ModelId is null ||
+                 string.IsNullOrWhiteSpace(evidence.Producer.ModelVersion) ||
+                 string.IsNullOrWhiteSpace(evidence.Producer.PromptVersion) ||
+                 !string.Equals(evidence.Source.Provider, "ConfiguredModel", StringComparison.Ordinal) ||
+                 !string.Equals(evidence.Source.ProviderOperationCode, "agent_reasoning", StringComparison.Ordinal) ||
+                 evidence.Source.ObservedAtUtc is not null ||
+                 evidence.Lineage.ParentEvidenceIds.Count == 0 ||
+                 evidence.Content.CitationRefs.Count != evidence.Lineage.ParentEvidenceIds.Count ||
+                 evidence.Prediction is not null))
+            {
+                return InvalidEvidence(
+                    "LlmInference Evidence requires a depth-1 AgentReasoningNode producer, exact parent citations, and cannot claim observation or prediction authority.");
+            }
+
             if (evidence.Source.TimeRange is { } sourceRange &&
                 (string.IsNullOrWhiteSpace(sourceRange.TimeZone) ||
                  sourceRange.FromUtc is null && sourceRange.ToUtc is null ||
@@ -1646,7 +1917,7 @@ internal static class AgentEvidenceCanonicalizer
                     string.IsNullOrWhiteSpace(evidence.Source.ProviderOperationCode) ||
                     !evidence.Source.ProviderOperationCode.StartsWith("CloudAiRead.", StringComparison.Ordinal) ||
                     string.IsNullOrWhiteSpace(evidence.Source.SemanticIntent) ||
-                    !AgentIntentCatalogV1.TryGetFrozenDescriptor(evidence.Source.SemanticIntent, out var descriptor) ||
+                    !AgentIntentRegistryV1.TryGetDescriptor(evidence.Source.SemanticIntent, out var descriptor) ||
                     descriptor.IntentClass != AgentIntentClass.CloudOnly ||
                     descriptor.Availability != AgentIntentAvailability.Available ||
                     !string.Equals(
@@ -1658,6 +1929,41 @@ internal static class AgentEvidenceCanonicalizer
                     return InvalidEvidence(
                         "CloudReadNode Evidence requires CloudAiRead provider, logical operation code, semantic intent, and canonical query scope.");
                 }
+            }
+
+            var isHealthAssessment =
+                string.Equals(evidence.Producer.ToolCode, "assess_cloud_health", StringComparison.Ordinal) ||
+                string.Equals(evidence.Source.Provider, "DeterministicHealthAlgorithm", StringComparison.Ordinal) ||
+                string.Equals(evidence.Source.ProviderOperationCode, "assess_cloud_health", StringComparison.Ordinal);
+            if (isHealthAssessment &&
+                (!string.Equals(evidence.EvidenceKind, "DerivedMetric", StringComparison.Ordinal) ||
+                 !string.Equals(evidence.TruthClass, "DerivedFact", StringComparison.Ordinal) ||
+                 !string.Equals(evidence.Producer.NodeKind, "DeterministicComputeNode", StringComparison.Ordinal) ||
+                 !string.Equals(
+                     evidence.Producer.ExecutorId,
+                     $"deterministic:{AgentCloudHealthAssessmentTool.AlgorithmVersion}",
+                     StringComparison.Ordinal) ||
+                 !string.Equals(evidence.Producer.ToolCode, "assess_cloud_health", StringComparison.Ordinal) ||
+                 evidence.Producer.ModelId is not null ||
+                 evidence.Producer.ModelVersion is not null ||
+                 evidence.Producer.PromptVersion is not null ||
+                 !string.Equals(evidence.Source.Provider, "DeterministicHealthAlgorithm", StringComparison.Ordinal) ||
+                 !string.Equals(evidence.Source.ProviderOperationCode, "assess_cloud_health", StringComparison.Ordinal) ||
+                 !string.Equals(evidence.Source.SemanticIntent, "Analysis.Device.Status", StringComparison.Ordinal) ||
+                 evidence.Source.ObservedAtUtc is not null ||
+                 evidence.Source.AsOfUtc is null ||
+                 evidence.Lineage.ParentEvidenceIds.Count != 1 ||
+                 evidence.Quality.RowCount is null ||
+                 evidence.Quality.MissingRate is null ||
+                 evidence.Quality.Confidence is null ||
+                 !evidence.Quality.QualityFlags.Contains("deterministic-health", StringComparer.Ordinal) ||
+                 !evidence.Quality.QualityFlags.Contains(
+                     AgentCloudHealthAssessmentTool.AlgorithmVersion,
+                     StringComparer.Ordinal) ||
+                 evidence.Prediction is not null))
+            {
+                return InvalidEvidence(
+                    "Current health Evidence must be a one-parent replayable DerivedFact from the fixed deterministic algorithm and cannot claim prediction authority.");
             }
 
             if (string.Equals(evidence.EvidenceKind, "ModelPrediction", StringComparison.Ordinal))

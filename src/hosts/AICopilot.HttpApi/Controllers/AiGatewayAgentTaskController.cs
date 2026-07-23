@@ -106,6 +106,12 @@ public class AiGatewayAgentTaskController(ISender sender) : ApiControllerBase(se
             pageSize)));
     }
 
+    [HttpGet("agent/task/{id:guid}/runtime-snapshot")]
+    public async Task<IActionResult> GetAgentTaskRuntimeSnapshot(Guid id)
+    {
+        return ReturnResult(await Sender.Send(new GetAgentTaskRuntimeSnapshotQuery(id)));
+    }
+
     [HttpPost("agent/approval/{id:guid}/approve")]
     public async Task<IActionResult> ApproveAgentApproval(Guid id, AgentApprovalDecisionRequest request)
     {

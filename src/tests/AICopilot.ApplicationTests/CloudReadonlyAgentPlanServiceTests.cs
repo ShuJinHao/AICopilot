@@ -25,7 +25,7 @@ public sealed class CloudReadonlyAgentPlanServiceTests
             Intent = intent,
             Query = query,
             Confidence = 0.95,
-            Reasoning = "test"
+            RoutingNote = "test"
         });
 
         var result = await service.CreateIntentAsync(Guid.NewGuid(), "只读查询");
@@ -52,10 +52,41 @@ public sealed class CloudReadonlyAgentPlanServiceTests
         constructorParameters.Should().Contain(typeof(ISemanticQueryPlanner));
     }
 
+    [Fact]
+    public void CreateIntentsFromRouted_ShouldFreezeEveryDistinctSupportedCloudIntent()
+    {
+        var routed = new[]
+        {
+            new IntentResult
+            {
+                Intent = "Analysis.Device.Status",
+                Query = "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}",
+                Confidence = 0.95
+            },
+            new IntentResult
+            {
+                Intent = "Analysis.Capacity.ByDevice",
+                Query = "{\"filters\":[{\"field\":\"deviceId\",\"operator\":\"eq\",\"value\":\"22222222-2222-4222-8222-222222222222\"}]}",
+                Confidence = 0.9
+            }
+        };
+        var service = CreateService(routed);
+
+        var result = service.CreateIntentsFromRouted("只读查看设备状态和产能", routed);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.Select(intent => intent.Intent).Should().Equal(
+            "Analysis.Capacity.ByDevice",
+            "Analysis.Device.Status");
+        result.Value.Should().OnlyContain(intent =>
+            intent.SemanticPlanDigest.Length == 64 && intent.SemanticPlanDigest.All(character =>
+                character is >= '0' and <= '9' or >= 'a' and <= 'f'));
+    }
+
     private static CloudReadonlyAgentPlanService CreateService(params IntentResult[] intents)
     {
         var definitions = new SemanticDefinitionCatalog();
-        var planner = new SemanticQueryPlanner(new SemanticIntentCatalog(definitions), definitions);
+        var planner = new SemanticQueryPlanner(new SemanticQuerySchemaRegistry(definitions), definitions);
         return new CloudReadonlyAgentPlanService(
             new FixedIntentRouter(intents),
             planner,

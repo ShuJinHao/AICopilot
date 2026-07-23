@@ -171,7 +171,6 @@ public sealed class AgentApprovalPermissionHardeningTests
                 "generate_pdf",
                 RequiresApproval: true)],
             AgentTaskType.DataAnalysis,
-            skillCode: null,
             knowledgeBaseIds: null);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),
@@ -255,7 +254,6 @@ public sealed class AgentApprovalPermissionHardeningTests
         var planJson = AgentPlanV2TestData.CreateCanonicalBuiltInPlanDraft(
             generationPlanSteps,
             AgentTaskType.CloudDataReport,
-            skillCode: null,
             knowledgeBaseIds: null);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),

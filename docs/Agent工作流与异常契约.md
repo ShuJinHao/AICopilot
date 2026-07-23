@@ -8,10 +8,10 @@
 - Chat 模式和 Plan 模式必须复用统一管线；区别只在出口。
 - Chat 出口可以直接回答，或按安全策略执行已允许的低风险只读动作。
 - Plan 出口只能生成 `PlanDraft` 草案；用户确认前不得执行 Cloud 查询、MCP 工具、Tool 调用、Worker 入队或其他真实业务动作。
-- 用户确认 `PlanDraft` 后才允许转换为 `ExecutablePlan` / `AgentTask`，进入 Skill、Tool、Schema、Guard、审批和 Worker 执行链路。
-- Skill、Tool、MCP、Knowledge 或 DataSource 未匹配时，不能阻断服务端能力发现形成 `PlanDraft`；只能在草案中说明能力缺口、降级为路线规划或要求用户补充目标。该规则不允许恢复已退役的前端 `skillCode/preferredToolCodes` 选择入口。
+- 用户确认无 gap 的 `PlanDraft` 后才允许转换为 `ExecutablePlan` / `AgentTask`，进入 Tool、Schema、Guard、审批和 Worker 执行链路。
+- Tool、MCP、Knowledge、DataSource、Provider 或资源未匹配时，不能阻断服务端能力发现形成 `PlanDraft`；必须形成显式 capability gap，带 gap 的草案保持 node-free、不可确认且不得入队。
 - Plan v2 公共请求的 `pluginSelectionMode/capabilitySelectionMode` 只接受大小写精确的字符串 enum 名；数字 token、未知字符串和大小写变体必须在 HTTP model binding 阶段拒绝，不得进入 stream handler、session/repository、Tool、Cloud 或消息持久化。
-- P0 的 `SkillCode/SkillName/SkillRoutingReason` 已从 Plan v2 canonical contract 退役。前端 plan-stream wire 不得发送 `skillCode/preferredToolCodes`；composer 仍有任一旧 Skill/Tool 选择时必须在 HTTP 前显示固定错误并停止，不能静默丢弃、自动猜测 Tool→Skill 或恢复影子路由。后端暂留 legacy request 字段只用于兼容期显式拒绝，并须在 stream handler 读取 session/repository 以及 command coordinator 准备/持久化前返回 `agent_plan_schema_invalid`；公共 SSE 只披露固定通用 schema detail，不泄漏内部拒绝原因。
+- `SkillDefinition`、`IAgentDynamicPlanner` 及其兼容字段/API 已从生产轨物理退役。Plan 请求只允许 `pluginSelectionMode/selectedPluginIds/capabilitySelectionMode/requestedCapabilityCodes/knowledgeBaseIds/uploadIds/artifactTargets`；这些选择是编译上限，唯一 `AgentPlanCompiler` 与安全门禁必须取交集，不得恢复 Skill 选择、preferred ToolCode、alias/wrapper 或第二套影子编译器。
 - Plan v2 的 `262144` UTF-8 byte 上限按“最终含 64 位 SHA-256 digest 的 canonical payload”计算。`AgentCanonicalJsonV1` 是排序、JavaScript 转义、数字规范化、root exclusion、共享结构限制与 byte count 的唯一 owner；Seal 必须先以同长度 64-hex placeholder 做 bounded canonical measure，正好上限允许，首次越界以专用内部信号短路为 `max+1` 并映射 `plan_payload_too_large`，不得让通用 canonical preflight 把业务超限泛化成 `agent_plan_invalid`，也不得放宽现有全局 `Canonicalize` 预检。
 - Plan 能力发现和真实 Tool 分支必须共用同一生产安全门禁；只有通过 `AiToolSafetyPolicy` 的 tool 才能进入草案或执行上下文。`GoldenEvalTests` 必须穿过真实 `AgentWorkflowPipeline` 或其正式生产组件，数据集必须版本化并记录变更理由；不得直接调用 leaf policy 自证。
 
@@ -64,9 +64,13 @@ Cloud 只读 Agent 当前正式能力限定为：
 ### 2.3 Plan 编译、产物检查点与 Tool 输出边界
 
 - 声明产物目标的 Plan 必须且只能有一个最后步骤 `finalize_artifacts`，其 `StepType=Finalize`、`RequiresApproval=true`；该步骤是生命周期检查点，不是 provider tool，不能交给 built-in、MCP 或 mock executor 伪造执行成功。
-- 当前生产 Plan 只允许 `BuiltInOnly`；唯一权威 `DeterministicLinearAgentPlanCompiler` 只能把服务器已解析、执行快照已冻结且无 capability gap 的 Draft 编译成非空 `LinearV1` 图。缺少执行快照必须披露 `execution_snapshot_unavailable`，缺少资源、工具或能力必须披露对应稳定 gap；任何带 gap 的 Draft 都必须保持 node-free、不可确认、不可入队，只有 gap-free 且节点非空的 Draft 才能封印为 `ExecutablePlan`。不得把测试用 fresh-read/downstream harness 带入生产注册。
+- 当前生产 Plan 只允许 `BuiltInOnly`；唯一权威 `DeterministicAgentPlanCompiler` 只消费同一版本 `AgentIntentRegistry` 的 typed candidate 与服务器冻结快照。它可以生成显式 `LinearV1`，或在存在多个独立只读 Evidence 根时生成受限 `DagV1`；`DagV1` 只允许固定节点类型、2–4 并行、显式 `dependsOn`、`AllRequired/OptionalBestEffort` 合流和确定性节点 ID，不得另建 general compiler、模型自由拓扑或 Runtime 猜测 profile。缺少执行快照、资源、工具或能力必须披露稳定 gap；任何带 gap 的 Draft 都保持 node-free、不可确认、不可入队。
+- 同一个 Plan 可冻结多个 `cloudReadonlyIntents`，每个 `CloudReadNode` 必须精确绑定自己的 semantic intent、plan digest、scope、time range 和 row limit；`Analysis.Device.Status` 的健康评估只能是该状态节点的确定性子节点。Cloud 失败、空集或未配置不得创建、调度或回退 `GovernedDataReadNode`/Simulation/Text-to-SQL/MCP。
+- 每个成功 `NodeRun` 必须在同一 fenced checkpoint 写入唯一 sealed Evidence；恢复只能从已授权 Evidence 与 checkpoint 重建，不得读取子 Agent 原始对话。并行根各自在独立 state 中运行，fan-in 只按 canonical 规则合并 Evidence payload；required 失败阻止下游，optional 缺失必须显式保留质量标记。
+- `AgentReasoningNode` 派生深度固定为 1，只消费 `EvidenceOnly + SafeSummary`，不得 spawn、继续 Tool 调用、扩权或把 `LlmInference/Recommendation` 伪装成 `ObservedFact/DerivedFact/ModelPrediction`。最后一次 recovery 仍不能产生合法 typed output 时节点失败。
 - 显式 `Development + CloudReadonly:Mode=Simulation + Simulation.Enabled=true + AlwaysMarkAsSimulation=true` profile 仍只能把唯一已授权 `SimulationBusiness` 数据源编译为固定的 `query_business_database_readonly → summarize_business_query_result → generate_markdown_report → finalize_artifacts` 四步图。该 profile 不得接 Cloud、MCP、Plugin、上传或 RAG，不得混合/回退 Real/Cloud 数据源；Plan 确认、入队和 Worker 每次 fresh-read 都必须重新校验 Simulation profile，配置关闭后旧计划立即 fail-closed。
-- Tool output 必须先通过注册表的 closed strict schema，才可记录 execution、step 或 run 成功。持久化 durable output 只保留规范化、版本化的安全 payload，不得保存 provider raw output；ArtifactWorkspace 文件/aggregate 的原子 staging、补偿、provenance 与 reconciliation 仍属于 P1，本 P0 契约不得宣称已经闭合。
+- Tool output 必须先通过注册表的 closed strict schema，才可记录 execution、step 或 run 成功。持久化 durable output 只保留规范化、版本化的安全 payload，不得保存 provider raw output。ArtifactWorkspace 的 workspace 初始化、draft 多文件创建、版本归档、当前文件替换和 final 文件集必须统一经过 file-set stage/journal、manifest hash、fencing token、数据库 checkpoint、commit marker、rollback/reconciliation 和 orphan cleanup；数据库或文件系统任一结果未知时不得宣称完成。
+- Markdown、HTML、PDF、PPTX、XLSX、图表 payload 和 Chat 追问必须绑定同一最终 `EvidenceSetDigest`，不得各自重算或只取最后一次 Cloud 查询。Chat 只能通过显式 `ReferencedAgentTaskId` 引用当前用户、当前会话内 `Completed` 任务的最新 `Succeeded` attempt；服务端必须验证 finalization checkpoint、全部 durable Evidence scope/expiry/seal 和完整 lineage，仅注入 bounded safe summary/findings/citations。不得自动选“最近任务”，不得从旧回答文本反推事实；路由命中新设备、工序、级别或时间范围时必须走本轮新只读查询，不得混入旧 EvidenceSet。
 
 ## 3. Cloud 写入禁止
 

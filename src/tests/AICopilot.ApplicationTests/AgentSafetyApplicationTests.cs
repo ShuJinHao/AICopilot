@@ -323,6 +323,62 @@ public sealed class AgentSafetyApplicationTests
     }
 
     [Fact]
+    public void FinalPromptEval_ShouldBindCompletedTaskEvidenceWithoutClaimingARefresh()
+    {
+        const string digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var taskId = Guid.NewGuid();
+        var prompt = InvokeBuildFinalUserPrompt(
+            new GenerationContext
+            {
+                Request = new ChatStreamRequest(
+                    Guid.NewGuid(),
+                    "为什么会出现这个结论？",
+                    ReferencedAgentTaskId: taskId),
+                Scene = ManufacturingSceneType.DeviceAnomalyDiagnosis,
+                EvidenceSetDigest = digest,
+                BoundTaskEvidence = new AgentTaskChatEvidenceContext(
+                    taskId,
+                    digest,
+                    ["LlmInference", "ObservedFact"],
+                    DateTimeOffset.Parse("2026-07-22T08:00:00Z"),
+                    "truth_class=ObservedFact\nsafe_summary=Cloud 只读查询返回 3 条已授权记录。\n\ntruth_class=LlmInference\nfinding=设备心跳陈旧。")
+            },
+            "为什么会出现这个结论？",
+            out var hasContext);
+
+        hasContext.Should().BeTrue();
+        prompt.Should().Contain($"evidence_set_digest={digest}");
+        prompt.Should().Contain("<bound_task_evidence_context>");
+        prompt.Should().Contain("设备心跳陈旧");
+        prompt.Should().Contain("不得声称已经刷新、重查或扩展了数据范围");
+        prompt.Should().Contain("发起新的只读查询");
+        prompt.Should().NotContain(taskId.ToString("D"));
+    }
+
+    [Fact]
+    public void ContextAggregatorEval_ShouldPreserveExactBoundTaskEvidenceDigest()
+    {
+        const string digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var taskEvidence = new AgentTaskChatEvidenceContext(
+            Guid.NewGuid(),
+            digest,
+            ["ObservedFact"],
+            DateTimeOffset.Parse("2026-07-22T08:00:00Z"),
+            "safe_summary=已封存任务结果。");
+        var executor = new ContextAggregatorExecutor(NullLogger<ContextAggregatorExecutor>.Instance);
+
+        var context = executor.Execute(
+            new ChatStreamRequest(Guid.NewGuid(), "继续解释"),
+            ManufacturingSceneType.DeviceAnomalyDiagnosis,
+            [BranchResult.Skipped(BranchType.DataAnalysis)],
+            taskEvidence);
+
+        context.BoundTaskEvidence.Should().BeSameAs(taskEvidence);
+        context.Evidence.Should().BeEmpty();
+        context.EvidenceSetDigest.Should().Be(digest);
+    }
+
+    [Fact]
     public void FinalPromptEval_ShouldNotRequireSourcesWhenRagIsEmpty()
     {
         var requirements = InvokeBuildRequirements(
@@ -417,6 +473,6 @@ public sealed class AgentSafetyApplicationTests
         method.Should().NotBeNull();
         return (IReadOnlyList<string>)method!.Invoke(
             null,
-            [scene, hasDataAnalysis, hasBusinessPolicy, hasKnowledge])!;
+            [scene, hasDataAnalysis, hasBusinessPolicy, hasKnowledge, false, false])!;
     }
 }

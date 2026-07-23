@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Workflows;
@@ -153,14 +154,20 @@ public sealed class AgentWorkflowBranchSemanticsTests
             new() { Intent = "Knowledge.Operations", Confidence = 0.7 },
             new() { Intent = "Action.export_report", Confidence = 0.9 }
         };
+        var registry = AgentIntentRegistryV1.CreateRoutingSnapshot(
+        [
+            new("Analysis.Device.List", "Device list"),
+            new("Knowledge.Operations", "Operations knowledge"),
+            new("Action.export_report", "Read-only report export")
+        ]);
 
-        DataAnalysisExecutor.IsRelevant(intents).Should().BeTrue();
-        KnowledgeRetrievalExecutor.IsRelevant(intents).Should().BeTrue();
-        ToolsPackExecutor.IsRelevant(intents).Should().BeTrue();
+        DataAnalysisExecutor.IsRelevant(intents, registry).Should().BeTrue();
+        KnowledgeRetrievalExecutor.IsRelevant(intents, registry).Should().BeTrue();
+        ToolsPackExecutor.IsRelevant(intents, registry).Should().BeTrue();
 
         var generalChat = new[] { new IntentResult { Intent = "General.Chat", Confidence = 1.0 } };
-        DataAnalysisExecutor.IsRelevant(generalChat).Should().BeFalse();
-        KnowledgeRetrievalExecutor.IsRelevant(generalChat).Should().BeFalse();
-        ToolsPackExecutor.IsRelevant(generalChat).Should().BeFalse();
+        DataAnalysisExecutor.IsRelevant(generalChat, registry).Should().BeFalse();
+        KnowledgeRetrievalExecutor.IsRelevant(generalChat, registry).Should().BeFalse();
+        ToolsPackExecutor.IsRelevant(generalChat, registry).Should().BeFalse();
     }
 }

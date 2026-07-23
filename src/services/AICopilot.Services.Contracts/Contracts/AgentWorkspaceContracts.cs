@@ -261,6 +261,41 @@ public sealed record AgentBusinessQueryResultSummaryDto(
     bool IsTruncated,
     Guid? ArtifactId = null);
 
+public sealed record AgentReportHealthAssessment(
+    string AlgorithmVersion,
+    string TruthClass,
+    int HealthScore,
+    string HealthLevel,
+    string SafeSummary,
+    IReadOnlyCollection<string> Findings,
+    double Confidence,
+    double MissingRate,
+    DateTimeOffset SourceAsOfUtc,
+    bool IsSimulation,
+    int RowCount,
+    bool IsTruncated,
+    IReadOnlyDictionary<string, decimal> TypedMetrics);
+
+public sealed record AgentReportCloudReadonlyQuery(
+    string Intent,
+    string SemanticPlanDigest,
+    string Summary,
+    string SourceMode,
+    bool IsSimulation,
+    string SourceLabel,
+    int RowCount,
+    bool IsTruncated,
+    DateTimeOffset QueriedAtUtc);
+
+public sealed record AgentReportInference(
+    string TruthClass,
+    string SafeSummary,
+    IReadOnlyCollection<string> Findings,
+    IReadOnlyCollection<string> CitationRefs,
+    IReadOnlyCollection<string> EvidenceWarnings,
+    string ConflictStatus,
+    double Confidence);
+
 public sealed record AgentReportDocument(
     string Title,
     string Goal,
@@ -271,7 +306,13 @@ public sealed record AgentReportDocument(
     DateTimeOffset GeneratedAt,
     IReadOnlyList<AgentReportMetric>? Metrics = null,
     AgentReportSourceInfo? CloudReadonlySource = null,
-    IReadOnlyList<AgentBusinessQueryResultSummaryDto>? BusinessQueryResults = null);
+    IReadOnlyList<AgentBusinessQueryResultSummaryDto>? BusinessQueryResults = null,
+    string? EvidenceSetDigest = null,
+    IReadOnlyList<string>? TruthClasses = null,
+    DateTimeOffset? EvidenceAsOfUtc = null,
+    AgentReportHealthAssessment? CurrentHealthAssessment = null,
+    IReadOnlyList<AgentReportCloudReadonlyQuery>? CloudReadonlyQueries = null,
+    AgentReportInference? AiInference = null);
 
 public interface IAgentTableFileParser
 {

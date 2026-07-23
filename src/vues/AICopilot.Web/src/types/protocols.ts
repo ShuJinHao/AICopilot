@@ -48,7 +48,6 @@ export interface ChatErrorPayload {
 export interface IntentResult {
   intent: string
   confidence: number
-  reasoning?: string
   query?: string
 }
 
@@ -150,6 +149,73 @@ export interface AgentTask {
   topologyProfile?: string | null
   isPlanExecutable?: boolean
   planIntegrityStatus?: 'ValidV2' | 'LegacyCompletedReadOnly' | 'Invalid' | string
+}
+
+export interface AgentRuntimeNode {
+  nodeId: string
+  label: string
+  kind: string
+  status: string
+  isRequired: boolean
+  dependencyCount: number
+  joinPolicy?: string | null
+  attemptNo: number
+  maxAttempts: number
+  retryCount: number
+  timeoutSeconds: number
+  durationMs?: number | null
+  startedAt?: string | null
+  completedAt?: string | null
+  failureCode?: string | null
+  safeMessage?: string | null
+}
+
+export interface AgentRuntimeEvidenceQuality {
+  rowCount?: number | null
+  isTruncated: boolean
+  freshness: string
+  missingRate?: number | null
+  confidence?: number | null
+  flags: string[]
+}
+
+export interface AgentRuntimeEvidence {
+  nodeId: string
+  nodeLabel: string
+  evidenceKind: string
+  truthClass: 'ObservedFact' | 'DerivedFact' | 'ModelPrediction' | 'LlmInference' | 'Recommendation' | string
+  truthLabel: string
+  sourceLabel: string
+  sourceMode: string
+  isSimulation: boolean
+  asOfUtc?: string | null
+  timeRangeStartUtc?: string | null
+  timeRangeEndUtc?: string | null
+  quality: AgentRuntimeEvidenceQuality
+  safeSummary: string
+  findings: string[]
+  typedMetrics: Record<string, number>
+  citationCount: number
+}
+
+export interface AgentRuntimeMetric {
+  code: string
+  label: string
+  value?: number | null
+  unit: string
+  status: string
+  source: string
+}
+
+export interface AgentTaskRuntimeSnapshot {
+  taskId: string
+  runAttemptId?: string | null
+  status: string
+  generatedAt: string
+  evidenceSetDigest?: string | null
+  nodes: AgentRuntimeNode[]
+  evidence: AgentRuntimeEvidence[]
+  metrics: AgentRuntimeMetric[]
 }
 
 export interface AgentApprovalRequest {

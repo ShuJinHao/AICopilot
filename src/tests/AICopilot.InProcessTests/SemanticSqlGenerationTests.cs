@@ -14,7 +14,7 @@ public sealed class SemanticSqlGenerationTests
     public SemanticSqlGenerationTests()
     {
         var definitions = new SemanticDefinitionCatalog();
-        var intents = new SemanticIntentCatalog(definitions);
+        var intents = new SemanticQuerySchemaRegistry(definitions);
         _planner = new SemanticQueryPlanner(intents, definitions);
         _sqlGenerator = new SemanticSqlGenerator(new AstSqlGuardrail());
     }

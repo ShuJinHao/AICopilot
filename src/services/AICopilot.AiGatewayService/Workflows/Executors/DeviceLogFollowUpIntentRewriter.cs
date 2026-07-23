@@ -48,7 +48,7 @@ internal static partial class DeviceLogFollowUpIntentRewriter
             existingDeviceLogIntent.Intent = targetIntent;
             existingDeviceLogIntent.Query = payload;
             existingDeviceLogIntent.Confidence = Math.Max(existingDeviceLogIntent.Confidence, 0.92);
-            existingDeviceLogIntent.Reasoning = AppendReason(existingDeviceLogIntent.Reasoning);
+            existingDeviceLogIntent.RoutingNote = AppendReason(existingDeviceLogIntent.RoutingNote);
             return;
         }
 
@@ -57,7 +57,7 @@ internal static partial class DeviceLogFollowUpIntentRewriter
             Intent = targetIntent,
             Confidence = 0.92,
             Query = payload,
-            Reasoning = "deterministic DeviceLog follow-up rewrite; inherited previous readonly query scope"
+            RoutingNote = "deterministic DeviceLog follow-up rewrite; inherited previous readonly query scope"
         });
     }
 

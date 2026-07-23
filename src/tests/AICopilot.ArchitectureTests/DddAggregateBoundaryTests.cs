@@ -11,7 +11,6 @@ using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
@@ -42,7 +41,6 @@ public sealed class DddAggregateBoundaryTests
         typeof(ApprovalPolicy),
         typeof(RoutingModelConfiguration),
         typeof(ToolRegistration),
-        typeof(SkillDefinition),
         typeof(ChatRuntimeSettings),
         typeof(UploadRecord),
         typeof(BusinessDatabase),
@@ -75,7 +73,6 @@ public sealed class DddAggregateBoundaryTests
             ["McpServerInfo"] = "Aggregate",
             ["RoutingModelConfiguration"] = "Aggregate",
             ["Session"] = "Aggregate",
-            ["SkillDefinition"] = "Aggregate",
             ["ToolRegistration"] = "Aggregate",
             ["UploadRecord"] = "Aggregate",
             ["AgentStep"] = "AggregateChild",

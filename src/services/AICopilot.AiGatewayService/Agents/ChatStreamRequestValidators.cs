@@ -20,6 +20,12 @@ public sealed class ChatStreamRequestValidator : IRequestValidator<ChatStreamReq
             return ValueTask.FromResult<ApiProblemDescriptor?>(RequestValidation.Failed("Message is required."));
         }
 
+        if (request.ReferencedAgentTaskId == Guid.Empty)
+        {
+            return ValueTask.FromResult<ApiProblemDescriptor?>(
+                RequestValidation.Failed("ReferencedAgentTaskId must be a non-empty identifier when supplied."));
+        }
+
         return ValueTask.FromResult<ApiProblemDescriptor?>(null);
     }
 }

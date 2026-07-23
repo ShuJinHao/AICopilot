@@ -14,7 +14,6 @@ using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Services.Contracts;
@@ -71,7 +70,7 @@ public static class AgentWorkflowPipelineFixture
         IKnowledgeBaseReadService knowledgeBaseReadService)
     {
         var pluginCatalog = new FixedPluginCatalog(PluginName, []);
-        var semanticCatalog = new SemanticIntentCatalog(new SemanticDefinitionCatalog());
+        var semanticCatalog = new SemanticQuerySchemaRegistry(new SemanticDefinitionCatalog());
         var businessSemantics = new BusinessSemanticsCatalog(
             new BusinessPolicyCatalog(),
             semanticCatalog,
@@ -124,7 +123,7 @@ public static class AgentWorkflowPipelineFixture
             new InMemoryReadRepository<ConversationTemplate>([template]),
             new InMemoryReadRepository<LanguageModel>([model]),
             runtimeFactory);
-        var semanticCatalog = new SemanticIntentCatalog(new SemanticDefinitionCatalog());
+        var semanticCatalog = new SemanticQuerySchemaRegistry(new SemanticDefinitionCatalog());
         var businessSemantics = new BusinessSemanticsCatalog(
             new BusinessPolicyCatalog(),
             semanticCatalog,
@@ -135,10 +134,9 @@ public static class AgentWorkflowPipelineFixture
             pluginCatalog,
             EmptyKnowledgeBaseReadService.Instance,
             EmptyBusinessDatabaseReadService.Instance,
-            new IntentRoutingPromptComposer(businessSemantics),
+            businessSemantics,
             new FixedRoutingModelResolver(),
-            metadata,
-            new InMemoryReadRepository<SkillDefinition>());
+            metadata);
 
         return new IntentRoutingExecutor(
             new FixedMediator(),

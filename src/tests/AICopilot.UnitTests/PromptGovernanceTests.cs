@@ -123,7 +123,7 @@ public sealed class PromptGovernanceTests
     {
         BuiltInConversationTemplates.Find("IntentRoutingAgent")!.SystemPrompt
             .Should().Contain("{{$IntentList}}")
-            .And.Contain("Skill")
+            .And.Contain("多个结构化意图")
             .And.Contain("JSON");
 
         BuiltInConversationTemplates.Find("agent_planner")!.SystemPrompt

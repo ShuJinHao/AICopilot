@@ -33,7 +33,9 @@ public sealed class EnterpriseArtifactWorkspaceP9Tests
             QueryHash: "sim-query-hash-001",
             ResultHash: "sim-result-hash-001",
             RowCount: 12,
-            IsTruncated: false));
+            IsTruncated: false,
+            EvidenceSetDigest: new string('a', 64)));
+        artifact.EvidenceSetDigest.Should().Be(new string('a', 64));
 
         var store = new InMemoryArtifactWorkspaceFileStore();
         await store.WriteTextAsync(workspace.WorkspaceCode, artifact.RelativePath, "# P9 draft\ncapacity summary", artifact.MimeType);

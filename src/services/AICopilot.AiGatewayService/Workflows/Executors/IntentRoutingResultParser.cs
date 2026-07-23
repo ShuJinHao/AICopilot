@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Models;
 
@@ -6,6 +7,16 @@ namespace AICopilot.AiGatewayService.Workflows.Executors;
 
 public static class IntentRoutingResultParser
 {
+    private static readonly IReadOnlySet<string> AllowedProperties = new HashSet<string>(
+        ["intent", "confidence", "query"],
+        StringComparer.Ordinal);
+
+    private static readonly JsonSerializerOptions StrictOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = false,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+    };
+
     public static bool TryParse(string? text, out List<IntentResult> intents)
     {
         intents = [];
@@ -24,26 +35,19 @@ public static class IntentRoutingResultParser
         try
         {
             using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            if (document.RootElement.ValueKind != JsonValueKind.Array ||
+                document.RootElement.GetArrayLength() is < 1 or > 16 ||
+                document.RootElement.EnumerateArray().Any(item => !HasStrictShape(item)))
             {
-                intents = JsonSerializer.Deserialize<List<IntentResult>>(
-                              document.RootElement.GetRawText(),
-                              JsonSerializerOptions.Web)
-                          ?? [];
-            }
-            else if (document.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                var intent = JsonSerializer.Deserialize<IntentResult>(
-                    document.RootElement.GetRawText(),
-                    JsonSerializerOptions.Web);
-                if (intent is not null)
-                {
-                    intents = [intent];
-                }
+                return false;
             }
 
+            intents = JsonSerializer.Deserialize<List<IntentResult>>(
+                          document.RootElement.GetRawText(),
+                          StrictOptions)
+                      ?? [];
+
             intents = intents
-                .Select(NormalizeIntent)
                 .Where(intent => !string.IsNullOrWhiteSpace(intent.Intent))
                 .ToList();
 
@@ -55,21 +59,32 @@ public static class IntentRoutingResultParser
         }
     }
 
-    private static IntentResult NormalizeIntent(IntentResult intent)
+    private static bool HasStrictShape(JsonElement item)
     {
-        if (string.IsNullOrWhiteSpace(intent.Intent) &&
-            !string.IsNullOrWhiteSpace(intent.SkillCode))
+        if (item.ValueKind != JsonValueKind.Object)
         {
-            intent.Intent = $"Skill.{intent.SkillCode.Trim()}";
+            return false;
         }
 
-        if (string.IsNullOrWhiteSpace(intent.Reasoning) &&
-            !string.IsNullOrWhiteSpace(intent.Reason))
+        var properties = item.EnumerateObject().ToArray();
+        if (properties.Length is < 2 or > 3 ||
+            properties.Any(property => !AllowedProperties.Contains(property.Name)) ||
+            properties.GroupBy(property => property.Name, StringComparer.Ordinal).Any(group => group.Count() != 1) ||
+            !item.TryGetProperty("intent", out var intent) ||
+            intent.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(intent.GetString()) ||
+            !item.TryGetProperty("confidence", out var confidence) ||
+            confidence.ValueKind != JsonValueKind.Number ||
+            !confidence.TryGetDouble(out var score) ||
+            double.IsNaN(score) ||
+            double.IsInfinity(score) ||
+            score is < 0 or > 1)
         {
-            intent.Reasoning = intent.Reason.Trim();
+            return false;
         }
 
-        return intent;
+        return !item.TryGetProperty("query", out var query) ||
+               query.ValueKind is JsonValueKind.Null or JsonValueKind.String;
     }
 
     private static string? ExtractJson(string text)
@@ -94,13 +109,6 @@ public static class IntentRoutingResultParser
         if (arrayStart >= 0 && arrayEnd > arrayStart)
         {
             return trimmed[arrayStart..(arrayEnd + 1)];
-        }
-
-        var objectStart = trimmed.IndexOf('{');
-        var objectEnd = trimmed.LastIndexOf('}');
-        if (objectStart >= 0 && objectEnd > objectStart)
-        {
-            return trimmed[objectStart..(objectEnd + 1)];
         }
 
         return null;

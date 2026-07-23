@@ -32,7 +32,8 @@ public enum ToolDataBoundary
     NoData = 0,
     SimulationBusinessOnly = 1,
     RagContextOnly = 2,
-    ArtifactDraftOnly = 3
+    ArtifactDraftOnly = 3,
+    AuthorizedEvidenceOnly = 4
 }
 
 public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregateRoot<ToolRegistrationId>

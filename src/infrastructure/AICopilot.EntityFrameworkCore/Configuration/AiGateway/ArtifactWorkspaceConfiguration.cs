@@ -152,6 +152,10 @@ public sealed class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
             .HasMaxLength(128)
             .HasColumnName("result_hash");
 
+        builder.Property(artifact => artifact.EvidenceSetDigest)
+            .HasMaxLength(64)
+            .HasColumnName("evidence_set_digest");
+
         builder.Property(artifact => artifact.RowCount)
             .IsRequired()
             .HasColumnName("row_count");

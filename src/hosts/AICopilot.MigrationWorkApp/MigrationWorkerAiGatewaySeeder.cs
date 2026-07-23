@@ -3,7 +3,6 @@ using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
 using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Security;
@@ -205,8 +204,6 @@ internal static class MigrationWorkerAiGatewaySeeder
                 string.IsNullOrWhiteSpace(tool.ApprovalPolicy) ? definition.ApprovalPolicy : tool.ApprovalPolicy);
         }
 
-        await SeedSkillDefinitionsAsync(aiGatewayDbContext, now, cancellationToken);
-
         var routingConfigurations = await aiGatewayDbContext.RoutingModelConfigurations
             .ToListAsync(cancellationToken);
         var privateMiniMaxRoutingConfiguration = routingConfigurations.FirstOrDefault(configuration =>
@@ -238,78 +235,6 @@ internal static class MigrationWorkerAiGatewaySeeder
         }
 
         await aiGatewayDbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    private static async Task SeedSkillDefinitionsAsync(
-        AiGatewayDbContext aiGatewayDbContext,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
-    {
-        var trackedToolEntries = aiGatewayDbContext.ChangeTracker
-            .Entries<ToolRegistration>()
-            .ToArray();
-        var deletedToolCodes = trackedToolEntries
-            .Where(entry => entry.State == EntityState.Deleted)
-            .Select(entry => entry.Entity.ToolCode)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var trackedActiveToolCodes = trackedToolEntries
-            .Where(entry => entry.State != EntityState.Deleted)
-            .Select(entry => entry.Entity.ToolCode);
-        var persistedToolCodes = await aiGatewayDbContext.ToolRegistrations
-            .Select(tool => tool.ToolCode)
-            .ToListAsync(cancellationToken);
-        var existingToolCodeSet = persistedToolCodes
-            .Concat(trackedActiveToolCodes)
-            .Where(toolCode => !deletedToolCodes.Contains(toolCode))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var definition in BuiltInSkillDefinitions.All)
-        {
-            var allowedToolCodes = definition.AllowedToolCodes
-                .Where(existingToolCodeSet.Contains)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            if (allowedToolCodes.Length == 0)
-            {
-                continue;
-            }
-
-            var skill = await aiGatewayDbContext.SkillDefinitions.FirstOrDefaultAsync(
-                item => item.SkillCode == definition.SkillCode,
-                cancellationToken);
-            if (skill is null)
-            {
-                aiGatewayDbContext.SkillDefinitions.Add(new SkillDefinition(
-                    definition.SkillCode,
-                    definition.DisplayName,
-                    definition.Description,
-                    allowedToolCodes,
-                    definition.RiskLevel,
-                    definition.ApprovalPolicy,
-                    definition.AllowedDataSourceModes,
-                    definition.AllowedKnowledgeScopes,
-                    definition.OutputComponentTypes,
-                    definition.IsEnabled,
-                    isBuiltIn: true,
-                    definition.Version,
-                    now));
-                continue;
-            }
-
-            skill.Update(
-                definition.DisplayName,
-                definition.Description,
-                allowedToolCodes,
-                definition.RiskLevel,
-                definition.ApprovalPolicy,
-                definition.AllowedDataSourceModes,
-                definition.AllowedKnowledgeScopes,
-                definition.OutputComponentTypes,
-                skill.IsEnabled && definition.IsEnabled,
-                isBuiltIn: true,
-                definition.Version,
-                now);
-        }
     }
 
     private static bool ShouldBindTemplateToPrivateMiniMax(

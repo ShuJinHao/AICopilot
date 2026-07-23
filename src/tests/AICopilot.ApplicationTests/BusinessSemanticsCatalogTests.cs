@@ -64,12 +64,12 @@ public sealed class BusinessSemanticsCatalogTests
     {
         var catalog = CreateCatalog();
         var definitions = new SemanticDefinitionCatalog();
-        var semanticIntentCatalog = new SemanticIntentCatalog(definitions);
+        var semanticQuerySchemaRegistry = new SemanticQuerySchemaRegistry(definitions);
 
         var descriptors = catalog.GetStructuredIntents();
 
         descriptors.Select(item => item.Intent.Intent).Should().BeEquivalentTo(
-            semanticIntentCatalog.GetAll().Select(item => item.Intent));
+            semanticQuerySchemaRegistry.GetAll().Select(item => item.Intent));
         descriptors.Should().OnlyContain(item => item.ExampleQuestions.Count > 0);
         descriptors.Should().OnlyContain(item => !string.IsNullOrWhiteSpace(item.QueryJsonExample));
     }
@@ -77,13 +77,13 @@ public sealed class BusinessSemanticsCatalogTests
     private static BusinessSemanticsCatalog CreateCatalog()
     {
         var definitions = new SemanticDefinitionCatalog();
-        var semanticIntentCatalog = new SemanticIntentCatalog(definitions);
+        var semanticQuerySchemaRegistry = new SemanticQuerySchemaRegistry(definitions);
         var businessPolicyCatalog = new BusinessPolicyCatalog();
         var summaryProfileCatalog = new SemanticSummaryProfileCatalog();
 
         return new BusinessSemanticsCatalog(
             businessPolicyCatalog,
-            semanticIntentCatalog,
+            semanticQuerySchemaRegistry,
             summaryProfileCatalog);
     }
 }

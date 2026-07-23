@@ -12,6 +12,9 @@ internal static class AgentArtifactDocumentFormatting
             SummaryRow("Title", document.Title),
             SummaryRow("Goal", document.Goal),
             SummaryRow("GeneratedAt", document.GeneratedAt.ToString("O", CultureInfo.InvariantCulture)),
+            SummaryRow("EvidenceSetDigest", document.EvidenceSetDigest ?? "NOT-RECORDED"),
+            SummaryRow("TruthClasses", string.Join(", ", document.TruthClasses ?? [])),
+            SummaryRow("EvidenceAsOfUtc", document.EvidenceAsOfUtc?.ToString("O", CultureInfo.InvariantCulture) ?? "NOT-RECORDED"),
             SummaryRow("SourceMarker", BuildSourceMarker(document)),
             SummaryRow("CloudReadonly", document.CloudReadonlySummary ?? string.Empty)
         };
@@ -25,6 +28,45 @@ internal static class AgentArtifactDocumentFormatting
             rows.Add(SummaryRow("RowCount", document.CloudReadonlySource.RowCount.ToString(CultureInfo.InvariantCulture)));
             rows.Add(SummaryRow("Truncated", FormatBool(document.CloudReadonlySource.IsTruncated)));
             rows.Add(SummaryRow("QueryHash", document.CloudReadonlySource.QueryHash ?? string.Empty));
+        }
+
+        foreach (var query in document.CloudReadonlyQueries ?? [])
+        {
+            rows.Add(SummaryRow(
+                $"CloudReadonlyQuery:{query.Intent}",
+                $"sourceMode={query.SourceMode}; isSimulation={FormatBool(query.IsSimulation)}; sourceLabel={query.SourceLabel}; rows={query.RowCount}; truncated={FormatBool(query.IsTruncated)}; queriedAtUtc={query.QueriedAtUtc.ToString("O", CultureInfo.InvariantCulture)}; semanticPlanDigest={query.SemanticPlanDigest}"));
+        }
+
+        if (document.AiInference is { } inference)
+        {
+            rows.Add(SummaryRow("InferenceTruthClass", inference.TruthClass));
+            rows.Add(SummaryRow("InferenceConfidence", inference.Confidence.ToString("0.###", CultureInfo.InvariantCulture)));
+            rows.Add(SummaryRow("InferenceConflictStatus", inference.ConflictStatus));
+            rows.Add(SummaryRow("InferenceSummary", inference.SafeSummary));
+            foreach (var finding in inference.Findings)
+            {
+                rows.Add(SummaryRow("InferenceFinding", finding));
+            }
+            foreach (var citation in inference.CitationRefs)
+            {
+                rows.Add(SummaryRow("InferenceCitation", citation));
+            }
+            foreach (var warning in inference.EvidenceWarnings)
+            {
+                rows.Add(SummaryRow("InferenceEvidenceWarning", warning));
+            }
+        }
+
+        if (document.CurrentHealthAssessment is { } health)
+        {
+            rows.Add(SummaryRow("HealthTruthClass", health.TruthClass));
+            rows.Add(SummaryRow("HealthAlgorithmVersion", health.AlgorithmVersion));
+            rows.Add(SummaryRow("HealthLevel", health.HealthLevel));
+            rows.Add(SummaryRow("HealthScore", health.HealthScore.ToString(CultureInfo.InvariantCulture)));
+            rows.Add(SummaryRow("HealthConfidence", health.Confidence.ToString("0.###", CultureInfo.InvariantCulture)));
+            rows.Add(SummaryRow("HealthMissingRate", health.MissingRate.ToString("0.###", CultureInfo.InvariantCulture)));
+            rows.Add(SummaryRow("HealthSourceAsOfUtc", health.SourceAsOfUtc.ToString("O", CultureInfo.InvariantCulture)));
+            rows.Add(SummaryRow("HealthSummary", health.SafeSummary));
         }
 
         foreach (var result in document.BusinessQueryResults ?? [])
@@ -97,10 +139,34 @@ internal static class AgentArtifactDocumentFormatting
             "RowCount",
             "Truncated",
             "QueryHash",
+            "SemanticPlanDigest",
             "Marker"
         };
         var rows = new List<IReadOnlyDictionary<string, string>>();
-        if (document.CloudReadonlySource is not null)
+        if ((document.CloudReadonlyQueries ?? []).Count != 0)
+        {
+            foreach (var query in document.CloudReadonlyQueries ?? [])
+            {
+                rows.Add(new Dictionary<string, string>
+                {
+                    ["SourceType"] = "CloudReadonly",
+                    ["Name"] = query.Intent,
+                    ["Detail"] = query.Summary,
+                    ["Score"] = string.Empty,
+                    ["IsLowConfidence"] = "false",
+                    ["SourceMode"] = query.SourceMode,
+                    ["IsSimulation"] = FormatBool(query.IsSimulation),
+                    ["SourceLabel"] = query.SourceLabel,
+                    ["SourcePath"] = string.Empty,
+                    ["RowCount"] = query.RowCount.ToString(CultureInfo.InvariantCulture),
+                    ["Truncated"] = FormatBool(query.IsTruncated),
+                    ["QueryHash"] = string.Empty,
+                    ["SemanticPlanDigest"] = query.SemanticPlanDigest,
+                    ["Marker"] = $"sourceMode={query.SourceMode}; isSimulation={FormatBool(query.IsSimulation)}; sourceLabel={query.SourceLabel}; rowCount={query.RowCount}; truncated={FormatBool(query.IsTruncated)}"
+                });
+            }
+        }
+        else if (document.CloudReadonlySource is not null)
         {
             rows.Add(new Dictionary<string, string>
             {
@@ -116,6 +182,7 @@ internal static class AgentArtifactDocumentFormatting
                 ["RowCount"] = document.CloudReadonlySource.RowCount.ToString(CultureInfo.InvariantCulture),
                 ["Truncated"] = FormatBool(document.CloudReadonlySource.IsTruncated),
                 ["QueryHash"] = document.CloudReadonlySource.QueryHash ?? string.Empty,
+                ["SemanticPlanDigest"] = string.Empty,
                 ["Marker"] = BuildSourceMarker(document)
             });
         }
@@ -136,6 +203,7 @@ internal static class AgentArtifactDocumentFormatting
                 ["RowCount"] = result.RowCount.ToString(CultureInfo.InvariantCulture),
                 ["Truncated"] = FormatBool(result.IsTruncated),
                 ["QueryHash"] = result.QueryHash,
+                ["SemanticPlanDigest"] = string.Empty,
                 ["Marker"] = $"sourceMode={result.SourceMode}; isSimulation={FormatBool(result.IsSimulation)}; sourceLabel={result.SourceLabel}; rowCount={result.RowCount}; truncated={FormatBool(result.IsTruncated)}; queryHash={result.QueryHash}"
             });
         }
@@ -156,6 +224,7 @@ internal static class AgentArtifactDocumentFormatting
                 ["RowCount"] = string.Empty,
                 ["Truncated"] = string.Empty,
                 ["QueryHash"] = string.Empty,
+                ["SemanticPlanDigest"] = string.Empty,
                 ["Marker"] = string.Empty
             });
         }
@@ -176,6 +245,7 @@ internal static class AgentArtifactDocumentFormatting
                 ["RowCount"] = "0",
                 ["Truncated"] = "false",
                 ["QueryHash"] = string.Empty,
+                ["SemanticPlanDigest"] = string.Empty,
                 ["Marker"] = BuildSourceMarker(document)
             });
         }

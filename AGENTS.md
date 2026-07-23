@@ -113,7 +113,7 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - 数据库绑定上传调用方必须复用唯一 `PersistenceFileCommitProtocol`，禁止各自复制 unknown/rollback/confirm catch。repository 未消费预留 commit id（包括 callback 漏掉 `SaveChanges`）时，确认必须 fail-closed、删除未提交文件并保留失败信号，不得仅凭 callback 正常返回清 journal。
 - RAG 文档删除事件不得绕过待对账上传：删除物理文件前必须按 storage path 查询 journal；有记录时取得同一 commit lease、在锁内复查并持久退休 journal 后才能删文件，journal 不可读或 lease 活跃必须让消息重试。journal/file 删除即使目录项当前已不可见，也必须完成父目录 durability barrier 后才能继续；日志和审计不得记录原始客户端路径。
 - commit marker 必须按 `created_at_utc` 索引并由 DataWorker 分批清理；默认保留 30 天，保留期必须长于文件对账延迟，存在待处理日志的 marker 不得删除。`AI-PERSIST-01b/01c` 共同定义完整持久化边界，后续修改 Identity、文件上传、marker、共享卷或 DataWorker 清理时必须同时跑真实 PostgreSQL `Suite=PersistenceCommit`、migration 与全量门禁；局部绿测不得替代整体验收。
-- `ArtifactWorkspace` 仍是独立的多文件、覆盖和目录复制边界，不得伪装成已被单文件上传 stage 覆盖。`AI-PERSIST-01d / AI-SEC-047` 完成前，禁止宣称所有数据库绑定文件已原子化；治理时必须同时处理新文件、已有文件覆盖、版本归档、final 复制和 commit-unknown 恢复，不得硬套单文件 API。
+- `ArtifactWorkspace` 是独立的多文件、覆盖和目录复制边界，不得伪装成已被单文件上传 stage 覆盖。所有实现必须同时处理新文件、已有文件替换、版本归档、final 文件集、fencing、manifest/hash、数据库 checkpoint、commit-unknown、rollback/reconciliation 和 orphan cleanup，不得硬套单文件 API。即使源码已接入 file-set journal，也只有真实文件系统 + PostgreSQL 故障矩阵通过后才能把 `AI-PERSIST-01d / AI-SEC-047` 标为 Done 或宣称数据库绑定文件已原子化。
 - 知识库文件唯一写入口是 RAG Document API；AiGateway 只允许 SessionTemp/AgentInput upload。禁止恢复 `UploadRecordScope.KnowledgeBase` 新写入、`IRagDocumentUploadBridge` 或 RAG→AiGateway 同步 shadow record。历史 KB shadow 行/列/枚举字符串由 `AI-PERSIST-01e / AI-SEC-048` 在只读盘点、证据导出和 drain 旧 HttpApi 后物理清理，禁止为冗余影子链新增 saga、幂等键或兼容 adapter。
 - RAG 的应用层 hash 预查不是并发幂等保证；`AI-SEC-050` 完成前不得宣称同 KB/同文件并发上传已去重。治理必须先盘点既有重复数据，再以数据库唯一约束、冲突后的既有 Document 语义和真实 PostgreSQL 并发测试闭环，失败竞争者仍须走 file journal 安全回滚。
 - “至少一个 enabled Admin”是跨 Identity 命令的不变量。当前 `DisableUser`、`UpdateUserRole` 和 migration seed 必须在唯一 Identity transaction 内先取得固定全局 PostgreSQL transaction advisory lock，再读取用户、角色和 enabled Admin；execution-strategy 每次 retry 必须重新加锁并重读。当前生产树没有 DeleteUser 入口；未来新增删除、直接角色移除或其它减少可用管理员数量的路径，必须同时接入该边界、编译型架构 Analyzer 和真实 PostgreSQL 竞争测试，禁止只加应用层 count 或制造空壳兼容 API。
@@ -161,11 +161,15 @@ Cloud-AICopilot OIDC 身份对齐的长期结论见 `../docs/历史核心记录.
 - Chat 模式和 Plan 模式都必须复用统一管线的意图理解、上下文编排和能力发现；两者只能在出口行为不同。
 - Chat 出口可以按现有安全策略直接生成回答，或执行已允许的低风险只读动作。
 - Plan 出口只能生成 `PlanDraft` 计划草案；用户确认前不得执行 Cloud 查询、MCP 工具、Tool 调用、Worker 入队或其他真实业务动作。
-- `PlanAgentTaskCommand` 只能负责计划草案/任务状态的持久化和编排入口，不得独立实现意图理解、工具发现、Skill 选择或 Tool catalog 强校验。
-- Skill、Tool、MCP 或 DataSource 未匹配时，不得阻断 `PlanDraft` 生成；只能在草案里说明能力缺口或要求用户补充目标。
-- 用户确认 `PlanDraft` 后，才允许转换为 `ExecutablePlan` / `AgentTask`，并进入 Skill、Tool、Schema、Guard、审批和 Worker 执行链路。
+- `PlanAgentTaskCommand` 只能负责计划草案/任务状态的持久化和编排入口；意图适配与步骤/节点生成必须由唯一 `AgentPlanCompiler` 负责，不得在 coordinator、前端或兼容适配器中复制编译规则。
+- 唯一生产实现是 `DeterministicAgentPlanCompiler`；它必须消费同一版本 `AgentIntentRegistry`，显式产生 `LinearV1` 或受限 `DagV1`，不得恢复 Skill/DynamicPlanner、第二套 compiler、手写 PlanJson 或由 Runtime 猜测拓扑。多 Cloud intent 必须逐节点冻结 semantic intent/digest/scope/time/limit，不能只执行最后一个 intent。
+- Tool、MCP、Knowledge、DataSource、Provider 或资源未匹配时，不得阻断 `PlanDraft` 生成；必须形成显式 capability gap，带 gap 的草案保持 node-free、不可确认且不得入队。
+- 用户确认无 gap 的 `PlanDraft` 后，才允许转换为 `ExecutablePlan` / `AgentTask`，并进入 Tool、Schema、Guard、审批和 Worker 执行链路。
 - Cloud 只读 Agent 当前正式能力覆盖 `Analysis.Device.List/Detail/Status`、`Analysis.DeviceLog.Latest/Range/ByLevel`、`Analysis.Capacity.Range/ByDevice`、`Analysis.ProductionData.Latest/Range/ByDevice`、`Analysis.Process.List/Detail` 和 `Analysis.ClientRelease.List`；`Analysis.Capacity.ByProcess` 尚未形成正式聚合契约，不得宣称可用。全部已覆盖能力必须复用统一语义定义和唯一 Cloud AiRead 实现，不能另起隐藏查询链、伪造返回或降级到其他数据源。
 - Agent workflow 的阶段和并行分支必须由 `AgentWorkflowTopology` 显式声明；`Tools`、`Knowledge`、`DataAnalysis`、`BusinessPolicy` 四个分支必须保持 `Task.WhenAll` + `AgentWorkflowSink` fan-out/fan-in 模式，不得为了“管道化”拍平成串行或为新能力另起一条孤立链路。
+- Durable 执行的 Task claim、Node claim、lease/fencing、budget reservation、checkpoint、Evidence、OutcomeUnknown 和 file-set reconciliation 必须由 PostgreSQL/持久化 store 的权威状态驱动；并行 Node 使用独立运行 state，合流只合并 sealed Evidence，不得共享可变 state 或用内存成功状态覆盖持久化结果。
+- `AgentReasoningNode` 只能深度 1、`EvidenceOnly + SafeSummary`、无 spawn/Tool/权限扩张；输出必须保持 `LlmInference/Recommendation` truth class，不能冒充事实或预测。
+- 完成任务的报告、图表、Markdown/HTML/PDF/PPTX/XLSX 和 Chat 追问必须复用同一最终 `EvidenceSetDigest`。Chat 仅允许用户显式引用当前用户/会话内 `Completed` 任务，服务端校验 succeeded attempt、finalization checkpoint、Evidence scope/seal/expiry/lineage 后只注入 bounded safe context；禁止自动复用最近任务。新设备、工序、日志级别或时间窗口必须重新走只读查询，不能把旧 EvidenceSet 当新事实。
 
 ## Capability Boundaries
 

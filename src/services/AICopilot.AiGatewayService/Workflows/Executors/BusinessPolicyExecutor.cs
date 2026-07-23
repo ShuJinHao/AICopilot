@@ -1,4 +1,5 @@
 using System.Text;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.BusinessPolicies;
 using AICopilot.AiGatewayService.BusinessSemantics;
 using AICopilot.AiGatewayService.Models;
@@ -12,22 +13,34 @@ public class BusinessPolicyExecutor(
 {
     public const string ExecutorId = nameof(BusinessPolicyExecutor);
 
-    public bool IsRelevant(IEnumerable<IntentResult> intentResults)
+    internal bool IsRelevant(
+        IEnumerable<IntentResult> intentResults,
+        AgentIntentRegistrySnapshot registry)
     {
         return intentResults.Any(item =>
             item.Confidence > 0.6
+            && AgentIntentRegistryV1.IsIntentClass(
+                registry,
+                item.Intent,
+                AgentIntentClass.Policy)
             && businessSemanticsCatalog.TryGetPolicyIntent(item.Intent, out _));
     }
 
     public Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
         string? userQuestion,
+        AgentIntentRegistrySnapshot registry,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
         var policyIntents = intentResults
-            .Where(item => item.Confidence > 0.6 && businessSemanticsCatalog.TryGetPolicyIntent(item.Intent, out _))
+            .Where(item => item.Confidence > 0.6 &&
+                           AgentIntentRegistryV1.IsIntentClass(
+                               registry,
+                               item.Intent,
+                               AgentIntentClass.Policy) &&
+                           businessSemanticsCatalog.TryGetPolicyIntent(item.Intent, out _))
             .GroupBy(item => item.Intent, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToList();

@@ -64,16 +64,17 @@ public sealed class FrontendContractSnapshotTests
         var taskId = Guid.NewGuid();
         var planJson = """
         {
-          "plannerMode": "Dynamic",
           "plannerModelId": "11111111-1111-1111-1111-111111111111",
           "plannerValidationVersion": "2026-05",
           "plannerToolCatalogVersion": "2026-05",
           "plannerAvailableToolCount": 3,
-          "cloudReadonlyIntent": {
-            "intent": "Analysis.Device.Status",
-            "confidence": 0.91,
-            "querySummary": "设备状态"
-          },
+          "cloudReadonlyIntents": [
+            {
+              "intent": "Analysis.Device.Status",
+              "confidence": 0.91,
+              "querySummary": "设备状态"
+            }
+          ],
           "steps": [
             {
               "title": "查询设备状态",
@@ -168,12 +169,11 @@ public sealed class FrontendContractSnapshotTests
             "planIntegrityStatus",
             "steps");
         var serializedPlan = root.GetProperty("planJson").GetString();
-        serializedPlan.Should().Contain("\"plannerMode\"");
         serializedPlan.Should().Contain("\"plannerModelId\"");
         serializedPlan.Should().Contain("\"plannerValidationVersion\"");
         serializedPlan.Should().Contain("\"plannerToolCatalogVersion\"");
         serializedPlan.Should().Contain("\"plannerAvailableToolCount\"");
-        serializedPlan.Should().Contain("\"cloudReadonlyIntent\"");
+        serializedPlan.Should().Contain("\"cloudReadonlyIntents\"");
         serializedPlan.Should().Contain("\"inputJson\"");
 
         var boundaryPrefix = "{\"schemaVersion\":\"2.0\",\"padding\":\"";

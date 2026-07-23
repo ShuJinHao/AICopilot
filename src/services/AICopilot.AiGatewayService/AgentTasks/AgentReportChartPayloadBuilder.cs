@@ -6,9 +6,34 @@ internal static class AgentReportChartPayloadBuilder
 {
     public static object BuildChartPayload(AgentTaskRunState state)
     {
+        foreach (var result in state.CloudReadonlyResults
+                     .OrderBy(item => item.Intent, StringComparer.Ordinal)
+                     .ThenBy(item => item.SemanticPlanDigest, StringComparer.Ordinal))
+        {
+            var resultSource = new AgentReportSourceInfo(
+                result.SourceMode,
+                result.IsSimulation,
+                result.SourceLabel,
+                null,
+                result.RowCount,
+                result.IsTruncated);
+            var resultPayload = TryBuildChartPayload(
+                state,
+                result.Intent,
+                result.Rows.Take(AgentReportFormatting.PreviewRowLimit).ToArray(),
+                resultSource,
+                result.RowCount,
+                result.IsTruncated);
+            if (resultPayload is not null)
+            {
+                return resultPayload;
+            }
+        }
+
         if (state.CloudReadonlyRows.Count > 0)
         {
             var cloudReadonlyPayload = TryBuildChartPayload(
+                state,
                 state.CloudReadonlySourceLabel ?? "cloud-readonly",
                 state.CloudReadonlyRows.Take(AgentReportFormatting.PreviewRowLimit).ToArray(),
                 AgentReportDocumentBuilder.BuildCloudReadonlySource(state),
@@ -30,7 +55,7 @@ internal static class AgentReportChartPayloadBuilder
                     item => (object?)item.Value,
                     StringComparer.OrdinalIgnoreCase))
                 .ToArray();
-            var tablePayload = TryBuildChartPayload(table.Name, rows, null, table.Rows.Count, false);
+            var tablePayload = TryBuildChartPayload(state, table.Name, rows, null, table.Rows.Count, false);
             if (tablePayload is not null)
             {
                 return tablePayload;
@@ -40,6 +65,7 @@ internal static class AgentReportChartPayloadBuilder
         var labels = state.ParsedData.Select(item => item.FileName).DefaultIfEmpty("input").ToArray();
         var values = state.ParsedData.Select(item => (double)item.Preview.Length).DefaultIfEmpty(0).ToArray();
         return BuildChartPayloadObject(
+            state,
             "parsed-preview",
             labels,
             [new ChartSeries("PreviewLength", "previewLength", values)],
@@ -49,6 +75,7 @@ internal static class AgentReportChartPayloadBuilder
     }
 
     private static object? TryBuildChartPayload(
+        AgentTaskRunState state,
         string source,
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
         AgentReportSourceInfo? sourceInfo,
@@ -89,10 +116,11 @@ internal static class AgentReportChartPayloadBuilder
                     .ToArray()))
             .ToArray();
 
-        return BuildChartPayloadObject(source, labels, series, sourceInfo, rowCount, isTruncated);
+        return BuildChartPayloadObject(state, source, labels, series, sourceInfo, rowCount, isTruncated);
     }
 
     private static object BuildChartPayloadObject(
+        AgentTaskRunState state,
         string source,
         IReadOnlyList<string> labels,
         IReadOnlyList<ChartSeries> series,
@@ -129,6 +157,55 @@ internal static class AgentReportChartPayloadBuilder
                 },
             rowCount,
             truncated = isTruncated,
+            evidenceSetDigest = state.ReportEvidenceSetDigest,
+            truthClasses = state.ReportTruthClasses,
+            evidenceAsOfUtc = state.ReportEvidenceAsOfUtc,
+            cloudReadonlyQueries = state.CloudReadonlyResults
+                .OrderBy(item => item.Intent, StringComparer.Ordinal)
+                .ThenBy(item => item.SemanticPlanDigest, StringComparer.Ordinal)
+                .Select(item => new
+                {
+                    item.Intent,
+                    item.SemanticPlanDigest,
+                    item.Summary,
+                    item.SourceMode,
+                    item.IsSimulation,
+                    item.SourceLabel,
+                    item.RowCount,
+                    item.IsTruncated,
+                    item.QueriedAtUtc
+                })
+                .ToArray(),
+            aiInference = state.ReasoningOutcome is null
+                ? null
+                : new
+                {
+                    state.ReasoningOutcome.TruthClass,
+                    state.ReasoningOutcome.SafeSummary,
+                    state.ReasoningOutcome.Findings,
+                    state.ReasoningOutcome.CitationRefs,
+                    state.ReasoningOutcome.EvidenceWarnings,
+                    state.ReasoningOutcome.ConflictStatus,
+                    state.ReasoningOutcome.Confidence
+                },
+            currentHealthAssessment = state.CloudHealthAssessment is null
+                ? null
+                : new
+                {
+                    state.CloudHealthAssessment.AlgorithmVersion,
+                    state.CloudHealthAssessment.TruthClass,
+                    state.CloudHealthAssessment.HealthScore,
+                    state.CloudHealthAssessment.HealthLevel,
+                    state.CloudHealthAssessment.SafeSummary,
+                    state.CloudHealthAssessment.Findings,
+                    state.CloudHealthAssessment.Confidence,
+                    state.CloudHealthAssessment.MissingRate,
+                    state.CloudHealthAssessment.SourceAsOfUtc,
+                    state.CloudHealthAssessment.IsSimulation,
+                    state.CloudHealthAssessment.RowCount,
+                    state.CloudHealthAssessment.IsTruncated,
+                    state.CloudHealthAssessment.TypedMetrics
+                },
             generatedAt = DateTimeOffset.UtcNow
         };
     }

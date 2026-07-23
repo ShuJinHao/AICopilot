@@ -10,7 +10,7 @@ public sealed class SemanticQueryPlannerTests
     public SemanticQueryPlannerTests()
     {
         var definitions = new SemanticDefinitionCatalog();
-        var intents = new SemanticIntentCatalog(definitions);
+        var intents = new SemanticQuerySchemaRegistry(definitions);
         _planner = new SemanticQueryPlanner(intents, definitions);
     }
 

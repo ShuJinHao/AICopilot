@@ -2,6 +2,7 @@ using System.Text.Json;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 
@@ -11,6 +12,68 @@ internal sealed class AgentRuntimeArtifactBuilder(
     IAgentArtifactWorkspaceService workspaceService,
     IAgentArtifactDocumentGenerator documentGenerator)
 {
+    public void BindEvidenceSet(
+        AgentTaskRunState state,
+        IReadOnlyCollection<AgentEvidenceRecord> inputEvidence)
+    {
+        if (inputEvidence.Count == 0)
+        {
+            state.ReportEvidenceSetDigest = null;
+            state.ReportTruthClasses = [];
+            state.ReportEvidenceAsOfUtc = null;
+            return;
+        }
+
+        if (!AgentEvidenceSetDigestAuthority.TryComputeEffective(
+                inputEvidence,
+                out var evidenceSetDigest) ||
+            evidenceSetDigest is null)
+        {
+            throw new AgentToolExecutionException(
+                AppProblemCodes.AgentNodeRunStateConflict,
+                "Artifact generation could not bind its authoritative input Evidence set.");
+        }
+
+        var documents = inputEvidence.Select(evidence =>
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<AgentEvidenceEnvelopeDocument>(
+                    evidence.CanonicalEnvelopeJson,
+                    CanonicalJson.SerializerOptions);
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException)
+            {
+                return null;
+            }
+        }).ToArray();
+        if (documents.Any(document => document is null))
+        {
+            throw new AgentToolExecutionException(
+                AppProblemCodes.AgentNodeRunStateConflict,
+                "Artifact generation could not read its authorized Evidence metadata.");
+        }
+
+        var isSameEvidenceSet = string.Equals(
+            state.ReportEvidenceSetDigest,
+            evidenceSetDigest,
+            StringComparison.Ordinal);
+        var inheritedTruthClasses = isSameEvidenceSet
+            ? state.ReportTruthClasses
+            : [];
+
+        state.ReportEvidenceSetDigest = evidenceSetDigest;
+        state.ReportTruthClasses = inheritedTruthClasses
+            .Concat(documents.Select(document => document!.TruthClass))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        state.ReportEvidenceAsOfUtc = documents
+            .Select(document => document!.Source.AsOfUtc ?? document.CreatedAtUtc)
+            .OrderByDescending(value => value)
+            .FirstOrDefault();
+    }
+
     public async Task<object> GenerateChartDataAsync(
     ArtifactWorkspace workspace,
     AgentStep step,
@@ -171,7 +234,8 @@ internal sealed class AgentRuntimeArtifactBuilder(
                 business.QueryHash,
                 ResultHash: null,
                 business.RowCount,
-                business.IsTruncated);
+                business.IsTruncated,
+                EvidenceSetDigest: state.ReportEvidenceSetDigest);
         }
 
         if (!string.IsNullOrWhiteSpace(state.CloudReadonlySourceMode) ||
@@ -186,7 +250,23 @@ internal sealed class AgentRuntimeArtifactBuilder(
                 state.BusinessQueryHash,
                 ResultHash: null,
                 state.CloudReadonlyRowCount,
-                state.CloudReadonlyIsTruncated);
+                state.CloudReadonlyIsTruncated,
+                EvidenceSetDigest: state.ReportEvidenceSetDigest);
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.ReportEvidenceSetDigest))
+        {
+            return new ArtifactSourceMetadata(
+                "Evidence",
+                Boundary: "AuthorizedEvidenceSet",
+                IsSimulation: false,
+                IsSandbox: false,
+                SourceLabel: "Authorized task Evidence",
+                QueryHash: null,
+                ResultHash: null,
+                RowCount: 0,
+                IsTruncated: false,
+                EvidenceSetDigest: state.ReportEvidenceSetDigest);
         }
 
         return null;

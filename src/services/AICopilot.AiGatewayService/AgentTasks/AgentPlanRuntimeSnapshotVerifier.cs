@@ -16,7 +16,8 @@ internal interface IAgentPlanRuntimeSnapshotVerifier
 internal sealed class AgentPlanRuntimeSnapshotVerifier(
     AgentPlanToolGuard planToolGuard,
     IAgentRoutingConfigurationSnapshotReader routingSnapshotReader,
-    IAgentPlanAuthorizationFreshVerifier? authorizationFreshVerifier = null)
+    IAgentPlanAuthorizationFreshVerifier? authorizationFreshVerifier = null,
+    ConfiguredAgentRuntimeFactory? reasoningConfigurationFactory = null)
     : IAgentPlanRuntimeSnapshotVerifier
 {
     public async Task<Result> VerifyAsync(
@@ -50,7 +51,6 @@ internal sealed class AgentPlanRuntimeSnapshotVerifier(
             plan.PlannerSafetySummary?.IsSimulationOnly ?? false,
             plan.BusinessDomains,
             cancellationToken,
-            skillCode: null,
             pluginSelectionMode: plan.PluginSelectionMode);
         if (!currentCatalog.IsSuccess)
         {
@@ -76,11 +76,21 @@ internal sealed class AgentPlanRuntimeSnapshotVerifier(
                 currentRoutingConfiguration,
                 plan.DataSourceIds,
                 plan.KnowledgeBaseIds,
-                plan.IntentCandidates ?? []))
+                plan.IntentCandidates ?? [],
+                plan.ConcurrencyPolicy?.PolicyVersion))
         {
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.ApprovalReconfirmationRequired,
                 "Runtime tool/provider/schema/prompt/model snapshot changed after confirmation; generate and confirm a new PlanDraft."));
+        }
+
+        var reasoningConfiguration = await AgentReasoningPolicyAuthority.VerifyCurrentConfigurationAsync(
+            plan,
+            reasoningConfigurationFactory,
+            cancellationToken);
+        if (!reasoningConfiguration.IsSuccess)
+        {
+            return Result.From(reasoningConfiguration);
         }
 
         return Result.Success();

@@ -74,6 +74,8 @@ public sealed class Artifact : IEntity<ArtifactId>
 
     public string? ResultHash { get; private set; }
 
+    public string? EvidenceSetDigest { get; private set; }
+
     public int RowCount { get; private set; }
 
     public bool IsTruncated { get; private set; }
@@ -147,6 +149,7 @@ public sealed class Artifact : IEntity<ArtifactId>
         SourceLabel = NormalizeOptional(metadata.SourceLabel, 200);
         QueryHash = NormalizeOptional(metadata.QueryHash, 128);
         ResultHash = NormalizeOptional(metadata.ResultHash, 128);
+        EvidenceSetDigest = NormalizeSha256(metadata.EvidenceSetDigest, nameof(metadata.EvidenceSetDigest));
         RowCount = Math.Max(0, metadata.RowCount);
         IsTruncated = metadata.IsTruncated;
     }
@@ -177,6 +180,24 @@ public sealed class Artifact : IEntity<ArtifactId>
             ? null
             : normalized.Length <= maxLength ? normalized : normalized[..maxLength];
     }
+
+    private static string? NormalizeSha256(string? value, string paramName)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        if (normalized.Length != 64 || normalized.Any(character =>
+                character is not (>= '0' and <= '9') &&
+                character is not (>= 'a' and <= 'f')))
+        {
+            throw new ArgumentException($"{paramName} must be a lowercase SHA-256 digest.", paramName);
+        }
+
+        return normalized;
+    }
 }
 
 public sealed record ArtifactSourceMetadata(
@@ -188,4 +209,5 @@ public sealed record ArtifactSourceMetadata(
     string? QueryHash,
     string? ResultHash,
     int RowCount,
-    bool IsTruncated);
+    bool IsTruncated,
+    string? EvidenceSetDigest = null);

@@ -1,4 +1,5 @@
 using AICopilot.AiGatewayService.Models;
+using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Services.Contracts;
@@ -13,7 +14,7 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
     public DeviceLogFollowUpIntentRewriterTests()
     {
         var definitions = new SemanticDefinitionCatalog();
-        var intents = new SemanticIntentCatalog(definitions);
+        var intents = new SemanticQuerySchemaRegistry(definitions);
         _planner = new SemanticQueryPlanner(intents, definitions);
     }
 
@@ -194,5 +195,19 @@ public sealed class DeviceLogFollowUpIntentRewriterTests
         intents.Should().ContainSingle();
         intents[0].Intent.Should().Be("General.Chat");
         intents[0].Query.Should().Be("那涂布设备呢");
+    }
+
+    [Theory]
+    [InlineData("换成昨天的数据", true)]
+    [InlineData("那 DEV-002 呢", true)]
+    [InlineData("再查一下 WARN 级别日志", true)]
+    [InlineData("把时间改为 2026-07-01 到 2026-07-02", true)]
+    [InlineData("为什么昨天的设备结论是这样", false)]
+    [InlineData("请解释这个结论的依据", false)]
+    public void EvidenceReusePolicy_ShouldRequireFreshQueryOnlyForScopeChanges(
+        string message,
+        bool expected)
+    {
+        AgentTaskChatEvidenceReusePolicy.RequiresFreshReadOnlyQuery(message).Should().Be(expected);
     }
 }

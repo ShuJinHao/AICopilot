@@ -101,13 +101,13 @@ describe('apiClient endpoint trust', () => {
       title: 'Bad Request',
       status: 400,
       code: 'agent_plan_tool_denied',
-      detail: 'toolCode is not allowed by the selected skill.',
+      detail: 'The requested capability does not authorize this tool.',
       errors: ['legacy field should be ignored']
     })).toEqual({
       title: 'Bad Request',
       status: 400,
       code: 'agent_plan_tool_denied',
-      detail: 'toolCode is not allowed by the selected skill.',
+      detail: 'The requested capability does not authorize this tool.',
       missingPermissions: undefined
     })
   })

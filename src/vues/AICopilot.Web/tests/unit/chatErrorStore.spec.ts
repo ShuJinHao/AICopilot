@@ -25,21 +25,15 @@ describe('chatErrorStore', () => {
     expect(
       resolveChatErrorMessage({
         code: 'agent_plan_tool_denied',
-        detail: 'toolCode query_device_logs is not allowed by skill general_report.',
+        detail: 'toolCode query_device_logs is outside the requested capability range.',
       }),
-    ).toBe('计划包含当前 Skill 不允许的工具，请调整 Skill 或重新生成计划。')
+    ).toBe('计划包含超出当前请求范围或权限范围的工具，请调整目标后重新生成。')
 
     expect(
       resolveChatErrorMessage({
         code: 'agent_worker_unavailable',
       }),
     ).toBe('当前没有可用 DataWorker，请检查 Worker 状态。')
-
-    expect(
-      resolveChatErrorMessage({
-        code: 'agent_skill_selection_required',
-      }),
-    ).toBe('无法自动识别合适的 Skill，请补充任务目标或手动选择 Skill 后重试。')
 
     expect(
       resolveChatErrorMessage({
@@ -106,11 +100,11 @@ describe('chatErrorStore', () => {
           title: 'Validation failed',
           errors: {
             Goal: ['The Goal field is required.'],
-            SkillCode: ['Skill is invalid.'],
+            ArtifactTargets: ['Artifact target is invalid.'],
           },
         }),
       ),
-    ).toBe('Goal: The Goal field is required.；SkillCode: Skill is invalid.')
+    ).toBe('Goal: The Goal field is required.；ArtifactTargets: Artifact target is invalid.')
 
     expect(
       toFriendlyMessage(

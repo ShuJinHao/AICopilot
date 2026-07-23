@@ -381,16 +381,6 @@
   line-height: 1.55;
 }
 
-.agent-skill-reason {
-  margin: 0;
-  border-left: 2px solid rgba(63, 111, 115, 0.24);
-  padding-left: 9px;
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.55;
-}
-
 .agent-step-preview {
   display: grid;
   gap: 7px;
@@ -1492,37 +1482,6 @@
   color: var(--ai-text-muted);
 }
 
-.skill-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  max-width: 220px;
-  border: 1px solid rgba(63, 111, 115, 0.18);
-  border-radius: 999px;
-  padding: 0 10px;
-  background: rgba(255, 255, 255, 0.78);
-  color: var(--ai-accent);
-  box-shadow: var(--ai-shadow-xs);
-}
-
-.skill-picker select {
-  min-width: 0;
-  max-width: 168px;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--ai-text);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 850;
-}
-
-.skill-picker select:disabled {
-  color: var(--ai-text-muted);
-  cursor: not-allowed;
-}
-
 .uploaded-hint {
   color: var(--ai-text-muted);
   font-weight: 800;
@@ -1593,69 +1552,6 @@
   font: inherit;
   font-size: 13px;
   font-weight: 850;
-}
-
-.plugin-option-group {
-  min-width: 0;
-}
-
-.plugin-tool-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.plugin-tool-chip {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  border: 1px solid var(--ai-border);
-  border-radius: 13px;
-  padding: 9px 10px;
-  background: var(--ai-surface);
-  color: var(--ai-text);
-  cursor: pointer;
-  text-align: left;
-}
-
-.plugin-tool-chip.active {
-  border-color: rgba(63, 111, 115, 0.35);
-  background: rgba(240, 253, 250, 0.86);
-  box-shadow: 0 0 0 3px rgba(63, 111, 115, 0.09);
-}
-
-.plugin-tool-chip strong,
-.plugin-tool-chip span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.plugin-tool-chip strong {
-  font-size: 12px;
-  font-weight: 950;
-}
-
-.plugin-tool-chip span {
-  color: var(--ai-text-muted);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.quiet-link {
-  width: fit-content;
-  border: 0;
-  background: transparent;
-  color: var(--ai-accent);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.panel-empty.compact {
-  padding: 10px;
-  font-size: 12px;
 }
 
 .composer-input-row {
@@ -1798,8 +1694,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .composer-options-panel,
-  .plugin-tool-grid {
+  .composer-options-panel {
     grid-template-columns: minmax(0, 1fr);
   }
 

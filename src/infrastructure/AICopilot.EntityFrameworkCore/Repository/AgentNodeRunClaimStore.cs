@@ -11,13 +11,47 @@ internal sealed class AgentNodeRunClaimStore(
     AgentExecutionTransactionRunner transactionRunner)
     : IAgentNodeRunClaimStore
 {
+    public Task<AgentNodeRunClaimOutcome> TryClaimAsync(
+        AgentNodeRunId nodeRunId,
+        AgentTaskRunAttemptId runAttemptId,
+        long taskFencingToken,
+        string leaseOwner,
+        TimeSpan leaseDuration,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken = default) =>
+        TryClaimCoreAsync(
+            nodeRunId,
+            runAttemptId,
+            taskFencingToken,
+            leaseOwner,
+            leaseDuration,
+            nowUtc,
+            cancellationToken);
+
     public Task<AgentNodeRunClaimOutcome> TryClaimNextAsync(
         AgentTaskRunAttemptId runAttemptId,
         long taskFencingToken,
         string leaseOwner,
         TimeSpan leaseDuration,
         DateTimeOffset nowUtc,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        TryClaimCoreAsync(
+            nodeRunId: null,
+            runAttemptId,
+            taskFencingToken,
+            leaseOwner,
+            leaseDuration,
+            nowUtc,
+            cancellationToken);
+
+    private Task<AgentNodeRunClaimOutcome> TryClaimCoreAsync(
+        AgentNodeRunId? nodeRunId,
+        AgentTaskRunAttemptId runAttemptId,
+        long taskFencingToken,
+        string leaseOwner,
+        TimeSpan leaseDuration,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
     {
         if (taskFencingToken <= 0 || leaseDuration <= TimeSpan.Zero)
         {
@@ -78,20 +112,34 @@ internal sealed class AgentNodeRunClaimStore(
                         "Queue claim authority is stale or no longer started.");
                 }
 
-                var node = await context.AgentNodeRuns
-                    .FromSqlInterpolated($$"""
-                        SELECT node.*, node.xmin
-                        FROM aigateway.agent_node_runs AS node
-                        WHERE run_attempt_id = {{runAttemptId.Value}}
-                          AND queue_item_id = {{queueItem.Id.Value}}
-                          AND task_fencing_token = {{taskFencingToken}}
-                          AND status = 'Runnable'
-                          AND (next_attempt_at IS NULL OR next_attempt_at <= {{nowUtc}})
-                        ORDER BY created_at, node_id, id
-                        FOR UPDATE SKIP LOCKED
-                        LIMIT 1
-                        """)
-                    .SingleOrDefaultAsync(token);
+                var node = nodeRunId is null
+                    ? await context.AgentNodeRuns
+                        .FromSqlInterpolated($$"""
+                            SELECT node.*, node.xmin
+                            FROM aigateway.agent_node_runs AS node
+                            WHERE run_attempt_id = {{runAttemptId.Value}}
+                              AND queue_item_id = {{queueItem.Id.Value}}
+                              AND task_fencing_token = {{taskFencingToken}}
+                              AND status = 'Runnable'
+                              AND (next_attempt_at IS NULL OR next_attempt_at <= {{nowUtc}})
+                            ORDER BY created_at, node_id, id
+                            FOR UPDATE SKIP LOCKED
+                            LIMIT 1
+                            """)
+                        .SingleOrDefaultAsync(token)
+                    : await context.AgentNodeRuns
+                        .FromSqlInterpolated($$"""
+                            SELECT node.*, node.xmin
+                            FROM aigateway.agent_node_runs AS node
+                            WHERE id = {{nodeRunId.Value.Value}}
+                              AND run_attempt_id = {{runAttemptId.Value}}
+                              AND queue_item_id = {{queueItem.Id.Value}}
+                              AND task_fencing_token = {{taskFencingToken}}
+                              AND status = 'Runnable'
+                              AND (next_attempt_at IS NULL OR next_attempt_at <= {{nowUtc}})
+                            FOR UPDATE SKIP LOCKED
+                            """)
+                        .SingleOrDefaultAsync(token);
                 if (node is null)
                 {
                     return Outcome(

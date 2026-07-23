@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Workflows.Executors;
@@ -15,7 +16,10 @@ public sealed record AgentPlanDraftWorkflowResult(
     string Scene,
     IReadOnlyCollection<IntentResult> Intents,
     IReadOnlyCollection<AiToolDefinition> Tools,
-    ChatExecutionMetadataSnapshot ExecutionMetadata);
+    ChatExecutionMetadataSnapshot ExecutionMetadata)
+{
+    internal required AgentIntentRegistrySnapshot RegistrySnapshot { get; init; }
+}
 
 public class AgentWorkflowPipeline(
     IntentRoutingExecutor intentRouting,
@@ -28,19 +32,23 @@ public class AgentWorkflowPipeline(
     FinalAgentRunExecutor agentRun,
     IFinalAgentContextStore finalAgentContextStore,
     IFinalAgentContextSerializer finalAgentContextSerializer,
-    ILogger<AgentWorkflowPipeline> logger)
+    ILogger<AgentWorkflowPipeline> logger,
+    IAgentTaskChatEvidenceProvider? taskChatEvidenceProvider = null)
 {
     public async Task<AgentPlanDraftWorkflowResult> RunPlanDraftWorkflowAsync(
         ChatStreamRequest request,
         CancellationToken ct = default)
     {
         var routing = await intentRouting.ExecuteAsync(request, ct);
-        var tools = await DiscoverSafeToolsAsync(routing.Intents, ct);
+        var tools = await DiscoverSafeToolsAsync(routing.Intents, routing.RegistrySnapshot, ct);
         return new AgentPlanDraftWorkflowResult(
             routing.Scene.ToString(),
             routing.Intents,
             tools.Tools ?? [],
-            routing.ExecutionMetadata);
+            routing.ExecutionMetadata)
+        {
+            RegistrySnapshot = routing.RegistrySnapshot
+        };
     }
 
     public async Task<AgentPlanDraftWorkflowResult> RunPlanDraftRoutingOnlyAsync(
@@ -52,7 +60,10 @@ public class AgentWorkflowPipeline(
             routing.Scene.ToString(),
             routing.Intents,
             [],
-            routing.ExecutionMetadata);
+            routing.ExecutionMetadata)
+        {
+            RegistrySnapshot = routing.RegistrySnapshot
+        };
     }
 
     public async IAsyncEnumerable<ChatChunk> RunIntentWorkflowAsync(
@@ -75,6 +86,77 @@ public class AgentWorkflowPipeline(
             yield return new ChatChunk(IntentRoutingExecutor.ExecutorId, ChunkType.Intent, routing.ResponseText);
         }
 
+        AgentTaskChatEvidenceContext? boundTaskEvidence = null;
+        if (request.ReferencedAgentTaskId is { } referencedTaskId)
+        {
+            var routedOnlyGeneralChat = routing.Intents.Count > 0 &&
+                                        routing.Intents.All(intent => string.Equals(
+                                            intent.Intent,
+                                            "General.Chat",
+                                            StringComparison.Ordinal));
+            var freshReadOnlyScopeRequested =
+                AgentTaskChatEvidenceReusePolicy.RequiresFreshReadOnlyQuery(request.Message);
+            if (routedOnlyGeneralChat && freshReadOnlyScopeRequested)
+            {
+                yield return CreateTaskEvidenceEvent(
+                    "task_evidence_refresh_required",
+                    "检测到设备、工序、日志级别或时间范围变化，但本轮未形成安全的数据读取意图；系统未复用旧任务证据。",
+                    evidenceSetDigest: null,
+                    freshQueryRequired: true);
+                yield return AgentStreamRuntime.CreateErrorChunk(
+                    AppProblemCodes.ChatStreamFailed,
+                    "A changed readonly data scope was routed as General.Chat, so the sealed task Evidence was not reused and no query was executed.",
+                    nameof(AgentWorkflowPipeline),
+                    "你改变了查询范围，但本轮没有形成可安全执行的新只读查询。请明确写出要查询的设备、工序、日志级别和时间范围后重试。旧任务结果未被复用。");
+                yield break;
+            }
+
+            var canReuseCompletedTaskEvidence = routedOnlyGeneralChat;
+            if (canReuseCompletedTaskEvidence)
+            {
+                if (session is null || taskChatEvidenceProvider is null)
+                {
+                    yield return AgentStreamRuntime.CreateErrorChunk(
+                        AppProblemCodes.AgentNodeRunStateConflict,
+                        "Completed AgentTask Evidence binding is unavailable for the current Chat runtime.",
+                        nameof(AgentWorkflowPipeline),
+                        "当前任务结果无法安全绑定到追问，请刷新任务结果后重试。");
+                    yield break;
+                }
+
+                var binding = await taskChatEvidenceProvider.BindCompletedTaskAsync(
+                    request.SessionId,
+                    session.UserId,
+                    referencedTaskId,
+                    ct);
+                if (!binding.IsSuccess)
+                {
+                    var problem = binding.Errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+                    yield return AgentStreamRuntime.CreateErrorChunk(
+                        problem?.Code ?? AppProblemCodes.AgentNodeRunStateConflict,
+                        problem?.Detail ?? "Completed AgentTask Evidence binding failed.",
+                        nameof(AgentWorkflowPipeline),
+                        "所选任务结果尚未形成当前会话可复用的封存证据，请刷新任务状态或重新执行查询。");
+                    yield break;
+                }
+
+                boundTaskEvidence = binding.Value!;
+                yield return CreateTaskEvidenceEvent(
+                    "task_evidence_reused",
+                    "已绑定所选已完成任务的封存证据，本轮回答不会重新查询数据。",
+                    boundTaskEvidence.EvidenceSetDigest,
+                    freshQueryRequired: false);
+            }
+            else
+            {
+                yield return CreateTaskEvidenceEvent(
+                    "task_evidence_refresh_required",
+                    "本轮问题命中新业务或数据范围，将按当前意图重新执行，不复用历史任务证据。",
+                    evidenceSetDigest: null,
+                    freshQueryRequired: true);
+            }
+        }
+
         var sink = new AgentWorkflowSink();
         using var branchCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var branchToken = branchCancellation.Token;
@@ -82,12 +164,23 @@ public class AgentWorkflowPipeline(
             .OrderBy(branch => branch.Order)
             .Select(branch =>
             {
-                var isRequired = IsBranchRequired(branch.BranchType, routing.Intents);
-                return RunBranchSafelyAsync(
+                var isRequired = IsBranchRequired(
+                    branch.BranchType,
+                    routing.Intents,
+                    routing.RegistrySnapshot);
+                return RunBranchNodeAsync(
                     branch.BranchType,
                     isRequired,
-                    () => ExecuteBranchAsync(branch.BranchType, routing.Intents, request.Message, sink, session, branchToken),
-                    logger,
+                    () => ExecuteBranchAsync(
+                        branch.BranchType,
+                        routing.Intents,
+                        request.Message,
+                        routing.RegistrySnapshot,
+                        sink,
+                        session,
+                        branchToken),
+                    request.SessionId,
+                    sink,
                     branchToken);
             })
             .ToArray();
@@ -119,7 +212,26 @@ public class AgentWorkflowPipeline(
                 yield break;
             }
 
-            var generationContext = contextAggregator.Execute(request, routing.Scene, branchResults);
+            if (branchResults
+                .Where(result => result.Status == BranchExecutionStatus.Succeeded)
+                .SelectMany(result => result.Evidence)
+                .Any(evidence => !AgentEvidenceAccessChecker.HasExactScopes(
+                    evidence.AllowedConsumerScopes,
+                    AgentEvidenceAccessChecker.BuildChatScopes(request.SessionId))))
+            {
+                yield return AgentStreamRuntime.CreateErrorChunk(
+                    AppProblemCodes.ChatStreamFailed,
+                    "A workflow Evidence envelope is outside the current session consumer scope.",
+                    nameof(AgentWorkflowPipeline),
+                    "本轮分析证据不属于当前会话，系统已停止生成最终回答。");
+                yield break;
+            }
+
+            var generationContext = contextAggregator.Execute(
+                request,
+                routing.Scene,
+                branchResults,
+                boundTaskEvidence);
 
             await using var finalAgentContext = await agentBuild.ExecuteAsync(generationContext, ct);
             await foreach (var chunk in RunFinalAgentAsync(finalAgentContext, session, assistantText, ct))
@@ -258,6 +370,137 @@ public class AgentWorkflowPipeline(
         }
     }
 
+    private async Task<BranchResult> RunBranchNodeAsync(
+        BranchType branchType,
+        bool isRequired,
+        Func<Task<BranchResult>> execute,
+        Guid sessionId,
+        AgentWorkflowSink sink,
+        CancellationToken ct)
+    {
+        var nodeId = $"chat-{branchType.ToString().ToLowerInvariant()}-branch";
+        var nodeKind = branchType switch
+        {
+            BranchType.Tools or BranchType.BusinessPolicy => "PolicyValidationNode",
+            BranchType.Knowledge => "KnowledgeRetrievalNode",
+            BranchType.DataAnalysis => "DeterministicComputeNode",
+            _ => "DeterministicComputeNode"
+        };
+        var executionContract = AgentNodeExecutionContract.ForChat(
+            nodeId,
+            nodeKind,
+            isRequired,
+            branchType.ToString());
+        await WriteNodeEventAsync(
+            sink,
+            new AgentNodeExecutionEvent(
+                AgentNodeExecutionEvent.CurrentSchemaVersion,
+                AgentNodeExecutionEventType.Started,
+                "Chat",
+                nodeId,
+                nodeKind,
+                branchType.ToString(),
+                isRequired,
+                EvidenceSetDigest: null,
+                FailureCode: null,
+                DateTimeOffset.UtcNow),
+            ct);
+
+        var result = await RunBranchSafelyAsync(
+            branchType,
+            isRequired,
+            () => AgentNodeExecutionPlane.ExecuteAsync(
+                executionContract,
+                _ => execute(),
+                ct),
+            logger,
+            ct);
+        if (result.Status == BranchExecutionStatus.Succeeded)
+        {
+            var normalized = AgentWorkflowEvidenceNormalizer.Normalize(result, sessionId);
+            if (!normalized.IsSuccess)
+            {
+                var problem = normalized.Errors?.OfType<ApiProblemDescriptor>().FirstOrDefault();
+                result = BranchResult.Failed(
+                        branchType,
+                        problem?.Code ?? AppProblemCodes.ChatStreamFailed,
+                        problem?.Detail ?? "Workflow branch Evidence normalization failed.")
+                    .WithRequirement(isRequired);
+            }
+            else
+            {
+                result = normalized.Value!.WithRequirement(isRequired);
+            }
+        }
+
+        var eventType = result.Status switch
+        {
+            BranchExecutionStatus.Skipped => AgentNodeExecutionEventType.Skipped,
+            BranchExecutionStatus.Empty => AgentNodeExecutionEventType.Empty,
+            BranchExecutionStatus.Succeeded => AgentNodeExecutionEventType.Succeeded,
+            BranchExecutionStatus.Failed => AgentNodeExecutionEventType.Failed,
+            _ => AgentNodeExecutionEventType.Failed
+        };
+        var evidenceSetDigest = result.Evidence.Count == 0
+            ? null
+            : AgentWorkflowEvidenceNormalizer.ComputeEvidenceSetDigest(result.Evidence);
+        await WriteNodeEventAsync(
+            sink,
+            new AgentNodeExecutionEvent(
+                AgentNodeExecutionEvent.CurrentSchemaVersion,
+                eventType,
+                "Chat",
+                nodeId,
+                result.Evidence.FirstOrDefault()?.NodeKind ?? nodeKind,
+                branchType.ToString(),
+                isRequired,
+                evidenceSetDigest,
+                result.FailureCode,
+                DateTimeOffset.UtcNow),
+            ct);
+        return result;
+    }
+
+    private static ValueTask WriteNodeEventAsync(
+        AgentWorkflowSink sink,
+        AgentNodeExecutionEvent nodeEvent,
+        CancellationToken cancellationToken)
+    {
+        return sink.WriteAsync(
+            new ChatChunk(
+                nameof(AgentWorkflowPipeline),
+                ChunkType.AgentEvent,
+                nodeEvent.ToJson()),
+            cancellationToken);
+    }
+
+    private static ChatChunk CreateTaskEvidenceEvent(
+        string stage,
+        string detail,
+        string? evidenceSetDigest,
+        bool freshQueryRequired)
+    {
+        return new ChatChunk(
+            nameof(AgentWorkflowPipeline),
+            ChunkType.AgentEvent,
+            CanonicalJson.Serialize(new
+            {
+                stage,
+                code = (string?)null,
+                detail,
+                recoverable = true,
+                suggestedAction = (string?)null,
+                metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["evidenceSetDigest"] = evidenceSetDigest ?? string.Empty,
+                    ["freshQueryRequired"] = freshQueryRequired.ToString().ToLowerInvariant(),
+                    ["sourceMode"] = evidenceSetDigest is null
+                        ? "FreshReadonlyQuery"
+                        : "CompletedAgentTaskEvidence"
+                }
+            }));
+    }
+
     internal static ChatChunk? CreateRequiredBranchFailureChunk(IEnumerable<BranchResult> branchResults)
     {
         if (!branchResults.Any(result =>
@@ -274,14 +517,17 @@ public class AgentWorkflowPipeline(
             "本次请求所需的只读分析、知识、策略或工具能力未能完成，系统已停止生成最终回答，请稍后重试。");
     }
 
-    private bool IsBranchRequired(BranchType branchType, IReadOnlyCollection<IntentResult> intents)
+    private bool IsBranchRequired(
+        BranchType branchType,
+        IReadOnlyCollection<IntentResult> intents,
+        AgentIntentRegistrySnapshot registry)
     {
         return branchType switch
         {
-            BranchType.Tools => ToolsPackExecutor.IsRelevant(intents),
-            BranchType.Knowledge => KnowledgeRetrievalExecutor.IsRelevant(intents),
-            BranchType.DataAnalysis => DataAnalysisExecutor.IsRelevant(intents),
-            BranchType.BusinessPolicy => businessPolicy.IsRelevant(intents),
+            BranchType.Tools => ToolsPackExecutor.IsRelevant(intents, registry),
+            BranchType.Knowledge => KnowledgeRetrievalExecutor.IsRelevant(intents, registry),
+            BranchType.DataAnalysis => DataAnalysisExecutor.IsRelevant(intents, registry),
+            BranchType.BusinessPolicy => businessPolicy.IsRelevant(intents, registry),
             _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
         };
     }
@@ -290,25 +536,27 @@ public class AgentWorkflowPipeline(
         BranchType branchType,
         List<IntentResult> intents,
         string message,
+        AgentIntentRegistrySnapshot registry,
         AgentWorkflowSink sink,
         SessionRuntimeSnapshot? session,
         CancellationToken ct)
     {
         return branchType switch
         {
-            BranchType.Tools => DiscoverSafeToolsAsync(intents, ct),
-            BranchType.Knowledge => knowledgeRetrieval.ExecuteAsync(intents, ct),
-            BranchType.DataAnalysis => dataAnalysis.ExecuteAsync(intents, sink, session, ct),
-            BranchType.BusinessPolicy => businessPolicy.ExecuteAsync(intents, message, ct),
+            BranchType.Tools => DiscoverSafeToolsAsync(intents, registry, ct),
+            BranchType.Knowledge => knowledgeRetrieval.ExecuteAsync(intents, registry, ct),
+            BranchType.DataAnalysis => dataAnalysis.ExecuteAsync(intents, registry, sink, session, ct),
+            BranchType.BusinessPolicy => businessPolicy.ExecuteAsync(intents, message, registry, ct),
             _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
         };
     }
 
     private async Task<BranchResult> DiscoverSafeToolsAsync(
         List<IntentResult> intents,
+        AgentIntentRegistrySnapshot registry,
         CancellationToken ct)
     {
-        var discovered = await toolsPack.DiscoverAsync(intents, ct);
+        var discovered = await toolsPack.DiscoverAsync(intents, registry, ct);
         if (discovered.Tools is null)
         {
             return discovered;

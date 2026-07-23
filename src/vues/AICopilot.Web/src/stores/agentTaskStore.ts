@@ -1,7 +1,12 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { chatService } from '@/services/chatService'
-import type { AgentApprovalRequest, AgentTask, AgentTaskAuditSummary } from '@/types/protocols'
+import type {
+  AgentApprovalRequest,
+  AgentTask,
+  AgentTaskAuditSummary,
+  AgentTaskRuntimeSnapshot,
+} from '@/types/protocols'
 import type { SessionTimelineEvent } from '@/types/app'
 import { toFriendlyMessage } from './chatErrorStore'
 
@@ -16,6 +21,7 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
   const agentApprovals = ref<AgentApprovalRequest[]>([])
   const agentAuditSummary = ref<AgentTaskAuditSummary[]>([])
   const timelineEvents = ref<SessionTimelineEvent[]>([])
+  const runtimeSnapshot = ref<AgentTaskRuntimeSnapshot | null>(null)
   const isAgentBusy = ref(false)
   const approvalAuthorityUnknownTaskIds = ref<Set<string>>(new Set())
 
@@ -50,6 +56,7 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
     agentApprovals.value = []
     agentAuditSummary.value = []
     timelineEvents.value = []
+    runtimeSnapshot.value = null
     isAgentBusy.value = false
     approvalAuthorityUnknownTaskIds.value = new Set()
   }
@@ -118,6 +125,23 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
     }
   }
 
+  async function loadRuntimeSnapshot(taskId: string | null = null, reportError?: ErrorReporter) {
+    if (!taskId) {
+      runtimeSnapshot.value = null
+      return null
+    }
+
+    try {
+      runtimeSnapshot.value = await chatService.getAgentTaskRuntimeSnapshot(taskId)
+      return runtimeSnapshot.value
+    } catch (error) {
+      console.error('Failed to load agent runtime snapshot.', error)
+      reportLoadError(reportError, '加载运行详情', error)
+      runtimeSnapshot.value = null
+      return null
+    }
+  }
+
   function findPendingPlanApproval(taskId: string) {
     return (
       agentApprovals.value.find(
@@ -132,6 +156,7 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
     agentApprovals,
     agentAuditSummary,
     timelineEvents,
+    runtimeSnapshot,
     isAgentBusy,
     approvalAuthorityUnknownTaskIds,
     latestAgentTask,
@@ -143,6 +168,7 @@ export const useAgentTaskStore = defineStore('agentTask', () => {
     loadTimeline,
     loadAgentApprovals,
     loadAgentAuditSummary,
+    loadRuntimeSnapshot,
     findPendingPlanApproval,
     markApprovalAuthorityUnknown,
     clearApprovalAuthorityUnknown,

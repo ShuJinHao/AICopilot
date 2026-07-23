@@ -28,6 +28,11 @@ interface SessionActivationOptions {
   preserveComposerSelections?: boolean
 }
 
+interface ReferencedAgentTaskContext {
+  taskId: string
+  evidenceSetDigest: string
+}
+
 export const useChatStore = defineStore('chat', () => {
   const sessionStore = useSessionStore()
   const messageStore = useMessageStore()
@@ -84,11 +89,7 @@ export const useChatStore = defineStore('chat', () => {
       agentTaskStore.timelineEvents = value
     },
   })
-  const availableSkills = computed(() => catalogStore.availableSkills)
-  const selectedSkillCode = computed(() => catalogStore.selectedSkillCode)
-  const availablePluginTools = computed(() => catalogStore.availablePluginTools)
-  const selectedToolCodes = computed(() => catalogStore.selectedToolCodes)
-  const isLoadingPluginTools = computed(() => catalogStore.isLoadingPluginTools)
+  const agentRuntimeSnapshot = computed(() => agentTaskStore.runtimeSnapshot)
   const availableKnowledgeBases = computed(() => catalogStore.availableKnowledgeBases)
   const selectedKnowledgeBaseId = computed(() => catalogStore.selectedKnowledgeBaseId)
   const uploadedFiles = computed({
@@ -123,6 +124,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   const currentRunStatus = computed(() => runStatusStore.currentRunStatus)
   const historyCursors = ref<Record<string, HistoryCursorState>>({})
+  const referencedAgentTasks = ref<Record<string, ReferencedAgentTaskContext>>({})
   const isLoadingOlderHistory = ref(false)
   const sessionOperationCount = ref(0)
   const preserveComposerContextDuringActivation = ref(false)
@@ -142,10 +144,6 @@ export const useChatStore = defineStore('chat', () => {
       (!sessionStore.isSessionActivating || preserveComposerContextDuringActivation.value),
   )
   const latestAgentTask = computed(() => agentTaskStore.latestAgentTask)
-  const selectedSkill = computed(() => catalogStore.selectedSkill)
-  const selectedPluginTools = computed(() => catalogStore.selectedPluginTools)
-  const isSkillAutoMode = computed(() => catalogStore.isSkillAutoMode)
-  const selectedSkillSupportsKnowledge = computed(() => catalogStore.selectedSkillSupportsKnowledge)
   const selectedKnowledgeBase = computed(() => catalogStore.selectedKnowledgeBase)
   const selectedKnowledgeBaseIdsForPlan = computed(
     () => catalogStore.selectedKnowledgeBaseIdsForPlan,
@@ -158,6 +156,44 @@ export const useChatStore = defineStore('chat', () => {
     const sessionId = sessionStore.currentSessionId
     return Boolean(sessionId && historyCursors.value[sessionId]?.hasMoreBefore)
   })
+  const referencedAgentTask = computed(() => {
+    const sessionId = composerSessionId.value
+    return sessionId ? referencedAgentTasks.value[sessionId] ?? null : null
+  })
+  const referencedAgentTaskId = computed(() => referencedAgentTask.value?.taskId ?? null)
+
+  function referenceAgentTaskForFollowUp(taskId: string, evidenceSetDigest: string) {
+    const sessionId = resolvedSessionId.value
+    const task = agentTaskStore.agentTasks.find((item) => item.id === taskId)
+    const snapshot = agentTaskStore.runtimeSnapshot
+    if (
+      !sessionId ||
+      !task ||
+      task.status !== 'Completed' ||
+      snapshot?.taskId !== taskId ||
+      snapshot.evidenceSetDigest !== evidenceSetDigest ||
+      !evidenceSetDigest
+    ) {
+      return false
+    }
+
+    referencedAgentTasks.value = {
+      ...referencedAgentTasks.value,
+      [sessionId]: { taskId, evidenceSetDigest },
+    }
+    return true
+  }
+
+  function clearReferencedAgentTask(sessionId = composerSessionId.value) {
+    if (!sessionId || !referencedAgentTasks.value[sessionId]) return
+    const remaining = { ...referencedAgentTasks.value }
+    delete remaining[sessionId]
+    referencedAgentTasks.value = remaining
+  }
+
+  function clearAllReferencedAgentTasks() {
+    referencedAgentTasks.value = {}
+  }
 
   function bindErrorSession() {
     errorStore.bindCurrentSession(sessionStore.currentSessionId)
@@ -254,15 +290,11 @@ export const useChatStore = defineStore('chat', () => {
       agentAuditSummary: [...agentTaskStore.agentAuditSummary],
       approvalAuthorityUnknownTaskIds: new Set(agentTaskStore.approvalAuthorityUnknownTaskIds),
       timelineEvents: [...agentTaskStore.timelineEvents],
+      runtimeSnapshot: agentTaskStore.runtimeSnapshot,
       uploadedFiles: [...artifactWorkspaceStore.uploadedFiles],
       currentWorkspace: artifactWorkspaceStore.currentWorkspace,
       currentArtifactPreview: artifactWorkspaceStore.currentArtifactPreview,
       chartPreview: artifactWorkspaceStore.chartPreview,
-      availableSkills: [...catalogStore.availableSkills],
-      selectedSkillCode: catalogStore.selectedSkillCode,
-      availablePluginTools: [...catalogStore.availablePluginTools],
-      selectedToolCodes: [...catalogStore.selectedToolCodes],
-      isLoadingPluginTools: catalogStore.isLoadingPluginTools,
       availableKnowledgeBases: [...catalogStore.availableKnowledgeBases],
       selectedKnowledgeBaseId: catalogStore.selectedKnowledgeBaseId,
     }
@@ -271,7 +303,6 @@ export const useChatStore = defineStore('chat', () => {
   function restoreSessionRuntimeSnapshot(
     snapshot: ReturnType<typeof captureSessionRuntimeSnapshot>,
   ) {
-    catalogStore.invalidatePluginToolRequests()
     agentTaskStore.agentTasks = snapshot.agentTasks
     agentTaskStore.agentApprovals = snapshot.agentApprovals
     agentTaskStore.agentAuditSummary = snapshot.agentAuditSummary
@@ -279,15 +310,11 @@ export const useChatStore = defineStore('chat', () => {
       snapshot.approvalAuthorityUnknownTaskIds,
     )
     agentTaskStore.timelineEvents = snapshot.timelineEvents
+    agentTaskStore.runtimeSnapshot = snapshot.runtimeSnapshot
     artifactWorkspaceStore.uploadedFiles = snapshot.uploadedFiles
     artifactWorkspaceStore.currentWorkspace = snapshot.currentWorkspace
     artifactWorkspaceStore.currentArtifactPreview = snapshot.currentArtifactPreview
     artifactWorkspaceStore.chartPreview = snapshot.chartPreview
-    catalogStore.availableSkills = snapshot.availableSkills
-    catalogStore.selectedSkillCode = snapshot.selectedSkillCode
-    catalogStore.availablePluginTools = snapshot.availablePluginTools
-    catalogStore.selectedToolCodes = snapshot.selectedToolCodes
-    catalogStore.isLoadingPluginTools = snapshot.isLoadingPluginTools
     catalogStore.availableKnowledgeBases = snapshot.availableKnowledgeBases
     catalogStore.selectedKnowledgeBaseId = snapshot.selectedKnowledgeBaseId
   }
@@ -321,58 +348,6 @@ export const useChatStore = defineStore('chat', () => {
 
   function getRunStatusForMessage(message: ChatMessage) {
     return runStatusStore.getStatus(message.sessionId, getChatRunMessageKey(message))
-  }
-
-  async function loadSkills() {
-    const loaded = await catalogStore.loadSkills(
-      createSessionErrorReporter(sessionStore.currentSessionId, 'catalog-skills'),
-    )
-    if (loaded) {
-      clearInitializationErrors('catalog-skills')
-    }
-  }
-
-  async function selectSkill(skillCode: string | null) {
-    if (!canEditComposerContext.value) {
-      return false
-    }
-
-    const loaded = await runSessionOperation(
-      async () =>
-        await catalogStore.selectSkill(
-          skillCode,
-          createSessionErrorReporter(sessionStore.currentSessionId, 'catalog-selection'),
-        ),
-    )
-    if (loaded) {
-      clearInitializationErrors('catalog-selection')
-    }
-    return loaded
-  }
-
-  async function loadPluginTools() {
-    const loaded = await catalogStore.loadPluginTools(
-      createSessionErrorReporter(sessionStore.currentSessionId, 'catalog-tools'),
-    )
-    if (loaded) {
-      clearInitializationErrors('catalog-tools')
-    }
-  }
-
-  function togglePluginTool(toolCode: string) {
-    if (!canEditComposerContext.value) {
-      return
-    }
-
-    catalogStore.togglePluginTool(toolCode)
-  }
-
-  function clearPluginTools() {
-    if (!canEditComposerContext.value) {
-      return
-    }
-
-    catalogStore.clearPluginTools()
   }
 
   async function loadKnowledgeBases() {
@@ -576,6 +551,10 @@ export const useChatStore = defineStore('chat', () => {
       }
       await loadAgentApprovals(latestTask?.id ?? null, sessionId)
       await loadAgentAuditSummary(latestTask?.id ?? null, sessionId)
+      await agentTaskStore.loadRuntimeSnapshot(
+        latestTask?.id ?? null,
+        createSessionErrorReporter(sessionId),
+      )
     } catch (error) {
       const newlyUnknownApprovalTasks = new Set(agentTaskStore.approvalAuthorityUnknownTaskIds)
       restoreAgentProjectionSnapshot(projectionSnapshot)
@@ -733,12 +712,6 @@ export const useChatStore = defineStore('chat', () => {
       return null
     }
 
-    if (selectedSkillCode.value || selectedToolCodes.value.length > 0) {
-      clearCurrentSessionError()
-      setCurrentSessionError('当前计划入口不再接受 Skill 或工具选择，请清除旧选择后重试。')
-      return null
-    }
-
     const assistantMessage = addPlanConversationMessages(sessionId, goal)
     const runMessageKey = getChatRunMessageKey(assistantMessage)
     isAgentBusy.value = true
@@ -755,7 +728,6 @@ export const useChatStore = defineStore('chat', () => {
           taskType: 'ReportGeneration',
           uploadIds: uploadedFiles.value.map((item) => item.id),
           knowledgeBaseIds: selectedKnowledgeBaseIdsForPlan.value,
-          plannerMode: 'Auto',
           pluginSelectionMode: 'BuiltInOnly',
           selectedPluginIds: [],
           capabilitySelectionMode: 'InferredFromGoal',
@@ -897,6 +869,10 @@ export const useChatStore = defineStore('chat', () => {
 
   async function retryAgentTask(taskId: string) {
     return executeAgentTaskAction(taskId, chatService.retryAgentTask)
+  }
+
+  async function cancelAgentTask(taskId: string) {
+    return executeAgentTaskAction(taskId, chatService.cancelAgentTask)
   }
 
   async function approveAndRunAgentTask(taskId: string) {
@@ -1070,14 +1046,11 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const [sessionLoadResult] = await Promise.allSettled([
         sessionStore.loadSessions(),
-        loadSkills(),
         loadKnowledgeBases(),
       ])
       if (sessionLoadResult.status === 'rejected') {
         throw sessionLoadResult.reason
       }
-      await loadPluginTools()
-
       if (sessionStore.sessions.length === 0) {
         await createSession({ preserveComposerSelections: previousActiveSessionId === null })
         return
@@ -1141,9 +1114,6 @@ export const useChatStore = defineStore('chat', () => {
       streamStore.stop()
       approvalStore.sync(newSession.id)
       bindErrorSession()
-      if (!(options.preserveComposerSelections ?? false)) {
-        await catalogStore.loadPluginTools(createSessionErrorReporter(newSession.id))
-      }
       clearInitializationErrors('session-list', 'session-create')
       sessionStore.completeSessionActivation(newSession.id)
       return newSession
@@ -1171,6 +1141,7 @@ export const useChatStore = defineStore('chat', () => {
     if (isSessionTransitionBlocked.value) {
       return null
     }
+    clearAllReferencedAgentTasks()
     try {
       return await createSession()
     } catch (error) {
@@ -1185,8 +1156,9 @@ export const useChatStore = defineStore('chat', () => {
     const runtimeSnapshot = captureSessionRuntimeSnapshot()
     const preserveComposerSelections =
       options.preserveComposerSelections ?? composerSessionId.value === id
-    const shouldReloadComposerCatalog =
-      previousActiveSessionId !== id && !preserveComposerSelections
+    if (previousActiveSessionId !== id) {
+      clearAllReferencedAgentTasks()
+    }
     preserveComposerContextDuringActivation.value = preserveComposerSelections
     sessionStore.beginSessionActivation(id)
     streamStore.stop()
@@ -1198,9 +1170,6 @@ export const useChatStore = defineStore('chat', () => {
       bindErrorSession()
       errorStore.clearSessionError(id)
       approvalStore.sync(id)
-      if (shouldReloadComposerCatalog) {
-        await catalogStore.loadPluginTools(createSessionErrorReporter(id))
-      }
       await loadHistory(id, options.forceReload ?? false)
       sessionStore.completeSessionActivation(id)
     } catch (error) {
@@ -1241,6 +1210,7 @@ export const useChatStore = defineStore('chat', () => {
       rejectUnknownSessionTarget()
       return false
     }
+    clearReferencedAgentTask(id)
     const previousCurrentSessionId = sessionStore.currentSessionId
     const previousActiveSessionId = sessionStore.activeSessionId
     const wasCurrent = sessionStore.currentSessionId === id
@@ -1371,6 +1341,8 @@ export const useChatStore = defineStore('chat', () => {
 
     return await runSessionOperation(async () => {
       clearCurrentSessionError()
+      const referencedTaskId = referencedAgentTask.value?.taskId ?? null
+      clearReferencedAgentTask(sessionId)
 
       const userMessage = messageStore.addMessage(sessionId, {
         sessionId,
@@ -1407,40 +1379,45 @@ export const useChatStore = defineStore('chat', () => {
       let refreshPendingApprovals = false
 
       try {
-        await chatService.sendMessageStream(sessionId, input, {
-          onChunkReceived(chunk) {
-            runStatusStore.advanceFromChunk(sessionId, runMessageKey, chunk)
-            if (chunk.type === ChunkType.Error) {
-              streamErrorCode = getErrorCode(chunk)
-            }
+        await chatService.sendMessageStream(
+          sessionId,
+          input,
+          {
+            onChunkReceived(chunk) {
+              runStatusStore.advanceFromChunk(sessionId, runMessageKey, chunk)
+              if (chunk.type === ChunkType.Error) {
+                streamErrorCode = getErrorCode(chunk)
+              }
 
-            processChunk(assistantMessage, chunk, {
-              setSessionError: errorStore.setSessionError,
-              onApprovalChunk: approvalStore.sync,
-            })
-          },
-          onComplete() {
-            streamStore.stop()
-            assistantMessage.isStreaming = false
-            if (streamErrorCode === 'approval_pending') {
-              runStatusStore.clearRunStatus(sessionId, runMessageKey)
-              messageStore.removeMessages(sessionId, userMessage, assistantMessage)
-              refreshPendingApprovals = true
-            } else {
-              runStatusStore.completeRun(sessionId, runMessageKey)
-            }
+              processChunk(assistantMessage, chunk, {
+                setSessionError: errorStore.setSessionError,
+                onApprovalChunk: approvalStore.sync,
+              })
+            },
+            onComplete() {
+              streamStore.stop()
+              assistantMessage.isStreaming = false
+              if (streamErrorCode === 'approval_pending') {
+                runStatusStore.clearRunStatus(sessionId, runMessageKey)
+                messageStore.removeMessages(sessionId, userMessage, assistantMessage)
+                refreshPendingApprovals = true
+              } else {
+                runStatusStore.completeRun(sessionId, runMessageKey)
+              }
 
-            approvalStore.sync(sessionId)
+              approvalStore.sync(sessionId)
+            },
+            onError(error) {
+              streamStore.stop()
+              assistantMessage.isStreaming = false
+              const message = toFriendlyMessage(error)
+              runStatusStore.failRun(sessionId, runMessageKey, message)
+              errorStore.setSessionError(sessionId, message)
+              approvalStore.sync(sessionId)
+            },
           },
-          onError(error) {
-            streamStore.stop()
-            assistantMessage.isStreaming = false
-            const message = toFriendlyMessage(error)
-            runStatusStore.failRun(sessionId, runMessageKey, message)
-            errorStore.setSessionError(sessionId, message)
-            approvalStore.sync(sessionId)
-          },
-        })
+          referencedTaskId,
+        )
         if (refreshPendingApprovals) {
           await approvalStore.refreshPendingApprovals(sessionId)
         }
@@ -1570,6 +1547,7 @@ export const useChatStore = defineStore('chat', () => {
     catalogStore.reset()
     resetCurrentSessionState()
     historyCursors.value = {}
+    referencedAgentTasks.value = {}
     isLoadingOlderHistory.value = false
     sessionOperationCount.value = 0
     pendingInitializationRuntimeSnapshot = null
@@ -1601,15 +1579,7 @@ export const useChatStore = defineStore('chat', () => {
     isAgentApprovalAuthorityUnknown,
     agentAuditSummary,
     timelineEvents,
-    availableSkills,
-    selectedSkillCode,
-    selectedSkill,
-    isSkillAutoMode,
-    availablePluginTools,
-    selectedToolCodes,
-    selectedPluginTools,
-    isLoadingPluginTools,
-    selectedSkillSupportsKnowledge,
+    agentRuntimeSnapshot,
     availableKnowledgeBases,
     selectedKnowledgeBaseId,
     selectedKnowledgeBase,
@@ -1619,15 +1589,12 @@ export const useChatStore = defineStore('chat', () => {
     chartPreview,
     isAgentBusy,
     currentRunStatus,
+    referencedAgentTask,
+    referencedAgentTaskId,
     errorMessage,
     getRunStatusForMessage,
     prepareInitialization,
     initialize,
-    loadSkills,
-    selectSkill,
-    loadPluginTools,
-    togglePluginTool,
-    clearPluginTools,
     loadKnowledgeBases,
     selectKnowledgeBase,
     loadTimeline,
@@ -1642,6 +1609,7 @@ export const useChatStore = defineStore('chat', () => {
     planAgentTask,
     runAgentTask,
     retryAgentTask,
+    cancelAgentTask,
     approveAndRunAgentTask,
     rejectAgentTaskPlan,
     decideAgentApproval,
@@ -1652,6 +1620,8 @@ export const useChatStore = defineStore('chat', () => {
     finalizeWorkspace,
     downloadArtifact,
     sendMessage,
+    referenceAgentTaskForFollowUp,
+    clearReferencedAgentTask,
     submitApproval,
     reset,
   }

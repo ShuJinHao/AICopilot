@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Workflows.Executors;
 
 namespace AICopilot.UnitTests;
@@ -11,6 +12,7 @@ public sealed class IntentRoutingFallbackClassifierTests
         var classified = IntentRoutingFallbackClassifier.TryClassify(
             "列出 LINE-A 当前设备状态，生成关键指标和记录摘要，只做只读分析",
             "routing JSON parse failed",
+            AgentIntentRegistryV1.FrozenSnapshot,
             out var intents);
 
         classified.Should().BeTrue();
@@ -29,6 +31,7 @@ public sealed class IntentRoutingFallbackClassifierTests
         var classified = IntentRoutingFallbackClassifier.TryClassify(
             "替我查询下模切设备最近的一些信息并帮我整理分类成表格图表",
             "routing model call failed",
+            AgentIntentRegistryV1.FrozenSnapshot,
             out var intents);
 
         classified.Should().BeTrue();
@@ -48,6 +51,7 @@ public sealed class IntentRoutingFallbackClassifierTests
         var classified = IntentRoutingFallbackClassifier.TryClassify(
             "介绍一下你的能力",
             "routing JSON parse failed",
+            AgentIntentRegistryV1.FrozenSnapshot,
             out var intents);
 
         classified.Should().BeFalse();
@@ -62,6 +66,7 @@ public sealed class IntentRoutingFallbackClassifierTests
         var classified = IntentRoutingFallbackClassifier.TryClassify(
             message,
             "routing JSON parse failed",
+            AgentIntentRegistryV1.FrozenSnapshot,
             out var intents);
 
         classified.Should().BeTrue();

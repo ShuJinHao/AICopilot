@@ -1,4 +1,5 @@
 using System.Text;
+using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
@@ -14,17 +15,20 @@ public class KnowledgeRetrievalExecutor(
     public const string ExecutorId = nameof(KnowledgeRetrievalExecutor);
     private const string KnowledgeIntentPrefix = "Knowledge.";
 
-    public static bool IsRelevant(IEnumerable<IntentResult> intentResults)
+    internal static bool IsRelevant(
+        IEnumerable<IntentResult> intentResults,
+        AgentIntentRegistrySnapshot registry)
     {
-        return intentResults.Any(IsKnowledgeIntent);
+        return intentResults.Any(intent => IsKnowledgeIntent(intent, registry));
     }
 
     public async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
+        AgentIntentRegistrySnapshot registry,
         CancellationToken ct = default)
     {
         var knowledgeIntents = intentResults
-            .Where(IsKnowledgeIntent)
+            .Where(intent => IsKnowledgeIntent(intent, registry))
             .ToList();
 
         if (knowledgeIntents.Count == 0)
@@ -135,9 +139,15 @@ public class KnowledgeRetrievalExecutor(
         }
     }
 
-    private static bool IsKnowledgeIntent(IntentResult intent)
+    private static bool IsKnowledgeIntent(
+        IntentResult intent,
+        AgentIntentRegistrySnapshot registry)
     {
-        return intent.Intent.StartsWith(KnowledgeIntentPrefix, StringComparison.OrdinalIgnoreCase)
-               && intent.Confidence > 0.6;
+        return intent.Confidence > 0.6 &&
+               AgentIntentRegistryV1.IsIntentClass(
+                   registry,
+                   intent.Intent,
+                   AgentIntentClass.Knowledge) &&
+               !string.Equals(intent.Intent, "Knowledge.Retrieve", StringComparison.Ordinal);
     }
 }

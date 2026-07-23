@@ -150,12 +150,16 @@ Cloud AiRead 设备契约：
 - `AgentWorkflowPipeline` 是统一工作流主干；旧名 `ChatWorkflowOrchestrator` 是历史命名歧义，不得被理解为聊天模式专属基建。
 - Chat 模式和 Plan 模式的区别只在出口，不在管线：Chat 出口直接回复或按安全策略执行低风险只读动作；Plan 出口只生成计划草案。
 - `PlanDraft` 是 AI 对用户目标的理解、路线规划、能力说明和待确认步骤；它不是可执行任务，不得入队 Worker。
-- `ExecutablePlan` 是用户确认 `PlanDraft` 后生成的可执行计划；此时才允许做 Skill、Tool、Schema、Guard 和审批校验。
+- `ExecutablePlan` 是用户确认无 capability gap 的 `PlanDraft` 后生成的可执行计划；此时才允许做 Tool、Schema、Guard 和审批校验。
 - `AgentTask` 是真正进入执行阶段的任务对象；它必须来自已确认的 `ExecutablePlan` 或等价确认状态。
 - 用户确认前，Plan 模式禁止 Cloud 业务查询、MCP 工具执行、Tool 执行、DataAnalysis 真实查询、Worker 入队和任何会产生业务副作用的动作。
 - Cloud 只读 Agent 当前正式能力覆盖 `Analysis.Device.List/Detail/Status`、`Analysis.DeviceLog.Latest/Range/ByLevel`、`Analysis.Capacity.Range/ByDevice`、`Analysis.ProductionData.Latest/Range/ByDevice`、`Analysis.Process.List/Detail` 和 `Analysis.ClientRelease.List`；`Analysis.Capacity.ByProcess` 尚无正式聚合契约。意图只能在用户确认后进入执行链，且必须复用唯一 Cloud AiRead 语义实现。
-- Skill、Tool、MCP、Knowledge 或 DataSource 未匹配时，不能阻断 `PlanDraft`；应在草案中说明能力缺口、降级为路线规划或要求用户补充业务对象。
+- Tool、MCP、Knowledge、DataSource、Provider 或资源未匹配时，不能阻断 `PlanDraft`；必须记录稳定 capability gap，且草案保持 node-free、不可确认、不可入队。
 - 执行阶段失败后的重试应基于已确认的 `ExecutablePlan` / `AgentTask` 重新入队，不应重新生成 `PlanDraft` 或丢失用户确认。
+- 一个目标包含设备、日志、产能等多个 Cloud 只读意图时，计划和执行必须保留全部已确认意图；每个查询的设备/工序、时间范围、筛选条件和数量上限都必须分别冻结，不能只返回最后一次查询或让 Cloud 失败回退 Simulation、Text-to-SQL、MCP 或其他来源。
+- 多分支执行只能把已授权 Evidence 合流给综合分析 Agent；AI 推断必须明确标为 `LlmInference`，建议必须明确标为 `Recommendation`，不得把 AI 推断、健康评估或建议说成 Cloud 已观测事实或预测模型结果。
+- 同一完成任务生成的回答、图表、Markdown、HTML、PDF、PPTX 和 XLSX 必须绑定同一 `EvidenceSetDigest`，跨格式关键事实不得漂移。
+- 用户只有主动选择“基于此结果追问”时，Chat 才能引用当前会话内该 `Completed` 任务的封存证据；引用是一次性的，不能自动取最近任务、跨会话/跨用户复用或从旧回答文本反推事实。用户改变设备、工序、日志级别或时间范围时必须重新执行新的只读查询。
 
 ### 8.2 当前内网 HTTP 部署红线
 
@@ -223,7 +227,7 @@ Cloud AiRead 设备契约：
 - Outbox 多实例调度必须使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略，不能让多 worker 重复发布同一消息。
 - 普通 repository 的业务、Outbox、审计和 durable commit marker 必须由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交；每个 execution-strategy attempt 对业务 Context 只允许一次 `SaveChangesAsync(false)`，事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。Identity 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine；非成功 `Result` 必须回滚 UserManager/RoleManager 已触发的所有中间保存，拒绝审计只能在回滚后另行提交，禁止恢复 `EfTransactionalExecutionService` 或复制第二套 transaction/retry。
 - EF execution-strategy 必须使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，禁止手写业务重试循环。commit-unknown 不能用 `SaveChanges(false)`、Outbox 或 audit 是否存在推断成功；必须写入同事务 durable marker，并由 fresh context 在独立超时与 execution strategy 下验证，真实 PostgreSQL 必须覆盖 commit-ACK 丢失、verification transient/persistent failure、caller cancellation 和数据库生成 identity 重放。
-- marker 写入后不得再让 caller cancellation 中断 commit/verification；fresh verification 无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id，不自动重放业务。RAG `UploadDocument` 与 AiGateway SessionTemp/AgentInput `UploadRecord` 必须先写持久化对账日志再写物理文件，并复用同一 commit id；请求与 DataWorker 通过 PostgreSQL advisory lease 互斥，结果未知时保留文件和日志，后台看到 marker 才保留文件并清日志，看不到 marker 才删除文件。RAG 删除事件必须按 storage path 查 journal、取得同一 lease 并在锁内退休 journal 后再删文件；journal 不可读或 lease 活跃必须重试，禁止直接删或记录原始客户端路径。知识库文件唯一写入口是 RAG Document API，禁止恢复 AiGateway KB shadow scope/bridge；`ArtifactWorkspace` 多文件边界仍属 `AI-PERSIST-01d / AI-SEC-047`，历史 KB shadow 清库仍属 `AI-PERSIST-01e / AI-SEC-048`，完成前不得声称全部本地文件债务已关单。
+- marker 写入后不得再让 caller cancellation 中断 commit/verification；fresh verification 无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id，不自动重放业务。RAG `UploadDocument` 与 AiGateway SessionTemp/AgentInput `UploadRecord` 必须先写持久化对账日志再写物理文件，并复用同一 commit id；请求与 DataWorker 通过 PostgreSQL advisory lease 互斥，结果未知时保留文件和日志，后台看到 marker 才保留文件并清日志，看不到 marker 才删除文件。RAG 删除事件必须按 storage path 查 journal、取得同一 lease 并在锁内退休 journal 后再删文件；journal 不可读或 lease 活跃必须重试，禁止直接删或记录原始客户端路径。知识库文件唯一写入口是 RAG Document API，禁止恢复 AiGateway KB shadow scope/bridge；`ArtifactWorkspace` 多文件必须走独立 file-set journal/manifest/fencing/checkpoint/rollback/reconciliation。源码接入不等于 `AI-PERSIST-01d / AI-SEC-047` 已关单，必须通过真实文件系统 + PostgreSQL 故障矩阵；历史 KB shadow 清库仍属 `AI-PERSIST-01e / AI-SEC-048`。
 - 标准容器共享卷只允许受信任的 AICopilot 后端写入。当前路径边界拒绝既有 symlink/reparse traversal，但不把同 UID 恶意进程在检查与打开之间替换目录的 TOCTOU 视为已解决；扩大威胁模型前必须增加容器权限隔离或 dirfd/`openat` 原子路径操作。
 - HttpApi 与 DataWorker 必须共享 `/var/lib/aicopilot`；commit marker 默认保留 30 天并按 `created_at_utc` 索引，保留期必须长于对账延迟，有待处理日志的 marker 不得删除。对账日志不可读时必须停止 marker 清理，禁止用 cron、手工删除或另一套清理任务替代。`AI-PERSIST-01b/01c` 后续变更必须同时通过真实 PostgreSQL、migration、部署配置和全量门禁。
 - MCP runtime 配置变更必须进入 runtime registry refresh cycle，禁用、删除或配置变更后不能继续暴露未来工具解析。

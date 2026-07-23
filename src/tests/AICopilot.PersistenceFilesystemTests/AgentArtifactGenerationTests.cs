@@ -8,6 +8,7 @@ namespace AICopilot.PersistenceFilesystemTests;
 public sealed class AgentArtifactGenerationTests
 {
     private const string SimulationLabel = "\u6a21\u62df Cloud \u53ea\u8bfb\u6570\u636e";
+    private const string EvidenceSetDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     [Fact]
     public async Task AgentTableFileParser_ShouldParseCsvIntoNormalizedRows()
@@ -59,6 +60,9 @@ public sealed class AgentArtifactGenerationTests
         pptxXml.Should().Contain("sourceMode=Simulation");
         pptxXml.Should().Contain("isSimulation=true");
         pptxXml.Should().Contain(SimulationLabel);
+        pptxXml.Should().Contain(EvidenceSetDigest);
+        pptxXml.Should().Contain("DerivedFact, ObservedFact");
+        pptxXml.Should().Contain("CurrentHealth: Watch");
 
         var xlsxXml = ZipXmlText(xlsx);
         xlsxXml.Should().Contain("Summary");
@@ -69,6 +73,9 @@ public sealed class AgentArtifactGenerationTests
         xlsxXml.Should().Contain(SimulationLabel);
         xlsxXml.Should().Contain("Metric:sourceMode");
         xlsxXml.Should().Contain("plannedOutput");
+        xlsxXml.Should().Contain(EvidenceSetDigest);
+        xlsxXml.Should().Contain("DerivedFact, ObservedFact");
+        xlsxXml.Should().Contain("cloud-health-assessment:v1");
     }
 
     private static AgentReportDocument CreateSimulationDocument()
@@ -101,7 +108,29 @@ public sealed class AgentArtifactGenerationTests
                 SimulationLabel,
                 "/simulation/manufacturing/weekly-report",
                 2,
-                false));
+                false),
+            BusinessQueryResults: [],
+            EvidenceSetDigest: EvidenceSetDigest,
+            TruthClasses: ["DerivedFact", "ObservedFact"],
+            EvidenceAsOfUtc: DateTimeOffset.Parse("2026-07-22T08:00:00Z"),
+            CurrentHealthAssessment: new AgentReportHealthAssessment(
+                "cloud-health-assessment:v1",
+                "DerivedFact",
+                72,
+                "Watch",
+                "Current deterministic health assessment is Watch.",
+                ["One stale heartbeat was observed."],
+                0.8,
+                0,
+                DateTimeOffset.Parse("2026-07-22T08:00:00Z"),
+                true,
+                2,
+                false,
+                new Dictionary<string, decimal>
+                {
+                    ["staleHeartbeatCount"] = 1,
+                    ["totalDeviceCount"] = 2
+                }));
     }
 
     private static IReadOnlyCollection<string> ZipEntries(byte[] content)

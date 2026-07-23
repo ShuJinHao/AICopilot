@@ -16,5 +16,13 @@ public class GenerationContext
 
     public string BusinessPolicyContext { get; set; } = string.Empty;
 
+    public IReadOnlyCollection<AgentWorkflowEvidence> Evidence { get; set; } = [];
+
+    public string EvidenceSetDigest { get; set; } = string.Empty;
+
+    public AgentTaskChatEvidenceContext? BoundTaskEvidence { get; set; }
+
+    public IReadOnlyCollection<BranchType> RequiredEmptyBranches { get; set; } = [];
+
     public ManufacturingSceneType Scene { get; set; } = ManufacturingSceneType.FallbackToExistingRouting;
 }

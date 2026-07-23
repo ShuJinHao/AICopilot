@@ -17,7 +17,59 @@ internal static class AgentReportMarkdownRenderer
         builder.AppendLine("## Data Source");
         builder.AppendLine("- " + AgentReportFormatting.BuildSourceMarker(report.CloudReadonlySource));
         builder.AppendLine("- " + (report.CloudReadonlySummary ?? "CloudReadonly was not accessed."));
+        foreach (var query in report.CloudReadonlyQueries ?? [])
+        {
+            builder.AppendLine(
+                $"- {query.Intent}: sourceMode={query.SourceMode}; isSimulation={AgentReportFormatting.FormatBool(query.IsSimulation)}; sourceLabel={query.SourceLabel}; rows={query.RowCount.ToString(CultureInfo.InvariantCulture)}; truncated={AgentReportFormatting.FormatBool(query.IsTruncated)}; queriedAtUtc={query.QueriedAtUtc.ToString("O", CultureInfo.InvariantCulture)}; semanticPlanDigest={query.SemanticPlanDigest}");
+        }
         builder.AppendLine();
+        builder.AppendLine("## Evidence Provenance");
+        builder.AppendLine($"- EvidenceSetDigest: {report.EvidenceSetDigest ?? "NOT-RECORDED"}");
+        builder.AppendLine($"- TruthClasses: {string.Join(", ", report.TruthClasses ?? [])}");
+        builder.AppendLine($"- EvidenceAsOfUtc: {report.EvidenceAsOfUtc?.ToString("O", CultureInfo.InvariantCulture) ?? "NOT-RECORDED"}");
+        builder.AppendLine();
+        if (report.AiInference is { } inference)
+        {
+            builder.AppendLine("## AI Evidence Inference");
+            builder.AppendLine($"- TruthClass: {inference.TruthClass}");
+            builder.AppendLine($"- Confidence: {inference.Confidence.ToString("0.###", CultureInfo.InvariantCulture)}");
+            builder.AppendLine($"- ConflictStatus: {inference.ConflictStatus}");
+            builder.AppendLine($"- Summary: {inference.SafeSummary}");
+            foreach (var finding in inference.Findings)
+            {
+                builder.AppendLine($"- Finding: {finding}");
+            }
+            foreach (var citation in inference.CitationRefs)
+            {
+                builder.AppendLine($"- Citation: {citation}");
+            }
+            foreach (var warning in inference.EvidenceWarnings)
+            {
+                builder.AppendLine($"- EvidenceWarning: {warning}");
+            }
+
+            builder.AppendLine();
+        }
+
+        if (report.CurrentHealthAssessment is { } health)
+        {
+            builder.AppendLine("## Current Runtime Health Assessment");
+            builder.AppendLine($"- TruthClass: {health.TruthClass}");
+            builder.AppendLine($"- AlgorithmVersion: {health.AlgorithmVersion}");
+            builder.AppendLine($"- HealthLevel: {health.HealthLevel}");
+            builder.AppendLine($"- HealthScore: {health.HealthScore}/100");
+            builder.AppendLine($"- Confidence: {health.Confidence.ToString("0.###", CultureInfo.InvariantCulture)}");
+            builder.AppendLine($"- MissingRate: {health.MissingRate.ToString("0.###", CultureInfo.InvariantCulture)}");
+            builder.AppendLine($"- SourceAsOfUtc: {health.SourceAsOfUtc.ToString("O", CultureInfo.InvariantCulture)}");
+            builder.AppendLine($"- Summary: {health.SafeSummary}");
+            foreach (var finding in health.Findings)
+            {
+                builder.AppendLine($"- Finding: {finding}");
+            }
+
+            builder.AppendLine();
+        }
+
         builder.AppendLine("## Business Query Results");
         builder.AppendLine(BuildMarkdownBusinessQueryResults(report.BusinessQueryResults ?? []));
         builder.AppendLine();

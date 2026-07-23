@@ -11,9 +11,7 @@ import type {
   LanguageModelTestResult,
   RoutingModelDetail,
   RoutingModelFormModel,
-  RoutingModelSummary,
-  SkillDefinition,
-  ToolRegistryCatalog
+  RoutingModelSummary
 } from '@/types/app'
 
 export const configService = {
@@ -138,18 +136,6 @@ export const configService = {
 
   async resetBuiltInConversationTemplates(modelId: string) {
     return await apiClient.post('/aigateway/conversation-template/reset-builtins', { modelId })
-  },
-
-  async getSkills() {
-    return await apiClient.get<SkillDefinition[]>('/aigateway/skills', {
-      enabledOnly: false
-    })
-  },
-
-  async getToolCatalog() {
-    return await apiClient.get<ToolRegistryCatalog>('/aigateway/tools/catalog', {
-      simulationOnly: false
-    })
   },
 
   async getCloudReadonlyStatus() {

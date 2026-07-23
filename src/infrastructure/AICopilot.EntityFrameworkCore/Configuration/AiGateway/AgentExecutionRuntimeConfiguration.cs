@@ -35,6 +35,7 @@ public sealed class AgentNodeRunConfiguration : IEntityTypeConfiguration<AgentNo
         builder.Property(node => node.OutputSchemaRef).HasMaxLength(160).HasColumnName("output_schema_ref");
         builder.Property(node => node.IsRequired).HasColumnName("is_required");
         builder.Property(node => node.RequiresApproval).HasColumnName("requires_approval");
+        builder.Property(node => node.JoinPolicy).HasMaxLength(40).HasColumnName("join_policy");
         builder.Property(node => node.SideEffectClass).HasConversion<string>().HasMaxLength(40).HasColumnName("side_effect_class");
         builder.Property(node => node.Status).HasConversion<string>().HasMaxLength(40).HasColumnName("status");
         builder.Property(node => node.AttemptNo).HasColumnName("attempt_no");

@@ -14,18 +14,22 @@ internal sealed record AgentPlanCompilerRequest(
     PlannerToolCatalog ToolCatalog,
     IReadOnlyCollection<Guid> UploadIds,
     IReadOnlyCollection<Guid> KnowledgeBaseIds,
-    AgentTaskPlanCloudReadonlyIntentDocument? CloudReadonlyIntent,
+    IReadOnlyCollection<AgentTaskPlanCloudReadonlyIntentDocument> CloudReadonlyIntents,
     IReadOnlyCollection<Guid> DataSourceIds,
     IReadOnlyCollection<string> BusinessDomains,
     IReadOnlyCollection<AgentTaskPlanDataSourceSummaryDocument> DataSourceSummaries,
     IReadOnlyCollection<string> ArtifactTargets,
     bool RequiresDataApproval,
     bool IsSimulationOnly,
-    string DataContractDigest);
+    string DataContractDigest,
+    RuntimeAgentConfigurationSnapshot? ReasoningModelConfiguration);
 
 internal sealed record AgentPlanCompilation(
+    string TopologyProfile,
+    AgentPlanConcurrencyPolicyDocument ConcurrencyPolicy,
     IReadOnlyCollection<AgentTaskPlanStepDocument> Steps,
     IReadOnlyCollection<AgentPlanNodeDocument> Nodes,
+    IReadOnlyCollection<string> JoinPolicies,
     IReadOnlyCollection<string> CapabilityGaps)
 {
     public bool IsExecutable => Nodes.Count > 0 && CapabilityGaps.Count == 0;
@@ -38,12 +42,12 @@ internal interface IAgentPlanCompiler
 
 /// <summary>
 /// The only production PlanCompiler boundary. It compiles canonical, server-owned
-/// IntentCandidate documents into a deterministic LinearV1 skeleton. It never calls a
-/// model, Tool, Cloud, MCP, Worker, or mutable resource discovery surface.
+/// IntentCandidate documents into deterministic LinearV1 or bounded DagV1 skeletons.
+/// It never calls a model, Tool, Cloud, MCP, Worker, or mutable discovery surface.
 /// </summary>
-internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
+internal sealed class DeterministicAgentPlanCompiler : IAgentPlanCompiler
 {
-    public const string CompilerVersion = "linear-plan-compiler:v1";
+    public const string CompilerVersion = "deterministic-plan-compiler:v4";
 
     private const long ArtifactBytesPerNode = 33_554_432;
 
@@ -74,11 +78,19 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
                                 candidate.CapabilityGap is null)
             .ToArray();
 
-        foreach (var gap in candidates
-                     .Where(candidate => candidate.CapabilityGap is not null)
-                     .Select(candidate => candidate.CapabilityGap!.Code))
+        if (candidates.Any(candidate =>
+                !AgentIntentRegistryV1.TryGetDescriptor(candidate.IntentCode, out var descriptor) ||
+                candidate.IntentClass != descriptor.IntentClass ||
+                !string.Equals(candidate.ProviderCode, descriptor.ProviderCode, StringComparison.Ordinal)))
         {
-            gaps.Add(gap);
+            gaps.Add(AgentPlanCapabilityGapCodes.UnknownIntent);
+        }
+
+        foreach (var candidate in candidates.Where(candidate => candidate.CapabilityGap is not null))
+        {
+            gaps.Add(candidate.IntentCode.StartsWith("Prediction.", StringComparison.Ordinal)
+                ? AgentPlanCapabilityGapCodes.UnsupportedNodeKind
+                : candidate.CapabilityGap!.Code);
         }
 
         if (request.CapabilitySelectionMode == AgentCapabilitySelectionMode.ExplicitAllowlist &&
@@ -90,8 +102,6 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
         if (request.PluginSelectionMode != AgentPluginSelectionMode.BuiltInOnly ||
             request.SelectedPluginIds.Count != 0)
         {
-            // P2 has no stable plugin-id-to-node contract. Failing closed here prevents
-            // an Action intent or plugin choice from expanding the built-in tool view.
             gaps.Add(AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
         }
 
@@ -100,70 +110,43 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
             gaps.Add(AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
         }
 
-        var toolCodes = new List<string>();
-        if (request.UploadIds.Count != 0)
-        {
-            toolCodes.Add("read_uploaded_file");
-            toolCodes.Add("parse_table_file");
-        }
-
         var knowledgeCandidates = available
             .Where(candidate => candidate.IntentClass == AgentIntentClass.Knowledge)
             .ToArray();
-        if (knowledgeCandidates.Length != 0)
+        if (knowledgeCandidates.Length != 0 && request.KnowledgeBaseIds.Count == 0)
         {
-            if (request.KnowledgeBaseIds.Count == 0)
-            {
-                gaps.Add(AgentPlanCapabilityGapCodes.ResourceResolutionRequired);
-            }
-            else
-            {
-                toolCodes.Add("rag_search");
-            }
+            gaps.Add(AgentPlanCapabilityGapCodes.ResourceResolutionRequired);
         }
 
         var cloudCandidates = available
             .Where(candidate => candidate.IntentClass == AgentIntentClass.CloudOnly)
             .ToArray();
-        if (cloudCandidates.Length != 0)
+        var expectedCloudIntentCodes = cloudCandidates
+            .Select(candidate => candidate.IntentCode)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        var actualCloudIntentCodes = request.CloudReadonlyIntents
+            .Select(intent => intent.Intent)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        if (!actualCloudIntentCodes.SequenceEqual(expectedCloudIntentCodes, StringComparer.Ordinal) ||
+            request.CloudReadonlyIntents.Count != actualCloudIntentCodes.Distinct(StringComparer.Ordinal).Count())
         {
-            if (cloudCandidates.Length != 1 ||
-                request.CloudReadonlyIntent is null ||
-                !string.Equals(
-                    request.CloudReadonlyIntent.Intent,
-                    cloudCandidates[0].IntentCode,
-                    StringComparison.Ordinal))
-            {
-                gaps.Add(AgentPlanCapabilityGapCodes.CloudReadonlyIntentUnavailable);
-            }
-            else
-            {
-                toolCodes.Add("query_cloud_data_readonly");
-            }
+            gaps.Add(AgentPlanCapabilityGapCodes.CloudReadonlyIntentUnavailable);
         }
 
         var governedCandidates = available
             .Where(candidate => candidate.IntentClass == AgentIntentClass.GovernedExploration)
             .ToArray();
-        if (governedCandidates.Length != 0)
+        if (governedCandidates.Length != 0 &&
+            (governedCandidates.Length != 1 ||
+             request.DataSourceIds.Count != 1 ||
+             request.DataSourceSummaries.Count != 1 ||
+             request.DataSourceSummaries.Single().Id != request.DataSourceIds.Single()))
         {
-            if (governedCandidates.Length != 1 ||
-                request.DataSourceIds.Count != 1 ||
-                request.DataSourceSummaries.Count != 1 ||
-                request.DataSourceSummaries.Single().Id != request.DataSourceIds.Single())
-            {
-                gaps.Add(AgentPlanCapabilityGapCodes.ResourceResolutionRequired);
-            }
-            else
-            {
-                toolCodes.Add("query_business_database_readonly");
-                toolCodes.Add("summarize_business_query_result");
-            }
+            gaps.Add(AgentPlanCapabilityGapCodes.ResourceResolutionRequired);
         }
 
-        // Policy is a real quick-Chat capability, but there is not yet a durable,
-        // snapshot-bound PolicyValidation executor/tool. It remains an explicit gap
-        // instead of being silently converted to a generic report step.
         if (available.Any(candidate => candidate.IntentClass == AgentIntentClass.Policy))
         {
             gaps.Add(AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
@@ -177,31 +160,6 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
         if (targets.Length == 0 || targets.Any(target => !ArtifactTools.ContainsKey(target)))
         {
             gaps.Add(AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
-        }
-        else
-        {
-            foreach (var target in targets)
-            {
-                var artifactTool = target == "chart" && governedCandidates.Length != 0
-                    ? "generate_business_chart"
-                    : ArtifactTools[target];
-                toolCodes.Add(artifactTool);
-            }
-
-            toolCodes.Add("finalize_artifacts");
-        }
-
-        if (toolCodes.Count > AgentPlanContractVersions.DefaultMaxNodes)
-        {
-            gaps.Add(AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
-        }
-
-        var tools = request.ToolCatalog.Tools
-            .Where(tool => tool.RuntimeAvailable && tool.IsVisibleToPlanner && tool.IsExecutableByAgent)
-            .ToDictionary(tool => tool.ToolCode, StringComparer.Ordinal);
-        if (toolCodes.Any(toolCode => !tools.ContainsKey(toolCode)))
-        {
-            gaps.Add(AgentPlanCapabilityGapCodes.PlannedToolUnavailable);
         }
 
         if (request.IsSimulationOnly &&
@@ -217,36 +175,95 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
             gaps.Add(AgentPlanCapabilityGapCodes.ResourceResolutionRequired);
         }
 
+        if (request.UploadIds.Count == 0 &&
+            knowledgeCandidates.Length == 0 &&
+            cloudCandidates.Length == 0 &&
+            governedCandidates.Length == 0)
+        {
+            gaps.Add(AgentPlanCapabilityGapCodes.ResourceResolutionRequired);
+        }
+
         if (gaps.Count != 0)
         {
             return Gap(gaps);
         }
 
-        var steps = new List<AgentTaskPlanStepDocument>(toolCodes.Count);
-        var nodes = new List<AgentPlanNodeDocument>(toolCodes.Count);
-        foreach (var toolCode in toolCodes)
+        var tools = request.ToolCatalog.Tools
+            .Where(tool => tool.RuntimeAvailable && tool.IsVisibleToPlanner && tool.IsExecutableByAgent)
+            .ToDictionary(tool => tool.ToolCode, StringComparer.Ordinal);
+        var specs = BuildNodeSpecs(
+            request,
+            available,
+            knowledgeCandidates,
+            cloudCandidates,
+            governedCandidates,
+            targets);
+        if (specs.Any(spec => spec.NodeKind == "AgentReasoningNode") &&
+            request.ReasoningModelConfiguration is null)
         {
-            var tool = tools[toolCode];
-            var nodeId = $"linear-node-{nodes.Count + 1:00}";
-            var previousNodeId = nodes.Count == 0 ? null : nodes[^1].NodeId;
-            var nodeKind = ResolveNodeKind(toolCode);
-            var capabilityCodes = ResolveCapabilityCodes(toolCode, available);
-            if (capabilityCodes.Length == 0)
+            gaps.Add(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable);
+            return Gap(gaps);
+        }
+
+        if (specs.Count > AgentPlanContractVersions.DefaultMaxNodes ||
+            specs.Any(spec => !tools.ContainsKey(spec.ToolCode)))
+        {
+            gaps.Add(specs.Count > AgentPlanContractVersions.DefaultMaxNodes
+                ? AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable
+                : AgentPlanCapabilityGapCodes.PlannedToolUnavailable);
+            return Gap(gaps);
+        }
+
+        var topologyProfile = RequiresDag(specs) ? "DagV1" : "LinearV1";
+        var concurrencyPolicy = topologyProfile == "DagV1"
+            ? new AgentPlanConcurrencyPolicyDocument(
+                AgentPlanContractVersions.DagConcurrencyPolicyV1,
+                AgentPlanContractVersions.DagMaxParallelism)
+            : new AgentPlanConcurrencyPolicyDocument(
+                AgentPlanContractVersions.LinearConcurrencyPolicyV1,
+                1);
+        var steps = new List<AgentTaskPlanStepDocument>(specs.Count);
+        var nodes = new List<AgentPlanNodeDocument>(specs.Count);
+
+        foreach (var spec in specs)
+        {
+            var tool = tools[spec.ToolCode];
+            var capabilityCodes = ResolveCapabilityCodes(spec.ToolCode, available, spec.CapabilityCodes);
+            if (capabilityCodes.Length == 0 ||
+                capabilityCodes.Any(capabilityCode =>
+                    !AgentIntentRegistryV1.TryGetDescriptor(capabilityCode, out var descriptor) ||
+                    !descriptor.AllowedNodeKinds.Contains(spec.NodeKind, StringComparer.Ordinal) ||
+                    !descriptor.AllowedToolCodes.Contains(spec.ToolCode, StringComparer.Ordinal)))
             {
                 gaps.Add(AgentPlanCapabilityGapCodes.KnownCapabilityUnavailable);
                 break;
             }
 
-            var isCloudRead = string.Equals(toolCode, "query_cloud_data_readonly", StringComparison.Ordinal);
-            var isGovernedRead = string.Equals(toolCode, "query_business_database_readonly", StringComparison.Ordinal);
-            var isFinalization = string.Equals(toolCode, "finalize_artifacts", StringComparison.Ordinal);
+            var isCloudRead = spec.ToolCode == "query_cloud_data_readonly";
+            var isCloudHealth = spec.ToolCode == "assess_cloud_health";
+            var isCloudSemanticNode = isCloudRead || isCloudHealth;
+            var isGovernedRead = spec.ToolCode == "query_business_database_readonly";
+            var isFinalization = spec.ToolCode == "finalize_artifacts";
+            var isReasoning = spec.NodeKind == "AgentReasoningNode";
+            var cloudIntent = spec.CloudIntentCode is null
+                ? null
+                : request.CloudReadonlyIntents.SingleOrDefault(intent =>
+                    string.Equals(intent.Intent, spec.CloudIntentCode, StringComparison.Ordinal));
+            if (isCloudSemanticNode && cloudIntent is null)
+            {
+                gaps.Add(AgentPlanCapabilityGapCodes.CloudReadonlyIntentUnavailable);
+                break;
+            }
+
             var isArtifactWrite = string.Equals(tool.SideEffectClass, "ArtifactWrite", StringComparison.Ordinal);
-            var sideEffectClass = isArtifactWrite ? "ArtifactDraftOnly" : "ReadOnly";
+            var sideEffectClass = spec.NodeKind is "JoinNode" or "DeterministicComputeNode"
+                ? "DeterministicInternal"
+                : isArtifactWrite ? "ArtifactDraftOnly" : "ReadOnly";
             var dataSourceId = isGovernedRead ? request.DataSourceIds.Single() : (Guid?)null;
-            var requestedScope = isCloudRead
-                ? request.CloudReadonlyIntent!.QueryScope
+            var requestedScope = isCloudSemanticNode
+                ? cloudIntent!.QueryScope
                 : isGovernedRead
-                    ? [$"data-source:{dataSourceId:D}"]
+                    ? [$"data-source:{dataSourceId!.Value:D}"]
                     : Array.Empty<string>();
             var artifactBudgetCount = isFinalization ? targets.Length : isArtifactWrite ? 1 : 0;
             var artifactBudgetBytes = artifactBudgetCount == 0
@@ -257,58 +274,65 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
                                        or nameof(AiToolRiskLevel.High)
                                        or nameof(AiToolRiskLevel.Critical) ||
                                    isGovernedRead && request.RequiresDataApproval;
+            var retryPolicy = isReasoning
+                ? new AgentPlanRetryPolicyDocument("retry-policy:v1", 1, "None")
+                : ResolveRetryPolicy(sideEffectClass);
 
             steps.Add(new AgentTaskPlanStepDocument(
                 tool.DisplayName,
                 tool.Description,
-                ResolveStepType(toolCode),
-                toolCode,
+                ResolveStepType(spec.ToolCode),
+                spec.ToolCode,
                 requiresApproval,
                 InputJson: null));
             nodes.Add(new AgentPlanNodeDocument(
                 AgentPlanContractVersions.NodeV1,
-                nodeId,
-                nodeKind,
-                previousNodeId is null ? [] : [previousNodeId],
-                Required: true,
-                InputSchemaRef: "node-input:v1",
-                OutputSchemaRef: $"evidence:{toolCode}:v1",
-                RequestedToolCodes: [toolCode],
-                RequestedCapabilityCodes: capabilityCodes,
-                DataScopes: isGovernedRead ? [dataSourceId!.Value] : [],
-                KnowledgeScopes: string.Equals(toolCode, "rag_search", StringComparison.Ordinal)
-                    ? request.KnowledgeBaseIds
-                    : [],
-                EvidenceSelectors: previousNodeId is null ? [] : [previousNodeId],
-                Input: new AgentPlanNodeInputDocument(
-                    SemanticIntent: isCloudRead ? request.CloudReadonlyIntent!.Intent : null,
-                    SemanticPlanDigest: isCloudRead ? request.CloudReadonlyIntent!.SemanticPlanDigest : null,
-                    TypedProvider: isCloudRead ? "CloudAiRead" : null,
-                    RequestedScope: requestedScope
-                        .Distinct(StringComparer.Ordinal)
-                        .OrderBy(value => value, StringComparer.Ordinal)
-                        .ToArray(),
-                    MaxRows: isCloudRead
-                        ? request.CloudReadonlyIntent!.Limit
+                spec.NodeId,
+                spec.NodeKind,
+                AgentPlanCanonicalCollections.Strings(spec.DependsOn),
+                spec.Required,
+                "node-input:v1",
+                $"evidence:{spec.ToolCode}:v1",
+                [spec.ToolCode],
+                capabilityCodes,
+                isGovernedRead ? [dataSourceId!.Value] : [],
+                spec.ToolCode == "rag_search" ? request.KnowledgeBaseIds : [],
+                AgentPlanCanonicalCollections.Strings(spec.DependsOn),
+                new AgentPlanNodeInputDocument(
+                    SemanticIntent: isCloudSemanticNode ? cloudIntent!.Intent : null,
+                    SemanticPlanDigest: isCloudSemanticNode ? cloudIntent!.SemanticPlanDigest : null,
+                    TypedProvider: isCloudRead
+                        ? "CloudAiRead"
+                        : isCloudHealth ? "DeterministicHealthAssessment" : null,
+                    RequestedScope: AgentPlanCanonicalCollections.Strings(requestedScope),
+                    MaxRows: isCloudSemanticNode
+                        ? cloudIntent!.Limit
                         : isGovernedRead ? 200 : null,
                     ExecutionMode: isGovernedRead ? "TextToSql" : null,
                     DataSourceId: dataSourceId,
                     BusinessDomains: isGovernedRead
-                        ? request.BusinessDomains.OrderBy(value => value, StringComparer.Ordinal).ToArray()
+                        ? AgentPlanCanonicalCollections.Strings(request.BusinessDomains)
                         : [],
                     GovernedSchemaDigest: isGovernedRead ? request.DataContractDigest : null,
                     RequestedPermission: isGovernedRead ? tool.RequiredPermission : null,
-                    CanonicalInputJson: null),
-                ModelPolicy: null,
+                    CanonicalInputJson: null,
+                    TimeRange: isCloudSemanticNode
+                        ? ToEvidenceTimeRange(cloudIntent!.TimeRange)
+                        : null),
+                ModelPolicy: isReasoning
+                    ? AgentReasoningPolicyAuthority.Create(request.ReasoningModelConfiguration!)
+                    : null,
                 new AgentPlanTimeoutPolicyDocument("timeout-policy:v1", tool.TimeoutSeconds),
-                new AgentPlanRetryPolicyDocument("retry-policy:v1", 1, "None"),
+                retryPolicy,
                 new AgentPlanNodeBudgetDocument(
-                    MaxToolCalls: 1,
-                    MaxModelCalls: 0,
-                    MaxInputTokens: 0,
-                    MaxOutputTokens: 0,
-                    MaxRows: isCloudRead ? request.CloudReadonlyIntent!.Limit : isGovernedRead ? 200 : 0,
-                    MaxCostAmount: 0m,
+                    MaxToolCalls: retryPolicy.MaxAttempts,
+                    MaxModelCalls: isReasoning
+                        ? AgentReasoningPolicyAuthority.MaxTurns + AgentReasoningPolicyAuthority.RecoveryTurns
+                        : 0,
+                    MaxInputTokens: isReasoning ? AgentReasoningPolicyAuthority.MaxInputTokens : 0,
+                    MaxOutputTokens: isReasoning ? AgentReasoningPolicyAuthority.MaxOutputTokens : 0,
+                    MaxRows: isCloudSemanticNode ? cloudIntent!.Limit : isGovernedRead ? 200 : 0,
+                    MaxCostAmount: isReasoning ? AgentReasoningPolicyAuthority.MaxCostAmount : 0m,
                     MaxArtifactCount: artifactBudgetCount,
                     MaxArtifactBytes: artifactBudgetBytes),
                 new AgentPlanApprovalPolicyDocument(
@@ -316,9 +340,14 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
                     string.IsNullOrWhiteSpace(tool.ApprovalPolicy) ? "None" : tool.ApprovalPolicy),
                 new AgentPlanIdempotencyPolicyDocument(
                     "idempotency-policy:v1",
-                    sideEffectClass == "ReadOnly" ? "ReadOnly" : "Fenced"),
+                    sideEffectClass switch
+                    {
+                        "ReadOnly" => "ReadOnly",
+                        "DeterministicInternal" => "Deterministic",
+                        _ => "Fenced"
+                    }),
                 sideEffectClass,
-                JoinPolicy: null));
+                spec.JoinPolicy));
         }
 
         if (gaps.Count != 0)
@@ -326,28 +355,240 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
             return Gap(gaps);
         }
 
-        return new AgentPlanCompilation(steps, nodes, []);
+        var joinPolicies = AgentPlanCanonicalCollections.Strings(
+            nodes.Select(node => node.JoinPolicy).Where(policy => policy is not null).Select(policy => policy!));
+        return new AgentPlanCompilation(
+            topologyProfile,
+            concurrencyPolicy,
+            steps,
+            nodes,
+            joinPolicies,
+            []);
     }
+
+    private static List<NodeSpec> BuildNodeSpecs(
+        AgentPlanCompilerRequest request,
+        IReadOnlyCollection<AgentIntentCandidateDocument> available,
+        IReadOnlyCollection<AgentIntentCandidateDocument> knowledgeCandidates,
+        IReadOnlyCollection<AgentIntentCandidateDocument> cloudCandidates,
+        IReadOnlyCollection<AgentIntentCandidateDocument> governedCandidates,
+        IReadOnlyCollection<string> targets)
+    {
+        var specs = new List<NodeSpec>();
+        var evidenceProducers = new List<string>();
+
+        if (request.UploadIds.Count != 0)
+        {
+            specs.Add(new NodeSpec("01-file-read", "read_uploaded_file", "FileAnalysisNode", [], true, null, []));
+            specs.Add(new NodeSpec("02-file-parse", "parse_table_file", "FileAnalysisNode", ["01-file-read"], true, null, []));
+            evidenceProducers.Add("02-file-parse");
+        }
+
+        if (knowledgeCandidates.Count != 0)
+        {
+            specs.Add(new NodeSpec(
+                "03-knowledge-read",
+                "rag_search",
+                "KnowledgeRetrievalNode",
+                [],
+                knowledgeCandidates.Any(candidate => candidate.Required.Value),
+                null,
+                knowledgeCandidates.Select(candidate => candidate.IntentCode).ToArray()));
+            evidenceProducers.Add("03-knowledge-read");
+        }
+
+        if (cloudCandidates.Count != 0)
+        {
+            var cloudIndex = 0;
+            foreach (var candidate in cloudCandidates.OrderBy(
+                         candidate => candidate.IntentCode,
+                         StringComparer.Ordinal))
+            {
+                cloudIndex++;
+                var cloudReadNodeId = $"04-cloud-{cloudIndex:00}-read";
+                specs.Add(new NodeSpec(
+                    cloudReadNodeId,
+                    "query_cloud_data_readonly",
+                    "CloudReadNode",
+                    [],
+                    true,
+                    null,
+                    [candidate.IntentCode],
+                    candidate.IntentCode));
+                if (string.Equals(
+                        candidate.IntentCode,
+                        "Analysis.Device.Status",
+                        StringComparison.Ordinal))
+                {
+                    var healthNodeId = $"04-cloud-{cloudIndex:00}-health";
+                    specs.Add(new NodeSpec(
+                        healthNodeId,
+                        "assess_cloud_health",
+                        "DeterministicComputeNode",
+                        [cloudReadNodeId],
+                        true,
+                        null,
+                        [candidate.IntentCode],
+                        candidate.IntentCode));
+                    evidenceProducers.Add(healthNodeId);
+                }
+                else
+                {
+                    evidenceProducers.Add(cloudReadNodeId);
+                }
+            }
+        }
+
+        if (governedCandidates.Count != 0)
+        {
+            specs.Add(new NodeSpec(
+                "05-governed-read",
+                "query_business_database_readonly",
+                "GovernedDataReadNode",
+                [],
+                true,
+                null,
+                governedCandidates.Select(candidate => candidate.IntentCode).ToArray()));
+            specs.Add(new NodeSpec(
+                "06-governed-summary",
+                "summarize_business_query_result",
+                "DeterministicComputeNode",
+                ["05-governed-read"],
+                Required: false,
+                JoinPolicy: null,
+                governedCandidates.Select(candidate => candidate.IntentCode).ToArray()));
+            evidenceProducers.Add("05-governed-read");
+            evidenceProducers.Add("06-governed-summary");
+        }
+
+        string[] artifactDependencies;
+        if (evidenceProducers.Count > 1)
+        {
+            var joinCapabilities = available
+                .Where(candidate => candidate.IntentClass == AgentIntentClass.General)
+                .Select(candidate => candidate.IntentCode)
+                .ToArray();
+            var joinPolicy = specs
+                .Where(spec => evidenceProducers.Contains(spec.NodeId, StringComparer.Ordinal))
+                .Any(spec => !spec.Required)
+                ? "OptionalBestEffort"
+                : "AllRequired";
+            specs.Add(new NodeSpec(
+                "07-evidence-join",
+                "join_evidence",
+                "JoinNode",
+                evidenceProducers,
+                true,
+                joinPolicy,
+                joinCapabilities));
+            specs.Add(new NodeSpec(
+                "08-agent-reasoning",
+                "agent_reasoning",
+                "AgentReasoningNode",
+                evidenceProducers,
+                true,
+                joinPolicy,
+                joinCapabilities));
+            artifactDependencies = ["07-evidence-join", "08-agent-reasoning"];
+        }
+        else
+        {
+            artifactDependencies = evidenceProducers.ToArray();
+        }
+
+        var previousArtifact = string.Empty;
+        var artifactIndex = 0;
+        foreach (var target in targets)
+        {
+            artifactIndex++;
+            var toolCode = target == "chart" && governedCandidates.Count != 0
+                ? "generate_business_chart"
+                : ArtifactTools[target];
+            var dependencies = previousArtifact.Length == 0
+                ? artifactDependencies
+                : [previousArtifact];
+            var nodeId = $"{20 + artifactIndex:00}-artifact-{target}";
+            specs.Add(new NodeSpec(
+                nodeId,
+                toolCode,
+                "ArtifactGenerationNode",
+                dependencies,
+                true,
+                dependencies.Length > 1 ? "AllRequired" : null,
+                []));
+            previousArtifact = nodeId;
+        }
+
+        specs.Add(new NodeSpec(
+            "99-finalize-artifacts",
+            "finalize_artifacts",
+            "ApprovalCheckpointNode",
+            [previousArtifact],
+            true,
+            null,
+            []));
+        return specs;
+    }
+
+    private static AgentIntentTimeRangeDocument? ToEvidenceTimeRange(
+        AgentTaskPlanSemanticTimeRangeDocument? timeRange) =>
+        timeRange is null
+            ? null
+            : new AgentIntentTimeRangeDocument(
+                timeRange.Start,
+                timeRange.End,
+                timeRange.TimeZone);
+
+    private static bool RequiresDag(IReadOnlyCollection<NodeSpec> specs)
+    {
+        if (specs.Any(spec => spec.DependsOn.Count > 1 || spec.JoinPolicy is not null))
+        {
+            return true;
+        }
+
+        var roots = specs.Count(spec => spec.DependsOn.Count == 0);
+        if (roots > 1)
+        {
+            return true;
+        }
+
+        var childCounts = specs
+            .SelectMany(spec => spec.DependsOn)
+            .GroupBy(parent => parent, StringComparer.Ordinal)
+            .Select(group => group.Count());
+        return childCounts.Any(count => count > 1);
+    }
+
+    private static AgentPlanRetryPolicyDocument ResolveRetryPolicy(string sideEffectClass) =>
+        sideEffectClass switch
+        {
+            "ReadOnly" => new AgentPlanRetryPolicyDocument("retry-policy:v1", 2, "Exponential"),
+            "DeterministicInternal" => new AgentPlanRetryPolicyDocument("retry-policy:v1", 2, "Fixed"),
+            _ => new AgentPlanRetryPolicyDocument("retry-policy:v1", 1, "None")
+        };
 
     private static string[] ResolveCapabilityCodes(
         string toolCode,
-        IReadOnlyCollection<AgentIntentCandidateDocument> available)
+        IReadOnlyCollection<AgentIntentCandidateDocument> available,
+        IReadOnlyCollection<string> explicitCodes)
     {
+        if (explicitCodes.Count != 0)
+        {
+            return AgentPlanCanonicalCollections.Strings(explicitCodes);
+        }
+
         IEnumerable<AgentIntentCandidateDocument> candidates = toolCode switch
         {
-            "query_cloud_data_readonly" => available.Where(candidate =>
-                candidate.IntentClass == AgentIntentClass.CloudOnly),
-            "query_business_database_readonly" => available.Where(candidate =>
+            "query_cloud_data_readonly" or "assess_cloud_health" => available.Where(candidate => candidate.IntentClass == AgentIntentClass.CloudOnly),
+            "query_business_database_readonly" or "summarize_business_query_result" => available.Where(candidate =>
                 candidate.IntentClass == AgentIntentClass.GovernedExploration),
-            "rag_search" => available.Where(candidate =>
-                candidate.IntentClass == AgentIntentClass.Knowledge),
+            "rag_search" => available.Where(candidate => candidate.IntentClass == AgentIntentClass.Knowledge),
+            "join_evidence" or "agent_reasoning" => available,
             _ => available.Where(candidate => candidate.IntentClass is
-                AgentIntentClass.General or AgentIntentClass.Knowledge)
+                AgentIntentClass.General or AgentIntentClass.Knowledge or
+                AgentIntentClass.CloudOnly or AgentIntentClass.GovernedExploration)
         };
 
-        // One least-privilege capability is sufficient to authorize a common
-        // file/artifact node; every required domain-specific candidate already has its
-        // own producer node above.
         var selected = candidates
             .OrderBy(candidate => candidate.IntentClass == AgentIntentClass.General ? 0 : 1)
             .ThenBy(candidate => candidate.IntentCode, StringComparer.Ordinal)
@@ -355,26 +596,13 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
         return selected is null ? [] : [selected.IntentCode];
     }
 
-    private static string ResolveNodeKind(string toolCode) => toolCode switch
-    {
-        "read_uploaded_file" or "parse_table_file" => "FileAnalysisNode",
-        "rag_search" => "KnowledgeRetrievalNode",
-        "query_cloud_data_readonly" => "CloudReadNode",
-        "query_business_database_readonly" => "GovernedDataReadNode",
-        "summarize_business_query_result" => "DeterministicComputeNode",
-        "generate_business_chart" or "generate_chart_data" or
-        "generate_markdown_report" or "generate_html_report" or
-        "generate_pdf" or "generate_pptx" or "generate_xlsx" => "ArtifactGenerationNode",
-        "finalize_artifacts" => "ApprovalCheckpointNode",
-        _ => throw new InvalidOperationException($"Tool '{toolCode}' has no LinearV1 NodeKind mapping.")
-    };
-
     private static AgentStepType ResolveStepType(string toolCode) => toolCode switch
     {
         "read_uploaded_file" => AgentStepType.FileRead,
         "rag_search" => AgentStepType.RagSearch,
         "query_cloud_data_readonly" or "query_business_database_readonly" => AgentStepType.DataQuery,
-        "parse_table_file" or "summarize_business_query_result" => AgentStepType.Analysis,
+        "parse_table_file" or "summarize_business_query_result" or "assess_cloud_health" or
+        "join_evidence" or "agent_reasoning" => AgentStepType.Analysis,
         "generate_business_chart" or "generate_chart_data" => AgentStepType.ChartGeneration,
         "generate_markdown_report" or "generate_html_report" or
         "generate_pdf" or "generate_pptx" or "generate_xlsx" => AgentStepType.ArtifactGeneration,
@@ -383,10 +611,25 @@ internal sealed class DeterministicLinearAgentPlanCompiler : IAgentPlanCompiler
     };
 
     private static AgentPlanCompilation Gap(IEnumerable<string> gaps) => new(
+        "LinearV1",
+        new AgentPlanConcurrencyPolicyDocument(
+            AgentPlanContractVersions.LinearConcurrencyPolicyV1,
+            1),
+        [],
         [],
         [],
         gaps.Where(gap => !string.IsNullOrWhiteSpace(gap))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(gap => gap, StringComparer.Ordinal)
             .ToArray());
+
+    private sealed record NodeSpec(
+        string NodeId,
+        string ToolCode,
+        string NodeKind,
+        IReadOnlyCollection<string> DependsOn,
+        bool Required,
+        string? JoinPolicy,
+        IReadOnlyCollection<string> CapabilityCodes,
+        string? CloudIntentCode = null);
 }

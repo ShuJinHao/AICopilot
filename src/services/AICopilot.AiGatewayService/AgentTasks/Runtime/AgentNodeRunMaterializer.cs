@@ -14,14 +14,19 @@ internal sealed class AgentNodeRunMaterializer(
         CancellationToken cancellationToken)
     {
         if (!string.Equals(plan.SchemaVersion, AgentPlanContractVersions.PlanV2, StringComparison.Ordinal) ||
-            !string.Equals(plan.TopologyProfile, "LinearV1", StringComparison.Ordinal) ||
+            plan.TopologyProfile is not ("LinearV1" or "DagV1") ||
             string.IsNullOrWhiteSpace(plan.PlanDigest) ||
             plan.ExecutionSnapshot is null ||
+            plan.ConcurrencyPolicy is null ||
+            (plan.TopologyProfile == "LinearV1" && plan.ConcurrencyPolicy.MaxParallelism != 1) ||
+            (plan.TopologyProfile == "DagV1" &&
+             (plan.ConcurrencyPolicy.MaxParallelism is < AgentPlanContractVersions.DagMinParallelism
+                 or > AgentPlanContractVersions.DagMaxParallelism)) ||
             plan.Nodes is not { Count: > 0 } ||
             plan.Nodes.Count != claim.Task.Steps.Count)
         {
             throw new InvalidOperationException(
-                "Durable NodeRun materialization requires a complete executable LinearV1 Plan v2.");
+                "Durable NodeRun materialization requires a complete executable LinearV1 or bounded DagV1 Plan v2.");
         }
 
         var executionSnapshotJson = CanonicalJson.Serialize(plan.ExecutionSnapshot);
@@ -104,6 +109,7 @@ internal sealed class AgentNodeRunMaterializer(
                     node.Budget.MaxCostAmount,
                     node.Budget.MaxArtifactCount,
                     node.Budget.MaxArtifactBytes),
+                node.JoinPolicy,
                 IsInitiallyRunnable: dependencies.Length == 0 && !node.ApprovalPolicy.Required);
         }).ToArray();
 

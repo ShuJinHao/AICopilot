@@ -9,13 +9,14 @@ internal sealed record AgentPlanDraftContractRequest(
     string RawGoal,
     AgentTaskPlanDocument CurrentPlan,
     IReadOnlyCollection<IntentResult> RoutedIntents,
-    AgentIntentAdapterContext IntentContext,
+    AgentIntentRegistryContext IntentContext,
     PlannerToolCatalog ToolCatalog,
     AgentPluginSelectionMode? PluginSelectionMode,
     IReadOnlyCollection<Guid>? SelectedPluginIds,
     AgentCapabilitySelectionMode? CapabilitySelectionMode,
     IReadOnlyCollection<string>? RequestedCapabilityCodes,
     RuntimeAgentConfigurationSnapshot? RoutingConfiguration = null,
+    RuntimeAgentConfigurationSnapshot? ReasoningConfiguration = null,
     bool AllowDevelopmentSimulationExecution = false);
 
 internal sealed record AgentPlanCatalogDigests(
@@ -79,14 +80,16 @@ internal static class AgentPlanCatalogSnapshotAuthority
         RuntimeAgentConfigurationSnapshot? routingConfiguration,
         IReadOnlyCollection<Guid>? authorizedDataSourceIds = null,
         IReadOnlyCollection<Guid>? authorizedKnowledgeBaseIds = null,
-        IReadOnlyCollection<AgentIntentCandidateDocument>? authorizedIntentCandidates = null)
+        IReadOnlyCollection<AgentIntentCandidateDocument>? authorizedIntentCandidates = null,
+        string? concurrencyPolicyVersion = null)
     {
         return snapshot == CreateSnapshot(
             catalog,
             routingConfiguration,
             authorizedDataSourceIds,
             authorizedKnowledgeBaseIds,
-            authorizedIntentCandidates);
+            authorizedIntentCandidates,
+            concurrencyPolicyVersion);
     }
 
     public static bool HasValidFrozenNonCatalogFields(
@@ -99,8 +102,8 @@ internal static class AgentPlanCatalogSnapshotAuthority
                string.Equals(snapshot.PlanContractDigest, AgentPlanContractSchemaAuthority.PlanContractDigest, StringComparison.Ordinal) &&
                string.Equals(snapshot.NodeContractVersion, AgentPlanContractVersions.NodeV1, StringComparison.Ordinal) &&
                string.Equals(snapshot.NodeContractDigest, AgentPlanContractSchemaAuthority.NodeContractDigest, StringComparison.Ordinal) &&
-               string.Equals(snapshot.IntentCatalogVersion, AgentIntentCatalogV1.CatalogVersion, StringComparison.Ordinal) &&
-               string.Equals(snapshot.IntentCatalogDigest, AgentIntentCatalogV1.CatalogDigest, StringComparison.Ordinal) &&
+               string.Equals(snapshot.IntentCatalogVersion, AgentIntentRegistryV1.RegistryVersion, StringComparison.Ordinal) &&
+               IsSha256(snapshot.IntentCatalogDigest) &&
                IsSha256(snapshot.AuthorizedIntentRosterDigest) &&
                snapshot.ModelId == modelId &&
                string.Equals(snapshot.DataContractVersion, DataContractVersion, StringComparison.Ordinal) &&
@@ -114,7 +117,9 @@ internal static class AgentPlanCatalogSnapshotAuthority
                string.Equals(snapshot.GuardVersion, GuardVersion, StringComparison.Ordinal) &&
                string.Equals(snapshot.GuardDigest, GuardDigest, StringComparison.Ordinal) &&
                string.Equals(snapshot.BudgetPolicyVersion, BudgetPolicyVersion, StringComparison.Ordinal) &&
-               string.Equals(snapshot.ConcurrencyPolicyVersion, AgentPlanContractVersions.ConcurrencyPolicyV1, StringComparison.Ordinal) &&
+               (snapshot.ConcurrencyPolicyVersion is
+                   AgentPlanContractVersions.LinearConcurrencyPolicyV1 or
+                   AgentPlanContractVersions.DagConcurrencyPolicyV1) &&
                string.Equals(snapshot.PluginCatalogDigest, CanonicalEmptyInventoryDigest, StringComparison.Ordinal) &&
                string.Equals(snapshot.McpCatalogDigest, CanonicalEmptyInventoryDigest, StringComparison.Ordinal) &&
                snapshot.MaxCanonicalBytes == AgentPlanContractVersions.MaxPlanCanonicalBytes;
@@ -148,9 +153,24 @@ internal static class AgentPlanCatalogSnapshotAuthority
         RuntimeAgentConfigurationSnapshot? routingConfiguration,
         IReadOnlyCollection<Guid>? authorizedDataSourceIds = null,
         IReadOnlyCollection<Guid>? authorizedKnowledgeBaseIds = null,
-        IReadOnlyCollection<AgentIntentCandidateDocument>? authorizedIntentCandidates = null)
+        IReadOnlyCollection<AgentIntentCandidateDocument>? authorizedIntentCandidates = null,
+        string? concurrencyPolicyVersion = null)
     {
         var digests = Compute(catalog);
+        var registryVersions = (authorizedIntentCandidates ?? [])
+            .Select(candidate => candidate.Provenance.CatalogVersion)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var registryDigests = (authorizedIntentCandidates ?? [])
+            .Select(candidate => candidate.Provenance.CatalogDigest)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var registryVersion = registryVersions.Length == 1
+            ? registryVersions[0]
+            : AgentIntentRegistryV1.RegistryVersion;
+        var registryDigest = registryDigests.Length == 1
+            ? registryDigests[0]
+            : AgentIntentRegistryV1.RegistryDigest;
         return new AgentExecutionSnapshotDocument(
             AgentPlanContractVersions.ExecutionSnapshotV1,
             AgentPlanContractVersions.PlanPolicyV1,
@@ -161,8 +181,8 @@ internal static class AgentPlanCatalogSnapshotAuthority
             catalog.Version,
             digests.ToolCatalogDigest,
             digests.ProviderCatalogDigest,
-            AgentIntentCatalogV1.CatalogVersion,
-            AgentIntentCatalogV1.CatalogDigest,
+            registryVersion,
+            registryDigest,
             HashAuthorizedIntentRoster(authorizedIntentCandidates),
             routingConfiguration?.TemplateCode,
             routingConfiguration?.TemplateVersion,
@@ -185,7 +205,7 @@ internal static class AgentPlanCatalogSnapshotAuthority
             GuardVersion,
             GuardDigest,
             BudgetPolicyVersion,
-            AgentPlanContractVersions.ConcurrencyPolicyV1,
+            concurrencyPolicyVersion ?? AgentPlanContractVersions.LinearConcurrencyPolicyV1,
             AgentPlanContractVersions.MaxPlanCanonicalBytes);
     }
 
@@ -298,18 +318,18 @@ internal static class AgentPlanCatalogSnapshotAuthority
 
 public sealed class AgentPlanDraftContractAuthority
 {
-    private readonly IntentResultToCandidateAdapter intentAdapter;
+    private readonly AgentIntentRegistryProjector intentProjector;
     private readonly AgentPlanCanonicalizer canonicalizer;
     private readonly IAgentPlanCompiler planCompiler;
 
     internal AgentPlanDraftContractAuthority(
-        IntentResultToCandidateAdapter intentAdapter,
+        AgentIntentRegistryProjector intentProjector,
         AgentPlanCanonicalizer canonicalizer,
         IAgentPlanCompiler? planCompiler = null)
     {
-        this.intentAdapter = intentAdapter;
+        this.intentProjector = intentProjector;
         this.canonicalizer = canonicalizer;
-        this.planCompiler = planCompiler ?? new DeterministicLinearAgentPlanCompiler();
+        this.planCompiler = planCompiler ?? new DeterministicAgentPlanCompiler();
     }
 
     internal Result<CanonicalAgentPlan> SealExecutable(AgentTaskPlanDocument draft)
@@ -320,7 +340,7 @@ public sealed class AgentPlanDraftContractAuthority
             draft.CapabilityGaps is not { Count: 0 })
         {
             return Invalid(
-                "Only a gap-free PlanDraft produced by the authoritative LinearV1 PlanCompiler can become executable.");
+                "Only a gap-free PlanDraft produced by the authoritative PlanCompiler can become executable.");
         }
 
         if (draft.PlanVersion == int.MaxValue)
@@ -358,13 +378,13 @@ public sealed class AgentPlanDraftContractAuthority
             ? [new IntentResult { Intent = "General.Chat", Confidence = 1 }]
             : request.RoutedIntents.ToArray();
         var explicitCapabilities = AgentPlanCanonicalCollections.Strings(request.RequestedCapabilityCodes ?? []);
-        var adapted = intentAdapter.Adapt(routedIntents, request.IntentContext);
-        if (!adapted.IsSuccess)
+        var projected = intentProjector.Project(routedIntents, request.IntentContext);
+        if (!projected.IsSuccess)
         {
-            return Result.From(adapted);
+            return Result.From(projected);
         }
 
-        var allCandidates = adapted.Value!.ToArray();
+        var allCandidates = projected.Value!.ToArray();
         var requestedCapabilities = capabilityMode == AgentCapabilitySelectionMode.ExplicitAllowlist
             ? explicitCapabilities
             : AgentPlanCanonicalCollections.Strings(allCandidates.Select(candidate => candidate.IntentCode));
@@ -375,18 +395,9 @@ public sealed class AgentPlanDraftContractAuthority
                 .ToArray()
             : allCandidates;
 
-        var stepsResult = NormalizeSteps(request.CurrentPlan.Steps);
-        if (!stepsResult.IsSuccess)
-        {
-            return Result.From(stepsResult);
-        }
-
         var explicitEmptyCapabilitySelection =
             capabilityMode == AgentCapabilitySelectionMode.ExplicitAllowlist &&
             requestedCapabilities.Length == 0;
-        var steps = explicitEmptyCapabilitySelection
-            ? Array.Empty<AgentTaskPlanStepDocument>()
-            : stepsResult.Value!.ToArray();
         var unresolvedCapabilityGaps = AgentPlanCanonicalCollections.Strings(
             (request.CurrentPlan.CapabilityGaps ?? [])
             .Concat(candidates
@@ -398,7 +409,7 @@ public sealed class AgentPlanDraftContractAuthority
             .Concat(explicitEmptyCapabilitySelection
                 ? [AgentPlanCapabilityGapCodes.CapabilitySelectionEmpty]
                 : []));
-        var artifactTargets = AgentPlanCanonicalCollections.Strings(request.CurrentPlan.ArtifactTypes ?? []);
+        var artifactTargets = AgentPlanCanonicalCollections.Strings(request.CurrentPlan.ArtifactTargets ?? []);
         var dataSourceIds = AgentPlanCanonicalCollections.Guids(request.CurrentPlan.DataSourceIds ?? []);
         var businessDomains = AgentPlanCanonicalCollections.Strings(request.CurrentPlan.BusinessDomains ?? []);
         var dataSourceSummaries = (request.CurrentPlan.DataSourceSummaries ?? [])
@@ -425,19 +436,36 @@ public sealed class AgentPlanDraftContractAuthority
                 request.ToolCatalog,
                 AgentPlanCanonicalCollections.Guids(request.CurrentPlan.UploadIds),
                 AgentPlanCanonicalCollections.Guids(request.CurrentPlan.KnowledgeBaseIds),
-                request.CurrentPlan.CloudReadonlyIntent,
+                (request.CurrentPlan.CloudReadonlyIntents ?? [])
+                    .OrderBy(intent => intent.Intent, StringComparer.Ordinal)
+                    .ToArray(),
                 dataSourceIds,
                 businessDomains,
                 dataSourceSummaries,
                 artifactTargets,
                 request.CurrentPlan.RequiresDataApproval,
                 request.CurrentPlan.PlannerSafetySummary?.IsSimulationOnly == true,
-                executionSnapshot.DataContractDigest))
-            : new AgentPlanCompilation([], [], unresolvedCapabilityGaps);
+                executionSnapshot.DataContractDigest,
+                request.ReasoningConfiguration))
+            : new AgentPlanCompilation(
+                "LinearV1",
+                new AgentPlanConcurrencyPolicyDocument(
+                    AgentPlanContractVersions.LinearConcurrencyPolicyV1,
+                    1),
+                [],
+                [],
+                [],
+                unresolvedCapabilityGaps);
+        executionSnapshot = executionSnapshot with
+        {
+            ConcurrencyPolicyVersion = compilation.ConcurrencyPolicy.PolicyVersion
+        };
         var capabilityGaps = AgentPlanCanonicalCollections.Strings(
             unresolvedCapabilityGaps.Concat(compilation.CapabilityGaps));
         var nodes = capabilityGaps.Length == 0 ? compilation.Nodes : [];
-        steps = capabilityGaps.Length == 0 ? compilation.Steps.ToArray() : steps;
+        var steps = capabilityGaps.Length == 0
+            ? compilation.Steps.ToArray()
+            : Array.Empty<AgentTaskPlanStepDocument>();
         var approvalCheckpoints = steps
             .Where(step => step.RequiresApproval)
             .Select(step => string.IsNullOrWhiteSpace(step.ToolCode) ? step.Title : step.ToolCode!)
@@ -456,13 +484,15 @@ public sealed class AgentPlanDraftContractAuthority
             Goal = BuildSafeGoalSummary(request.CurrentPlan.TaskType, request.RawGoal),
             UploadIds = AgentPlanCanonicalCollections.Guids(request.CurrentPlan.UploadIds),
             KnowledgeBaseIds = AgentPlanCanonicalCollections.Guids(request.CurrentPlan.KnowledgeBaseIds),
+            CloudReadonlyIntents = (request.CurrentPlan.CloudReadonlyIntents ?? [])
+                .OrderBy(intent => intent.Intent, StringComparer.Ordinal)
+                .ToArray(),
             Steps = steps,
             DataSourceIds = dataSourceIds,
             BusinessDomains = businessDomains,
-            ArtifactTypes = artifactTargets,
             PlannerToolCatalogVersion = request.ToolCatalog.Version,
             PlannerAvailableToolCount = request.ToolCatalog.AvailableToolCount,
-            ForcedStepCodes = AgentPlanCanonicalCollections.Strings(request.CurrentPlan.ForcedStepCodes ?? []),
+            ForcedStepCodes = [],
             ApprovalCheckpoints = approvalCheckpoints,
             ToolApprovalCheckpoints = toolApprovalCheckpoints,
             DataSourceSummaries = dataSourceSummaries,
@@ -471,7 +501,6 @@ public sealed class AgentPlanDraftContractAuthority
             ToolRiskSummary = toolRiskSummary,
             MockMcpOnly = PlannerToolCatalogMetadata.IsMockMcpOnly(request.ToolCatalog.Tools),
             PlannerModelId = request.RoutingConfiguration?.ModelId,
-            PlannerFallbackReason = null,
             PlannerSafetySummary = request.CurrentPlan.PlannerSafetySummary is null
                 ? null
                 : request.CurrentPlan.PlannerSafetySummary with
@@ -482,9 +511,6 @@ public sealed class AgentPlanDraftContractAuthority
                     ToolRiskSummary = toolRiskSummary,
                     MockMcpOnly = PlannerToolCatalogMetadata.IsMockMcpOnly(request.ToolCatalog.Tools)
                 },
-            SkillCode = null,
-            SkillName = null,
-            SkillRoutingReason = null,
             PlanKind = AgentTaskPlanKinds.PlanDraft,
             IsExecutable = false,
             LifecycleSealPadding = "0000",
@@ -493,7 +519,7 @@ public sealed class AgentPlanDraftContractAuthority
             PlanId = Guid.NewGuid(),
             PlanVersion = 1,
             PlanDigest = null,
-            TopologyProfile = "LinearV1",
+            TopologyProfile = compilation.TopologyProfile,
             IntentCandidates = candidates,
             CapabilitySelectionMode = capabilityMode,
             RequestedCapabilityCodes = requestedCapabilities,
@@ -501,7 +527,7 @@ public sealed class AgentPlanDraftContractAuthority
             SelectedPluginIds = selectedPluginIds,
             ArtifactTargets = artifactTargets,
             Nodes = nodes,
-            JoinPolicies = [],
+            JoinPolicies = capabilityGaps.Length == 0 ? compilation.JoinPolicies : [],
             Budgets = new AgentPlanBudgetDocument(
                 AgentPlanContractVersions.BudgetPolicyV1,
                 AgentPlanContractVersions.DefaultMaxNodes,
@@ -516,6 +542,7 @@ public sealed class AgentPlanDraftContractAuthority
                 AgentPlanContractVersions.DefaultMaxArtifactCount,
                 AgentPlanContractVersions.DefaultMaxArtifactBytes,
                 AgentPlanContractVersions.MaxPlanCanonicalBytes),
+            ConcurrencyPolicy = compilation.ConcurrencyPolicy,
             ApprovalSummary = new AgentPlanApprovalSummaryDocument(
                 true,
                 approvalCheckpoints),
@@ -530,32 +557,6 @@ public sealed class AgentPlanDraftContractAuthority
         };
 
         return canonicalizer.Seal(plan);
-    }
-
-    private static Result<IReadOnlyCollection<AgentTaskPlanStepDocument>> NormalizeSteps(
-        IReadOnlyCollection<AgentTaskPlanStepDocument> steps)
-    {
-        var normalized = new List<AgentTaskPlanStepDocument>(steps.Count);
-        foreach (var step in steps)
-        {
-            string? inputJson = null;
-            if (!string.IsNullOrWhiteSpace(step.InputJson))
-            {
-                var input = AgentNodeToolInputContractV1.Normalize(step.InputJson);
-                if (!input.IsValid)
-                {
-                    return Result.Failure(new ApiProblemDescriptor(
-                        AppProblemCodes.AgentPlanSchemaInvalid,
-                        input.Error ?? "Plan step input violates node-tool-input-policy:v1."));
-                }
-
-                inputJson = input.CanonicalJson;
-            }
-
-            normalized.Add(step with { InputJson = inputJson });
-        }
-
-        return Result.Success<IReadOnlyCollection<AgentTaskPlanStepDocument>>(normalized);
     }
 
     private static string BuildSafeGoalSummary(string taskType, string rawGoal)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 
@@ -10,27 +11,56 @@ internal sealed class NodeCheckpointCoordinator(
         AgentNodeSuccessCheckpoint checkpoint,
         CancellationToken cancellationToken)
     {
-        return Map(
-            await checkpointStore.CommitSuccessAsync(checkpoint, cancellationToken),
-            duplicateIsSuccess: true);
+        var started = Stopwatch.GetTimestamp();
+        var result = await checkpointStore.CommitSuccessAsync(checkpoint, cancellationToken);
+        RecordCheckpoint(result, started);
+        if (result == AgentFencedWriteResult.Succeeded)
+        {
+            AgentRuntimeTelemetry.RecordUsage(checkpoint.Usage);
+        }
+
+        return Map(result, duplicateIsSuccess: true);
     }
 
     public async Task<Result> CommitFailureAsync(
         AgentNodeFailureCheckpoint checkpoint,
         CancellationToken cancellationToken)
     {
-        return Map(
-            await checkpointStore.CommitFailureAsync(checkpoint, cancellationToken),
-            duplicateIsSuccess: false);
+        var started = Stopwatch.GetTimestamp();
+        var result = await checkpointStore.CommitFailureAsync(checkpoint, cancellationToken);
+        RecordCheckpoint(result, started);
+        if (result == AgentFencedWriteResult.Succeeded)
+        {
+            AgentRuntimeTelemetry.RecordUsage(checkpoint.Usage);
+        }
+
+        return Map(result, duplicateIsSuccess: false);
     }
 
     public async Task<Result> CommitOutcomeUnknownAsync(
         AgentNodeOutcomeUnknownCheckpoint checkpoint,
         CancellationToken cancellationToken)
     {
-        return Map(
-            await checkpointStore.CommitOutcomeUnknownAsync(checkpoint, cancellationToken),
-            duplicateIsSuccess: false);
+        var started = Stopwatch.GetTimestamp();
+        var result = await checkpointStore.CommitOutcomeUnknownAsync(checkpoint, cancellationToken);
+        RecordCheckpoint(result, started);
+        if (result == AgentFencedWriteResult.Succeeded)
+        {
+            AgentRuntimeTelemetry.RecordOutcomeUnknown();
+        }
+
+        return Map(result, duplicateIsSuccess: false);
+    }
+
+    private static void RecordCheckpoint(AgentFencedWriteResult result, long started)
+    {
+        AgentRuntimeTelemetry.RecordCheckpointLatency(
+            Stopwatch.GetElapsedTime(started),
+            result.ToString());
+        if (result is AgentFencedWriteResult.StaleFence or AgentFencedWriteResult.Duplicate)
+        {
+            AgentRuntimeTelemetry.RecordStaleWorkerReject("node-checkpoint");
+        }
     }
 
     private static Result Map(AgentFencedWriteResult result, bool duplicateIsSuccess)

@@ -38,6 +38,10 @@ public sealed record BranchResult
 
     public string? SafeMessage { get; init; }
 
+    public IReadOnlyCollection<AgentWorkflowEvidence> Evidence { get; init; } = [];
+
+    internal IReadOnlyCollection<AgentBranchEvidenceSeed> EvidenceSeeds { get; init; } = [];
+
     public static BranchResult Skipped(BranchType type) =>
         new() { Type = type, Status = BranchExecutionStatus.Skipped };
 
@@ -67,6 +71,19 @@ public sealed record BranchResult
         string.IsNullOrWhiteSpace(result)
             ? Empty(BranchType.DataAnalysis)
             : new() { Type = BranchType.DataAnalysis, Status = BranchExecutionStatus.Succeeded, DataAnalysis = result };
+
+    internal static BranchResult FromDataAnalysis(
+        string result,
+        IReadOnlyCollection<AgentBranchEvidenceSeed> evidenceSeeds) =>
+        string.IsNullOrWhiteSpace(result) || evidenceSeeds.Count == 0
+            ? Empty(BranchType.DataAnalysis)
+            : new()
+            {
+                Type = BranchType.DataAnalysis,
+                Status = BranchExecutionStatus.Succeeded,
+                DataAnalysis = result,
+                EvidenceSeeds = evidenceSeeds
+            };
 
     public static BranchResult FromBusinessPolicy(string result) =>
         string.IsNullOrWhiteSpace(result)

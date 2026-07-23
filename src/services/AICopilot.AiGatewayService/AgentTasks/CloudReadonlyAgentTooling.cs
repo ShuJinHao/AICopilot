@@ -37,6 +37,10 @@ public interface ICloudReadonlyAgentPlanService
     Result<CloudReadonlyAgentPlanIntent> CreateIntentFromRouted(
         string goal,
         IReadOnlyCollection<IntentResult> routedIntents);
+
+    Result<IReadOnlyCollection<CloudReadonlyAgentPlanIntent>> CreateIntentsFromRouted(
+        string goal,
+        IReadOnlyCollection<IntentResult> routedIntents);
 }
 
 public interface ICloudReadonlyAgentIntentRouter
@@ -93,26 +97,64 @@ public sealed class CloudReadonlyAgentPlanService(
         string goal,
         IReadOnlyCollection<IntentResult> routedIntents)
     {
+        var result = CreateIntentsFromRouted(goal, routedIntents);
+        if (!result.IsSuccess)
+        {
+            return Result.From(result);
+        }
+
+        return Result.Success(result.Value!
+            .OrderByDescending(intent => intent.Confidence)
+            .ThenBy(intent => intent.Intent, StringComparer.Ordinal)
+            .First());
+    }
+
+    public Result<IReadOnlyCollection<CloudReadonlyAgentPlanIntent>> CreateIntentsFromRouted(
+        string goal,
+        IReadOnlyCollection<IntentResult> routedIntents)
+    {
         if (CloudReadonlyAgentTextGuard.ContainsForbiddenWriteSemantic(goal))
         {
-            return Unsupported("Cloud readonly agent plans cannot contain write semantics.");
+            return UnsupportedMany("Cloud readonly agent plans cannot contain write semantics.");
         }
 
         if (cloudReadonlyOptions.Value.Mode == CloudReadonlyDataSourceMode.Simulation)
         {
-            return Unsupported(
+            return UnsupportedMany(
                 "Durable Plan v2 cannot seal Simulation as CloudAiRead; simulation remains a non-executable development path.");
         }
 
-        var candidate = routedIntents
+        var candidates = routedIntents
             .Where(IsSupportedIntentFamily)
-            .OrderByDescending(intent => intent.Confidence)
-            .FirstOrDefault();
-        if (candidate is null)
+            .GroupBy(intent => intent.Intent, StringComparer.Ordinal)
+            .Select(group => group
+                .OrderByDescending(intent => intent.Confidence)
+                .ThenBy(intent => intent.Query ?? string.Empty, StringComparer.Ordinal)
+                .First())
+            .OrderBy(intent => intent.Intent, StringComparer.Ordinal)
+            .ToArray();
+        if (candidates.Length == 0)
         {
-            return Unsupported("Cloud readonly agent plans only support device, device log, capacity, production data, process, and client release intents.");
+            return UnsupportedMany("Cloud readonly agent plans only support device, device log, capacity, production data, process, and client release intents.");
         }
 
+        var planned = new List<CloudReadonlyAgentPlanIntent>(candidates.Length);
+        foreach (var candidate in candidates)
+        {
+            var intent = CreateIntentFromCandidate(candidate);
+            if (!intent.IsSuccess)
+            {
+                return Result.From(intent);
+            }
+
+            planned.Add(intent.Value!);
+        }
+
+        return Result.Success<IReadOnlyCollection<CloudReadonlyAgentPlanIntent>>(planned);
+    }
+
+    private Result<CloudReadonlyAgentPlanIntent> CreateIntentFromCandidate(IntentResult candidate)
+    {
         if (candidate.Confidence < MinimumConfidence)
         {
             return Unsupported("Cloud readonly agent intent confidence is below the execution threshold.");
@@ -214,6 +256,13 @@ public sealed class CloudReadonlyAgentPlanService(
     }
 
     private static Result<CloudReadonlyAgentPlanIntent> Unsupported(string detail)
+    {
+        return Result.Failure(new ApiProblemDescriptor(
+            AppProblemCodes.CloudReadonlyIntentUnsupported,
+            detail));
+    }
+
+    private static Result<IReadOnlyCollection<CloudReadonlyAgentPlanIntent>> UnsupportedMany(string detail)
     {
         return Result.Failure(new ApiProblemDescriptor(
             AppProblemCodes.CloudReadonlyIntentUnsupported,

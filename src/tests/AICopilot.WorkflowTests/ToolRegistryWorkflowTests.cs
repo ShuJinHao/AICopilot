@@ -8,7 +8,6 @@ using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.AiGatewayService.Runtime;
-using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Uploads;
 using AICopilot.AiGatewayService.Workspaces;
@@ -19,7 +18,6 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
@@ -149,17 +147,6 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         task.ActiveRunAttemptId.Should().Be(attempt.Id);
         executionRepository.Items.Should().ContainSingle()
             .Which.RunAttemptId.Should().Be(attempt.Id);
-    }
-    [Fact]
-    public void AgentPlanV2Fixture_ShouldRejectRetiredPersistedSkillField()
-    {
-        Action create = () => AgentPlanV2TestData.CreateSingleStep(
-            "generate_pdf",
-            executable: false,
-            skillCode: "restricted_skill");
-
-        create.Should().Throw<InvalidOperationException>()
-            .WithMessage("*must not serialize or consume retired Skill fields*");
     }
     [Fact]
     public async Task RetryAgentTaskCommand_ShouldResetFailedStep_AndEnqueueRetry()
@@ -440,8 +427,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
                 new AgentPlanDraftConfirmationService(
                     CreatePlanToolGuard(CreateAgentRuntimeGuardWithCloudEnabled()),
                     AgentPlanV2TestData.CreateMatchingFreshReadGate(),
-                    AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader(),
-                    new FixedCloudReadonlyAgentPlanService())));
+                    AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader())));
 
         var result = await handler.Handle(new ApproveAgentApprovalCommand(approval.Id.Value, "approved"), CancellationToken.None);
 

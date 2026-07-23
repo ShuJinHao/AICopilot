@@ -18,8 +18,6 @@ export type AgentPlanPreview = {
   isExecutable?: boolean
   capabilityGaps?: string[]
   requestedCapabilityCodes?: string[]
-  plannerMode?: string
-  plannerFallbackReason?: string | null
   plannerToolCatalogVersion?: number
   plannerAvailableToolCount?: number
   toolCatalogVersion?: number
@@ -29,9 +27,6 @@ export type AgentPlanPreview = {
   forcedStepCodes?: string[]
   queryMode?: string | null
   taskType?: string | null
-  skillCode?: string | null
-  skillName?: string | null
-  skillRoutingReason?: string | null
   dataSourceSummaries?: Array<{
     name?: string
     sourceMode?: string
@@ -40,8 +35,6 @@ export type AgentPlanPreview = {
   }>
   plannerSafetySummary?: {
     planSource?: string
-    plannerMode?: string
-    plannerModelSummary?: string | null
     plannerToolCatalogVersion?: number
     availableToolCount?: number
     isSimulationOnly?: boolean

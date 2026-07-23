@@ -72,11 +72,6 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         var isIntentRouting =
             requestText.Contains("General.Chat", StringComparison.OrdinalIgnoreCase)
             || messageTexts.Any(text => text.Contains("General.Chat", StringComparison.OrdinalIgnoreCase));
-        var isAgentSkillRouting = messageTexts.Any(text =>
-            text.Contains("select-agent-skill", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("Agent Skill Router", StringComparison.OrdinalIgnoreCase))
-            || requestText.Contains("select-agent-skill", StringComparison.OrdinalIgnoreCase)
-            || requestText.Contains("Agent Skill Router", StringComparison.OrdinalIgnoreCase);
 
         if (stream)
         {
@@ -86,12 +81,6 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             if (hasToolResult)
             {
                 await WriteTextStreamAsync(context, "已批准并执行工具。");
-                return;
-            }
-
-            if (isAgentSkillRouting)
-            {
-                await WriteTextStreamAsync(context, ResolveAgentSkillSelectionResponse(messageTexts, latestUserText));
                 return;
             }
 
@@ -118,9 +107,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             return;
         }
 
-        var content = isAgentSkillRouting
-            ? ResolveAgentSkillSelectionResponse(messageTexts, latestUserText)
-            : isIntentRouting
+        var content = isIntentRouting
             ? ResolveIntentResponse(latestUserText)
             : ResolvePlainTextResponse(messageTexts, latestUserText);
 
@@ -351,8 +338,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                     new
                     {
                         intent = "General.Chat",
-                        confidence = 0.99,
-                        reasoning = "The request asks for a control action, which must be refused and redirected to diagnostics-only guidance."
+                        confidence = 0.99
                     }
                 },
                 JsonOptions);
@@ -364,8 +350,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                 new
                 {
                     intent = "Action.DiagnosticAdvisorPlugin",
-                    confidence = 0.99,
-                    reasoning = "The user explicitly asked for a high-risk diagnostic checklist that still requires human review."
+                    confidence = 0.99
                 }
             }
             : new[]
@@ -373,68 +358,11 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                 new
                 {
                     intent = "General.Chat",
-                    confidence = 0.99,
-                    reasoning = "The user is asking for a normal conversational response."
+                    confidence = 0.99
                 }
             };
 
         return JsonSerializer.Serialize(result, JsonOptions);
-    }
-
-    private static string ResolveAgentSkillSelectionResponse(
-        IReadOnlyCollection<string> messageTexts,
-        string latestUserText)
-    {
-        var goal = ExtractAgentSkillGoal(latestUserText);
-
-        string? skillCode;
-        string reason;
-        if (ContainsAny(goal, "csv", "upload", "uploaded", "file", "report", "artifact", "ppt", "pdf", "xlsx", "产物", "报告", "上传", "文件"))
-        {
-            skillCode = "artifact_report";
-            reason = "用户目标涉及上传文件或受控报告产物生成。";
-        }
-        else if (ContainsAny(goal, "cloud", "device", "dev-", "line-", "log", "status", "capacity", "生产", "设备", "日志", "状态", "产能"))
-        {
-            skillCode = "cloud_readonly";
-            reason = "用户目标涉及 Cloud 只读业务数据分析。";
-        }
-        else if (ContainsAny(goal, "chart", "analysis", "data", "图表", "分析", "数据"))
-        {
-            skillCode = "data_analysis";
-            reason = "用户目标涉及只读数据分析和图表输出。";
-        }
-        else if (messageTexts.Any(text => text.Contains("general_report", StringComparison.OrdinalIgnoreCase)))
-        {
-            skillCode = "general_report";
-            reason = "用户目标适合通用报告 Skill。";
-        }
-        else
-        {
-            skillCode = null;
-            reason = "目标不明确，需要用户补充或手动选择 Skill。";
-        }
-
-        return JsonSerializer.Serialize(new { skillCode, reason }, JsonOptions);
-    }
-
-    private static string ExtractAgentSkillGoal(string latestUserText)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(latestUserText);
-            if (document.RootElement.TryGetProperty("goal", out var goalElement) &&
-                goalElement.ValueKind == JsonValueKind.String)
-            {
-                return goalElement.GetString() ?? latestUserText;
-            }
-        }
-        catch (JsonException)
-        {
-            // Non-JSON content is still a valid plain goal in fake provider tests.
-        }
-
-        return latestUserText;
     }
 
     private static string ResolvePlainTextResponse(IReadOnlyCollection<string> messageTexts, string latestUserText)
@@ -1443,7 +1371,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
 
     private static object CreateSemanticIntent(
         string intent,
-        string reasoning,
+        string _,
         object? filters = null,
         object? sort = null,
         object? timeRange = null,
@@ -1480,7 +1408,6 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         {
             intent,
             confidence = 0.99,
-            reasoning,
             query = JsonSerializer.Serialize(queryPayload, JsonOptions)
         };
     }
@@ -1548,13 +1475,12 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         return false;
     }
 
-    private static object CreatePolicyIntent(string intent, string reasoning, string latestUserText)
+    private static object CreatePolicyIntent(string intent, string _, string latestUserText)
     {
         return new
         {
             intent,
             confidence = 0.99,
-            reasoning,
             query = latestUserText
         };
     }

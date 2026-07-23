@@ -195,6 +195,7 @@ public sealed class AgentNodeRun : BaseEntity<AgentNodeRunId>
         int maxAttempts,
         int timeoutSeconds,
         AgentNodeBudgetLimits budget,
+        string? joinPolicy,
         DateTimeOffset nowUtc)
     {
         if (maxAttempts <= 0)
@@ -222,6 +223,7 @@ public sealed class AgentNodeRun : BaseEntity<AgentNodeRunId>
         OutputSchemaRef = NormalizeRequired(outputSchemaRef, nameof(outputSchemaRef), 160);
         IsRequired = isRequired;
         RequiresApproval = requiresApproval;
+        JoinPolicy = NormalizeJoinPolicy(joinPolicy);
         SideEffectClass = sideEffectClass;
         IdempotencyKeyHash = NormalizeRequired(idempotencyKeyHash, nameof(idempotencyKeyHash), 128);
         MaxAttempts = maxAttempts;
@@ -274,6 +276,8 @@ public sealed class AgentNodeRun : BaseEntity<AgentNodeRunId>
     public bool IsRequired { get; private set; }
 
     public bool RequiresApproval { get; private set; }
+
+    public string? JoinPolicy { get; private set; }
 
     public AgentNodeSideEffectClass SideEffectClass { get; private set; }
 
@@ -586,6 +590,26 @@ public sealed class AgentNodeRun : BaseEntity<AgentNodeRunId>
 
         FailureCode = "agent_task_cancellation_requested";
         SafeMessage = NormalizeRequired(safeMessage, nameof(safeMessage), 2000);
+        Status = AgentNodeRunStatus.Cancelled;
+        CompletedAt = nowUtc;
+        NextAttemptAt = null;
+        UpdatedAt = nowUtc;
+    }
+
+    public void CancelFromDependencyFailure(string dependencyNodeId, DateTimeOffset nowUtc)
+    {
+        if (Status is not AgentNodeRunStatus.Pending
+            and not AgentNodeRunStatus.Runnable
+            and not AgentNodeRunStatus.WaitingApproval)
+        {
+            throw new InvalidOperationException("Only an inactive NodeRun can be cancelled by dependency failure.");
+        }
+
+        FailureCode = "agent_required_dependency_failed";
+        SafeMessage = NormalizeRequired(
+            $"Required dependency '{dependencyNodeId}' failed; this downstream node was not started.",
+            nameof(dependencyNodeId),
+            2000);
         Status = AgentNodeRunStatus.Cancelled;
         CompletedAt = nowUtc;
         NextAttemptAt = null;
@@ -967,6 +991,18 @@ public sealed class AgentNodeRun : BaseEntity<AgentNodeRunId>
         return normalized is { Length: > 0 } && normalized.Length > maxLength
             ? normalized[..maxLength]
             : normalized;
+    }
+
+    private static string? NormalizeJoinPolicy(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        return value is "AllRequired" or "OptionalBestEffort"
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(value));
     }
 }
 

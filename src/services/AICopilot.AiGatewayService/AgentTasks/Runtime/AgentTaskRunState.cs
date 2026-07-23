@@ -12,6 +12,8 @@ internal sealed class AgentTaskRunState
 
     public List<AgentRagResult> RagResults { get; } = [];
 
+    public List<AgentCloudReadonlyQuerySnapshot> CloudReadonlyResults { get; } = [];
+
     public string? CloudReadonlySummary { get; set; }
 
     public IReadOnlyList<Dictionary<string, object?>> CloudReadonlyRows { get; set; } = [];
@@ -28,6 +30,18 @@ internal sealed class AgentTaskRunState
 
     public bool CloudReadonlyIsTruncated { get; set; }
 
+    public DateTimeOffset? CloudReadonlyQueriedAtUtc { get; set; }
+
+    public AgentCloudHealthAssessmentOutput? CloudHealthAssessment { get; set; }
+
+    public AgentReasoningToolOutput? ReasoningOutcome { get; set; }
+
+    public string? ReportEvidenceSetDigest { get; set; }
+
+    public IReadOnlyCollection<string> ReportTruthClasses { get; set; } = [];
+
+    public DateTimeOffset? ReportEvidenceAsOfUtc { get; set; }
+
     public string? BusinessQueryHash { get; set; }
 
     public List<AgentBusinessQuerySummary> BusinessQueryResults { get; } = [];
@@ -43,6 +57,18 @@ internal sealed record AgentBusinessQuerySummary(
     int RowCount,
     bool IsTruncated,
     Guid? ArtifactId);
+
+internal sealed record AgentCloudReadonlyQuerySnapshot(
+    string Intent,
+    string SemanticPlanDigest,
+    string Summary,
+    IReadOnlyList<Dictionary<string, object?>> Rows,
+    string SourceLabel,
+    string SourceMode,
+    bool IsSimulation,
+    int RowCount,
+    bool IsTruncated,
+    DateTimeOffset QueriedAtUtc);
 
 internal sealed record AgentUploadSummary(
     Guid Id,

@@ -4,12 +4,12 @@ import {
   Check,
   FolderOpen,
   ListChecks,
+  MessageCircle,
   Play,
   RefreshCw,
   ShieldCheck,
   Sparkles,
   TriangleAlert,
-  Wrench,
   X,
 } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
@@ -47,9 +47,8 @@ const {
   canFinalizeWorkspace,
 } = useAgentWorkbench()
 const {
-  latestPlan,
   latestPlanKindLabel,
-  latestPlanVisibleToolCount,
+  latestPlanTopologyProfile,
   latestPlanIsCloudReadonly,
   latestPlanIsSimulation,
   isPlanDraftTask,
@@ -69,7 +68,55 @@ const visibleOutputArtifacts = computed(() =>
 const hiddenVisibleOutputArtifactCount = computed(() =>
   isPlanDraftTask.value ? 0 : hiddenOutputArtifactCount.value,
 )
-const selectedPlanTypeLabel = computed(() => store.selectedSkill?.displayName || '自动识别')
+const visibleTaskResult = computed(() => {
+  const candidates = [...(store.agentRuntimeSnapshot?.evidence ?? [])]
+    .reverse()
+    .filter((item) =>
+      item.evidenceKind !== 'ArtifactReference' &&
+      ['ObservedFact', 'DerivedFact', 'ModelPrediction', 'LlmInference', 'Recommendation'].includes(
+        item.truthClass,
+      ),
+    )
+  const evidence = candidates.find((item) => item.findings.length > 0) ?? candidates[0]
+  if (latestTask.value?.finalSummary) {
+    return {
+      title: '最终结果',
+      summary: latestTask.value.finalSummary,
+      truthLabel: evidence?.truthLabel ?? '历史结果（真值类型未记录）',
+    }
+  }
+
+  if (!['WorkspaceReady', 'WaitingFinalApproval', 'Completed'].includes(latestTask.value?.status ?? '')) {
+    return null
+  }
+
+  return evidence
+    ? { title: '执行结果', summary: evidence.safeSummary, truthLabel: evidence.truthLabel }
+    : null
+})
+const completedTaskEvidenceDigest = computed(() => {
+  const task = latestTask.value
+  const snapshot = store.agentRuntimeSnapshot
+  if (
+    !task ||
+    task.status !== 'Completed' ||
+    snapshot?.taskId !== task.id ||
+    !snapshot.nodes.some(
+      (node) => node.kind === 'ApprovalCheckpointNode' && node.status === 'Succeeded',
+    ) ||
+    !snapshot.evidenceSetDigest
+  ) {
+    return null
+  }
+
+  return snapshot.evidenceSetDigest
+})
+const canReferenceTaskResult = computed(() =>
+  Boolean(visibleTaskResult.value && completedTaskEvidenceDigest.value),
+)
+const isTaskResultReferenced = computed(() =>
+  Boolean(latestTask.value?.id && store.referencedAgentTaskId === latestTask.value.id),
+)
 const hasRuntimeDetails = computed(() =>
   Boolean(
     latestTask.value ||
@@ -116,6 +163,10 @@ const agentRunReply = computed(() => {
     return `正在按计划执行，当前进度 ${completedStepCount.value}/${taskSteps.value.length}。`
   }
 
+  if (task.status === 'WaitingToolApproval') {
+    return '执行已在审批点暂停，确认前不会继续调用工具或 Cloud 只读能力。'
+  }
+
   if (task.status === 'Failed') {
     return '执行已停止，错误原因会显示在当前对话块里，重试会基于已确认计划继续。'
   }
@@ -139,6 +190,16 @@ const shouldPollRuntimeSnapshot = computed(() => {
     task.isRunInProgress ||
     task.status === 'Running' ||
     task.status === 'GeneratingArtifacts',
+  )
+})
+const canCancelTask = computed(() => {
+  const task = latestTask.value
+  if (!task || isPlanDraftTask.value || store.isAgentBusy) return false
+
+  return Boolean(
+    task.isRunQueued ||
+    task.isRunInProgress ||
+    ['PlanApproved', 'WaitingToolApproval', 'Running', 'GeneratingArtifacts'].includes(task.status),
   )
 })
 const primaryTaskAction = computed(() => {
@@ -278,9 +339,23 @@ async function rejectCurrentPlan() {
   await store.rejectAgentTaskPlan(task.id)
 }
 
+async function cancelCurrentTask() {
+  const task = latestTask.value
+  if (!task || !canCancelTask.value) return
+  if (!window.confirm('确认取消当前任务？已持久化的运行记录和证据会保留用于审计。')) return
+  await store.cancelAgentTask(task.id)
+}
+
 async function previewArtifact(artifactId: string) {
   if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
   await store.loadArtifactPreview(artifactId)
+}
+
+function referenceCurrentTaskResult() {
+  const task = latestTask.value
+  const digest = completedTaskEvidenceDigest.value
+  if (!task || !digest || !canReferenceTaskResult.value) return
+  store.referenceAgentTaskForFollowUp(task.id, digest)
 }
 
 watch(
@@ -321,11 +396,7 @@ onBeforeUnmount(stopRuntimePolling)
         </span>
         <span>
           <Sparkles :size="14" />
-          Skill：{{ latestPlan?.skillName || latestPlan?.skillCode || selectedPlanTypeLabel }}
-        </span>
-        <span>
-          <Wrench :size="14" />
-          工具 {{ latestPlanVisibleToolCount }}
+          拓扑：{{ latestPlanTopologyProfile || '待生成' }}
         </span>
         <span>
           <ShieldCheck :size="14" />
@@ -361,6 +432,34 @@ onBeforeUnmount(stopRuntimePolling)
         <button v-if="isPlanDraftTask" type="button" :disabled="store.isAgentBusy" @click="rejectCurrentPlan">
           <X :size="17" />
           拒绝计划
+        </button>
+        <button v-else-if="canCancelTask" type="button" :disabled="store.isAgentBusy" @click="cancelCurrentTask">
+          <X :size="17" />
+          取消任务
+        </button>
+      </div>
+
+      <div
+        v-if="visibleTaskResult"
+        class="agent-run-notice notice-success"
+        data-testid="agent-visible-final-result"
+      >
+        <Check :size="15" />
+        <span>
+          <strong>{{ visibleTaskResult.title }}</strong>
+          <small>结果类型：{{ visibleTaskResult.truthLabel }}</small>
+          <small>{{ visibleTaskResult.summary }}</small>
+        </span>
+      </div>
+
+      <div v-if="canReferenceTaskResult" class="run-actions">
+        <button
+          type="button"
+          :disabled="isTaskResultReferenced || store.isAgentBusy"
+          @click="referenceCurrentTaskResult"
+        >
+          <MessageCircle :size="17" />
+          {{ isTaskResultReferenced ? '已关联到输入框' : '基于此结果追问' }}
         </button>
       </div>
 

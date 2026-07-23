@@ -10,7 +10,6 @@ using AICopilot.AiGatewayService.RoutingModels;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Sessions;
-using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Uploads;
 using AICopilot.AiGatewayService.Workspaces;
@@ -73,6 +72,10 @@ public static class DependencyInjection
         builder.Services.AddScoped<AgentNodeRunMaterializer>();
         builder.Services.AddScoped<NodeRunClaimCoordinator>();
         builder.Services.AddScoped<NodeCheckpointCoordinator>();
+        builder.Services.AddScoped<AgentRuntimeArtifactBuilder>();
+        builder.Services.AddScoped<AgentReasoningNodeExecutor>();
+        builder.Services.AddScoped<AgentBuiltInToolDispatcher>();
+        builder.Services.AddScoped<AgentParallelReadNodeExecutor>();
         builder.Services.AddScoped<AgentFinalizationNodeExecutor>();
         builder.Services.AddScoped<NodeOutcomeReconciliationCoordinator>();
         builder.Services.AddScoped<IAgentOutcomeAuthorityProbe, ArtifactFileSetOutcomeAuthorityProbe>();
@@ -106,7 +109,6 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentToolExecutor, McpAgentToolExecutor>();
         builder.Services.AddScoped<IMcpToolRegistryReadService, McpToolRegistryReadService>();
         builder.Services.AddScoped<ToolRegistryGuard>();
-        builder.Services.AddScoped<SkillDefinitionGuard>();
         builder.Services.AddScoped<AgentPlanToolGuard>();
         builder.Services.AddScoped<AgentPlanDraftConfirmationService>();
         builder.Services.AddScoped<AgentTaskPlanFreshReadGate>();
@@ -114,10 +116,10 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IAgentPlanIntegrityValidator>(provider =>
             provider.GetRequiredService<AgentPlanCanonicalizer>());
         builder.Services.AddSingleton<IAgentTaskPlanPersistencePolicy, AgentTaskPlanPersistencePolicy>();
-        builder.Services.AddSingleton<IntentResultToCandidateAdapter>();
-        builder.Services.AddSingleton<IAgentPlanCompiler, DeterministicLinearAgentPlanCompiler>();
+        builder.Services.AddSingleton<AgentIntentRegistryProjector>();
+        builder.Services.AddSingleton<IAgentPlanCompiler, DeterministicAgentPlanCompiler>();
         builder.Services.AddSingleton(provider => new AgentPlanDraftContractAuthority(
-            provider.GetRequiredService<IntentResultToCandidateAdapter>(),
+            provider.GetRequiredService<AgentIntentRegistryProjector>(),
             provider.GetRequiredService<AgentPlanCanonicalizer>(),
             provider.GetRequiredService<IAgentPlanCompiler>()));
         builder.Services.AddScoped<AgentAuditRecorder>();
@@ -136,7 +138,6 @@ public static class DependencyInjection
         builder.Services.AddScoped<IFinalAgentContextSerializer, FinalAgentContextSerializer>();
         builder.Services.AddScoped<SessionMessagePersistenceService>();
         builder.Services.AddScoped<MessageTimelineProjectionWriter>();
-        builder.Services.AddScoped<IAgentSkillAutoSelector, AgentSkillRouterAutoSelector>();
         builder.Services.AddSingleton<IBusinessPolicyCatalog, BusinessPolicyCatalog>();
         builder.Services.AddSingleton<ISemanticSummaryProfileCatalog, SemanticSummaryProfileCatalog>();
         builder.Services.AddSingleton<IBusinessSemanticsCatalog, BusinessSemanticsCatalog>();
@@ -146,7 +147,6 @@ public static class DependencyInjection
             registrar.RegisterPluginFromAssembly(Assembly.GetExecutingAssembly());
         });
 
-        builder.Services.AddScoped<IntentRoutingPromptComposer>();
         builder.Services.AddScoped<IntentRoutingAgentBuilder>();
         builder.Services.AddScoped<IAgentRoutingConfigurationSnapshotReader>(services =>
             services.GetRequiredService<IntentRoutingAgentBuilder>());
@@ -165,6 +165,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<DataAnalysisExecutor>();
         builder.Services.AddScoped<BusinessPolicyExecutor>();
         builder.Services.AddScoped<ContextAggregatorExecutor>();
+        builder.Services.AddScoped<IAgentTaskChatEvidenceProvider, AgentTaskChatEvidenceProvider>();
         builder.Services.AddScoped<FinalAgentBuildExecutor>();
         builder.Services.AddScoped<FinalAgentRunExecutor>();
         builder.Services.AddScoped<AgentWorkflowPipeline>();

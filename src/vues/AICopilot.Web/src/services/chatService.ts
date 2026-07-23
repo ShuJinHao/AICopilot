@@ -5,14 +5,13 @@ import type {
   ChatHistoryPage,
   KnowledgeBaseSummary,
   SessionTimelinePage,
-  SkillDefinition,
   StreamCallbacks,
-  ToolRegistryCatalog,
 } from '@/types/app'
 import type {
   AgentApprovalRequest,
   AgentArtifactPreview,
   AgentTask,
+  AgentTaskRuntimeSnapshot,
   AgentTaskAuditSummary,
   ArtifactWorkspace,
   ChatChunk,
@@ -159,27 +158,6 @@ export const chatService = {
     )
   },
 
-  async getSkills() {
-    return await apiClient.get<SkillDefinition[]>(
-      '/aigateway/skills',
-      {
-        enabledOnly: true,
-      },
-      CHAT_READ_REQUEST_OPTIONS,
-    )
-  },
-
-  async getToolCatalog(skillCode?: string | null) {
-    return await apiClient.get<ToolRegistryCatalog>(
-      '/aigateway/tools/catalog',
-      {
-        simulationOnly: false,
-        skillCode: skillCode || undefined,
-      },
-      CHAT_READ_REQUEST_OPTIONS,
-    )
-  },
-
   async getKnowledgeBases() {
     return await apiClient.get<KnowledgeBaseSummary[]>(
       '/rag/knowledge-base/list',
@@ -214,8 +192,21 @@ export const chatService = {
     )
   },
 
-  async sendMessageStream(sessionId: string, message: string, callbacks: StreamCallbacks) {
-    await sendEventStream('/aigateway/chat', { sessionId, message }, callbacks)
+  async sendMessageStream(
+    sessionId: string,
+    message: string,
+    callbacks: StreamCallbacks,
+    referencedAgentTaskId?: string | null,
+  ) {
+    await sendEventStream(
+      '/aigateway/chat',
+      {
+        sessionId,
+        message,
+        ...(referencedAgentTaskId ? { referencedAgentTaskId } : {}),
+      },
+      callbacks,
+    )
   },
 
   async sendApprovalDecisionStream(
@@ -268,8 +259,7 @@ export const chatService = {
       taskType: string
       uploadIds?: string[]
       knowledgeBaseIds?: string[]
-      artifactTypes?: string[]
-      plannerMode?: 'Auto' | 'DynamicOnly' | 'StaticOnly'
+      artifactTargets?: string[]
       pluginSelectionMode?: 'BuiltInOnly' | 'ExplicitAllowlist'
       selectedPluginIds?: string[]
       capabilitySelectionMode?: 'InferredFromGoal' | 'ExplicitAllowlist'
@@ -312,6 +302,14 @@ export const chatService = {
     )
   },
 
+  async cancelAgentTask(id: string) {
+    return await apiClient.post<AgentTask>(
+      '/aigateway/agent/task/cancel',
+      { id },
+      CHAT_MUTATION_REQUEST_OPTIONS,
+    )
+  },
+
   async getAgentTasksBySession(sessionId: string) {
     return await apiClient.get<AgentTask[]>(
       '/aigateway/agent/task/by-session',
@@ -339,6 +337,14 @@ export const chatService = {
   async getAgentTaskAuditSummary(taskId: string) {
     return await apiClient.get<AgentTaskAuditSummary[]>(
       `/aigateway/agent/task/${encodeURIComponent(taskId)}/audit-summary`,
+      undefined,
+      CHAT_READ_REQUEST_OPTIONS,
+    )
+  },
+
+  async getAgentTaskRuntimeSnapshot(taskId: string) {
+    return await apiClient.get<AgentTaskRuntimeSnapshot>(
+      `/aigateway/agent/task/${encodeURIComponent(taskId)}/runtime-snapshot`,
       undefined,
       CHAT_READ_REQUEST_OPTIONS,
     )

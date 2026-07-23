@@ -15,6 +15,10 @@ export function formatAgentEventDetail(event: AgentEventPayload) {
       return '正在检查可用能力。'
     case 'plan_draft_ready':
       return '计划草案已生成，等待确认。'
+    case 'task_evidence_reused':
+      return '已绑定所选已完成任务的封存证据。'
+    case 'task_evidence_refresh_required':
+      return '本轮范围已变化，将执行新的只读查询。'
     default:
       return event.recoverable
         ? '运行事件已记录，可继续查看后续结果。'

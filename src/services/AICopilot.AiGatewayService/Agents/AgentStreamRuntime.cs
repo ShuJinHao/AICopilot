@@ -415,7 +415,7 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
             AppProblemCodes.CapabilityNotAllowed =>
                 "错误码 capability_not_allowed：当前能力不允许执行该操作。",
             AppProblemCodes.AgentPlanToolDenied =>
-                "错误码 agent_plan_tool_denied：计划引用了当前 Skill 或安全策略不允许的工具。",
+                "错误码 agent_plan_tool_denied：计划引用了当前能力范围或安全策略不允许的工具。",
             AppProblemCodes.ToolOutputSchemaInvalid =>
                 "错误码 tool_output_schema_invalid：工具输出未通过 schema 或持久化绑定校验，请管理员检查工具运行时与注册契约。",
             AppProblemCodes.ToolBlocked =>

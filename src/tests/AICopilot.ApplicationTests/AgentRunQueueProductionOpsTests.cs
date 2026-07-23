@@ -307,7 +307,6 @@ public sealed class AgentRunQueueProductionOpsTests
                     "generate_chart_data")],
                 executable: false,
                 AgentTaskType.ReportGeneration,
-                skillCode: null,
                 knowledgeBaseIds: null),
             now);
         var step = task.AddStep(

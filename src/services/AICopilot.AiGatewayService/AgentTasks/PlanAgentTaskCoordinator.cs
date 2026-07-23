@@ -6,7 +6,6 @@ using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.Contracts;
@@ -33,7 +32,8 @@ public sealed class PlanAgentTaskCoordinator(
     AgentPlanDraftContractAuthority? planDraftContractAuthority = null,
     IOptions<CloudReadonlyOptions>? cloudReadonlyOptions = null,
     IHostEnvironment? hostEnvironment = null,
-    IBusinessDatabaseAuthorizationReadService? businessDatabaseAuthorizationReadService = null)
+    IBusinessDatabaseAuthorizationReadService? businessDatabaseAuthorizationReadService = null,
+    ConfiguredAgentRuntimeFactory? configuredAgentRuntimeFactory = null)
 {
     private const int PlanDraftValidationVersion = 1;
 
@@ -41,14 +41,6 @@ public sealed class PlanAgentTaskCoordinator(
         PlanAgentTaskCommand request,
         CancellationToken cancellationToken)
     {
-        var retiredSelection = AgentPlanRetiredSelectionContract.Validate(
-            request.SkillCode,
-            request.PreferredToolCodes);
-        if (retiredSelection is not null)
-        {
-            return Result.Failure(retiredSelection);
-        }
-
         if (currentUser.Id is not { } userId)
         {
             return MissingUser();
@@ -101,19 +93,17 @@ public sealed class PlanAgentTaskCoordinator(
             : request.ModelId;
 
         var riskLevel = AgentTaskPlanMetadataBuilder.DetermineRiskLevel(effectiveTaskType);
-        var requestedArtifactTypes = request.ArtifactTypes ??
+        var requestedArtifactTargets = request.ArtifactTargets ??
             (useDevelopmentSimulationProfile ? ["markdown"] : null);
-        var artifactTypesResult = AgentTaskPlanStepBuilder.ResolveArtifactTypes(requestedArtifactTypes);
-        if (!artifactTypesResult.IsSuccess)
+        var artifactTargetsResult = AgentArtifactTargetAuthority.Resolve(requestedArtifactTargets);
+        if (!artifactTargetsResult.IsSuccess)
         {
-            return Result.From(artifactTypesResult);
+            return Result.From(artifactTargetsResult);
         }
 
-        var effectiveArtifactTypes = artifactTypesResult.Value!
+        var effectiveArtifactTargets = artifactTargetsResult.Value!
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
-        var effectivePlannerMode = "PlanDraft";
-        string? plannerFallbackReason = null;
         var plannerToolCatalog = new PlannerToolCatalog(PlannerToolCatalog.CurrentVersion, 0, []);
         if (planToolGuard is not null)
         {
@@ -122,7 +112,6 @@ public sealed class PlanAgentTaskCoordinator(
                 preparation.IsSimulationOnlyPlan,
                 preparation.BusinessDomains,
                 cancellationToken,
-                skillCode: null,
                 pluginSelectionMode: request.PluginSelectionMode ?? AgentPluginSelectionMode.BuiltInOnly);
             if (catalogResult.IsSuccess)
             {
@@ -145,69 +134,8 @@ public sealed class PlanAgentTaskCoordinator(
         var plannerToolCount = plannerToolCatalog.AvailableToolCount;
         var toolRiskSummary = AgentTaskPlanMetadataBuilder.BuildToolRiskSummary(plannerToolCatalog);
         var mockMcpOnly = PlannerToolCatalogMetadata.IsMockMcpOnly(plannerToolCatalog.Tools);
-        var steps = AgentTaskPlanStepBuilder.BuildPlanSteps(
-            preparation.UploadIds.Length > 0,
-            preparation.KnowledgeBaseIds.Length > 0,
-            preparation.HasBusinessDataSourcesForPlan,
-            effectiveTaskType,
-            riskLevel,
-            effectiveArtifactTypes);
-
-        var originalToolCodes = steps
-            .Select(step => step.ToolCode)
-            .Where(toolCode => !string.IsNullOrWhiteSpace(toolCode))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        steps = AgentTaskPlanStepBuilder.EnsureMandatorySteps(
-            steps,
-            preparation.UploadIds.Length > 0,
-            preparation.KnowledgeBaseIds.Length > 0,
-            preparation.HasBusinessDataSourcesForPlan,
-            effectiveTaskType,
-            request.RequiresDataApproval,
-            effectiveArtifactTypes);
-        var forcedStepCodes = steps
-            .Select(step => step.ToolCode)
-            .Where(toolCode => !string.IsNullOrWhiteSpace(toolCode) && !originalToolCodes.Contains(toolCode!))
-            .Select(toolCode => toolCode!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        steps = riskLevel >= AgentTaskRiskLevel.High
-            ? steps.Select(step => step with { RequiresApproval = true }).ToArray()
-            : steps;
-        if (planToolGuard is not null && steps.Count != 0)
-        {
-            var guardedStepsResult = await planToolGuard.ValidateStepsAsync(
-                steps,
-                effectiveTaskType,
-                userId,
-                preparation.IsSimulationOnlyPlan,
-                preparation.BusinessDomains,
-                cancellationToken,
-                skillCode: null,
-                pluginSelectionMode: request.PluginSelectionMode ?? AgentPluginSelectionMode.BuiltInOnly);
-            if (guardedStepsResult.IsSuccess)
-            {
-                steps = guardedStepsResult.Value!;
-            }
-            else
-            {
-                capabilityGaps.Add(AgentPlanCapabilityGapCodes.PlannedToolUnavailable);
-            }
-        }
-
-        var approvalCheckpoints = steps
-            .Where(step => step.RequiresApproval)
-            .Select(step => string.IsNullOrWhiteSpace(step.ToolCode) ? step.Title : step.ToolCode!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var toolApprovalCheckpoints = steps
-            .Where(step => step.RequiresApproval && !string.IsNullOrWhiteSpace(step.ToolCode))
-            .Select(step => step.ToolCode!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        AgentTaskPlanCloudReadonlyIntentDocument? cloudReadonlyIntent = null;
-        CloudReadonlyAgentPlanIntent? resolvedCloudIntent = null;
+        IReadOnlyCollection<AgentTaskPlanCloudReadonlyIntentDocument> cloudReadonlyIntents = [];
+        IReadOnlyCollection<CloudReadonlyAgentPlanIntent> resolvedCloudIntents = [];
         if (effectiveTaskType == AgentTaskType.CloudDataReport)
         {
             if (cloudReadonlyPlanService is null)
@@ -216,17 +144,21 @@ public sealed class PlanAgentTaskCoordinator(
             }
             else
             {
-                Result<CloudReadonlyAgentPlanIntent> cloudIntentResult = workflowDraft is null
+                Result<IReadOnlyCollection<CloudReadonlyAgentPlanIntent>> cloudIntentResult = workflowDraft is null
                     ? Result.Failure(new ApiProblemDescriptor(
                         AppProblemCodes.CloudReadonlyIntentUnsupported,
-                        "The single authoritative routing result is unavailable."))
-                    : cloudReadonlyPlanService.CreateIntentFromRouted(
+                        "The authoritative routing result is unavailable."))
+                    : cloudReadonlyPlanService.CreateIntentsFromRouted(
                     request.Goal,
                     workflowDraft.Intents);
                 if (cloudIntentResult.IsSuccess)
                 {
-                    resolvedCloudIntent = cloudIntentResult.Value!;
-                    cloudReadonlyIntent = AgentTaskPlanCloudReadonlyIntentDocument.From(resolvedCloudIntent);
+                    resolvedCloudIntents = cloudIntentResult.Value!
+                        .OrderBy(intent => intent.Intent, StringComparer.Ordinal)
+                        .ToArray();
+                    cloudReadonlyIntents = resolvedCloudIntents
+                        .Select(AgentTaskPlanCloudReadonlyIntentDocument.From)
+                        .ToArray();
                 }
                 else
                 {
@@ -236,61 +168,47 @@ public sealed class PlanAgentTaskCoordinator(
         }
 
         var plan = new AgentTaskPlanDocument(
-            1,
-            "agent_planner",
-            request.Goal,
-            effectiveTaskType.ToString(),
-            riskLevel.ToString(),
-            preparation.UploadIds,
-            preparation.KnowledgeBaseIds,
-            cloudReadonlyIntent,
-            steps.Select(step => new AgentTaskPlanStepDocument(
-                    step.Title,
-                    step.Description,
-                    step.StepType,
-                    step.ToolCode,
-                    step.RequiresApproval,
-                    step.InputJson))
-                .ToArray(),
-            new AgentTaskPlanRuntimeSettingsDocument(0, 0),
-            effectivePlannerMode,
-            plannerFallbackReason,
-            effectivePlannerModelId,
-            PlanDraftValidationVersion,
-            plannerToolCatalogVersion,
-            plannerToolCount,
-            preparation.DataSourceIds,
-            preparation.BusinessDomains,
-            effectiveQueryMode,
-            request.RequiresDataApproval,
-            effectiveArtifactTypes,
-            new AgentTaskPlanSafetySummaryDocument(
+            Version: 1,
+            PlannerTemplateCode: "agent_planner",
+            Goal: request.Goal,
+            TaskType: effectiveTaskType.ToString(),
+            RiskLevel: riskLevel.ToString(),
+            UploadIds: preparation.UploadIds,
+            KnowledgeBaseIds: preparation.KnowledgeBaseIds,
+            CloudReadonlyIntents: cloudReadonlyIntents,
+            Steps: [],
+            RuntimeSettings: new AgentTaskPlanRuntimeSettingsDocument(0, 0),
+            PlannerModelId: effectivePlannerModelId,
+            PlannerValidationVersion: PlanDraftValidationVersion,
+            PlannerToolCatalogVersion: plannerToolCatalogVersion,
+            PlannerAvailableToolCount: plannerToolCount,
+            DataSourceIds: preparation.DataSourceIds,
+            BusinessDomains: preparation.BusinessDomains,
+            QueryMode: effectiveQueryMode,
+            RequiresDataApproval: request.RequiresDataApproval,
+            PlannerSafetySummary: new AgentTaskPlanSafetySummaryDocument(
                 effectivePlanSource,
-                effectivePlannerMode,
-                PlannerModelSummary: null,
                 plannerToolCatalogVersion,
                 plannerToolCount,
                 preparation.IsSimulationOnlyPlan,
                 request.RequiresDataApproval,
                 toolRiskSummary,
                 mockMcpOnly),
-            forcedStepCodes,
-            approvalCheckpoints,
-            AgentTaskPlanMetadataBuilder.BuildPlanDataSourceSummaries(preparation.SelectedDataSources),
-            plannerToolCatalogVersion,
-            plannerToolCount,
-            toolRiskSummary,
-            mockMcpOnly,
-            toolApprovalCheckpoints,
-            SkillCode: null,
-            SkillName: null,
-            SkillRoutingReason: null,
+            ForcedStepCodes: [],
+            ApprovalCheckpoints: [],
+            DataSourceSummaries: AgentTaskPlanMetadataBuilder.BuildPlanDataSourceSummaries(preparation.SelectedDataSources),
+            ToolCatalogVersion: plannerToolCatalogVersion,
+            VisibleToolCount: plannerToolCount,
+            ToolRiskSummary: toolRiskSummary,
+            MockMcpOnly: mockMcpOnly,
+            ToolApprovalCheckpoints: [],
             PlanKind: AgentTaskPlanKinds.PlanDraft,
             IsExecutable: false,
             CapabilityGaps: capabilityGaps
                 .Where(gap => !string.IsNullOrWhiteSpace(gap))
                 .Distinct(StringComparer.Ordinal)
-                .ToArray());
+                .ToArray(),
+            ArtifactTargets: effectiveArtifactTargets);
 
         var routedIntents = new List<IntentResult>();
         if (useDevelopmentSimulationProfile && preparation.IsSimulationOnlyPlan)
@@ -301,14 +219,14 @@ public sealed class PlanAgentTaskCoordinator(
             routedIntents.Add(new IntentResult { Intent = "General.Chat", Confidence = 1 });
             routedIntents.Add(new IntentResult { Intent = "Analysis.GovernedQuery", Confidence = 1 });
         }
-        else if (resolvedCloudIntent is not null)
+        else if (resolvedCloudIntents.Count != 0)
         {
-            routedIntents.Add(new IntentResult
+            routedIntents.AddRange(resolvedCloudIntents.Select(resolvedCloudIntent => new IntentResult
             {
                 Intent = resolvedCloudIntent.Intent,
-                Query = BuildTypedIntentAdapterQuery(resolvedCloudIntent.SemanticPlan),
+                Query = BuildTypedIntentRegistryQuery(resolvedCloudIntent.SemanticPlan),
                 Confidence = resolvedCloudIntent.Confidence
-            });
+            }));
         }
         else if (workflowDraft is not null)
         {
@@ -332,6 +250,7 @@ public sealed class PlanAgentTaskCoordinator(
             routedIntents.Add(new IntentResult { Intent = "Analysis.GovernedQuery", Confidence = 1 });
         }
 
+        var addedDerivedGeneralIntent = false;
         if ((request.CapabilitySelectionMode ?? AgentCapabilitySelectionMode.InferredFromGoal) ==
                 AgentCapabilitySelectionMode.InferredFromGoal &&
             !routedIntents.Any(intent => string.Equals(
@@ -344,28 +263,53 @@ public sealed class PlanAgentTaskCoordinator(
             // inferred planning; an explicit allowlist remains a hard upper bound
             // and is never silently expanded here.
             routedIntents.Add(new IntentResult { Intent = "General.Chat", Confidence = 1 });
+            addedDerivedGeneralIntent = true;
         }
         var contractAuthority = planDraftContractAuthority ?? new AgentPlanDraftContractAuthority(
-            new IntentResultToCandidateAdapter(),
+            new AgentIntentRegistryProjector(),
             new AgentPlanCanonicalizer());
+        RuntimeAgentConfigurationSnapshot? reasoningConfiguration = null;
+        if (configuredAgentRuntimeFactory is not null)
+        {
+            try
+            {
+                reasoningConfiguration = await configuredAgentRuntimeFactory.ReadConfigurationSnapshotAsync(
+                    AgentReasoningPolicyAuthority.TemplateCode,
+                    modelOverride: null,
+                    configureOptions: AgentReasoningPolicyAuthority.ConfigureOptions,
+                    cancellationToken: cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // The compiler only requires this snapshot when the deterministic
+                // skeleton contains an AgentReasoningNode; that path fails closed.
+            }
+        }
+
         var sealedPlanResult = contractAuthority.SealDraft(new AgentPlanDraftContractRequest(
             request.Goal,
             plan,
             routedIntents,
-            new AgentIntentAdapterContext(
+            new AgentIntentRegistryContext(
                 preparation.UploadIds,
                 preparation.KnowledgeBaseIds,
                 preparation.SelectedDataSources,
-                effectiveArtifactTypes ?? [],
-                ResolveRoutedSkillCodes(workflowDraft),
+                effectiveArtifactTargets,
                 ResolveAuthorizedActionIntentCodes(workflowDraft),
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)),
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                addedDerivedGeneralIntent ? ["General.Chat"] : [],
+                workflowDraft?.RegistrySnapshot),
             plannerToolCatalog,
             request.PluginSelectionMode,
             request.SelectedPluginIds,
             request.CapabilitySelectionMode,
             request.RequestedCapabilityCodes,
             workflowDraft?.ExecutionMetadata.RoutingConfiguration,
+            reasoningConfiguration,
             AllowDevelopmentSimulationExecution: useDevelopmentSimulationProfile));
         if (!sealedPlanResult.IsSuccess)
         {
@@ -402,7 +346,7 @@ public sealed class PlanAgentTaskCoordinator(
             AuditResults.Succeeded,
             useDevelopmentSimulationProfile && preparation.IsSimulationOnlyPlan
                 ? "Development Simulation PlanDraft generated with an explicit read-only execution graph; no tool, Cloud, MCP, or Worker execution occurred before confirmation."
-                : "Agent task PlanDraft contract generated; execution remains blocked until the trusted P2 PlanCompiler is available.",
+                : "Agent task PlanDraft generated by the authoritative PlanCompiler; no Tool, Cloud, MCP, or Worker execution occurred before confirmation.",
             pendingApprovalCount: 0,
             cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
@@ -452,22 +396,7 @@ public sealed class PlanAgentTaskCoordinator(
             .ToArray();
     }
 
-    private static string[] ResolveRoutedSkillCodes(AgentPlanDraftWorkflowResult? workflowDraft)
-    {
-        return workflowDraft?.Intents
-            .Select(intent => !string.IsNullOrWhiteSpace(intent.SkillCode)
-                ? intent.SkillCode!.Trim()
-                : intent.Intent.StartsWith("Skill.", StringComparison.Ordinal)
-                    ? intent.Intent["Skill.".Length..].Trim()
-                    : null)
-            .Where(code => !string.IsNullOrWhiteSpace(code))
-            .Select(code => code!)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(code => code, StringComparer.Ordinal)
-            .ToArray() ?? [];
-    }
-
-    private static string BuildTypedIntentAdapterQuery(SemanticQueryPlan plan)
+    private static string BuildTypedIntentRegistryQuery(SemanticQueryPlan plan)
     {
         var payload = new
         {

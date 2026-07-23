@@ -22,6 +22,53 @@ internal static class AgentReportHtmlRenderer
         builder.AppendLine("<h2>Data Source</h2>");
         builder.AppendLine($"<p>{AgentReportFormatting.EscapeHtml(AgentReportFormatting.BuildSourceMarker(report.CloudReadonlySource))}</p>");
         builder.AppendLine($"<p>{AgentReportFormatting.EscapeHtml(report.CloudReadonlySummary ?? "CloudReadonly was not accessed.")}</p>");
+        if ((report.CloudReadonlyQueries ?? []).Count != 0)
+        {
+            builder.AppendLine("<ul>");
+            foreach (var query in report.CloudReadonlyQueries ?? [])
+            {
+                builder.AppendLine($"<li>{AgentReportFormatting.EscapeHtml(query.Intent)}: sourceMode={AgentReportFormatting.EscapeHtml(query.SourceMode)}; isSimulation={AgentReportFormatting.EscapeHtml(AgentReportFormatting.FormatBool(query.IsSimulation))}; sourceLabel={AgentReportFormatting.EscapeHtml(query.SourceLabel)}; rows={query.RowCount.ToString(CultureInfo.InvariantCulture)}; truncated={AgentReportFormatting.EscapeHtml(AgentReportFormatting.FormatBool(query.IsTruncated))}; queriedAtUtc={query.QueriedAtUtc.ToString("O", CultureInfo.InvariantCulture)}; semanticPlanDigest={AgentReportFormatting.EscapeHtml(query.SemanticPlanDigest)}</li>");
+            }
+            builder.AppendLine("</ul>");
+        }
+        builder.AppendLine("<h2>Evidence Provenance</h2>");
+        builder.AppendLine($"<p>EvidenceSetDigest: {AgentReportFormatting.EscapeHtml(report.EvidenceSetDigest ?? "NOT-RECORDED")}</p>");
+        builder.AppendLine($"<p>TruthClasses: {AgentReportFormatting.EscapeHtml(string.Join(", ", report.TruthClasses ?? []))}</p>");
+        builder.AppendLine($"<p>EvidenceAsOfUtc: {AgentReportFormatting.EscapeHtml(report.EvidenceAsOfUtc?.ToString("O", CultureInfo.InvariantCulture) ?? "NOT-RECORDED")}</p>");
+        if (report.AiInference is { } inference)
+        {
+            builder.AppendLine("<h2>AI Evidence Inference</h2>");
+            builder.AppendLine($"<p>{AgentReportFormatting.EscapeHtml(inference.SafeSummary)}</p>");
+            builder.AppendLine($"<p>TruthClass={AgentReportFormatting.EscapeHtml(inference.TruthClass)}; Confidence={inference.Confidence.ToString("0.###", CultureInfo.InvariantCulture)}; ConflictStatus={AgentReportFormatting.EscapeHtml(inference.ConflictStatus)}</p>");
+            builder.AppendLine("<ul>");
+            foreach (var finding in inference.Findings)
+            {
+                builder.AppendLine($"<li>Finding: {AgentReportFormatting.EscapeHtml(finding)}</li>");
+            }
+            foreach (var citation in inference.CitationRefs)
+            {
+                builder.AppendLine($"<li>Citation: {AgentReportFormatting.EscapeHtml(citation)}</li>");
+            }
+            foreach (var warning in inference.EvidenceWarnings)
+            {
+                builder.AppendLine($"<li>EvidenceWarning: {AgentReportFormatting.EscapeHtml(warning)}</li>");
+            }
+            builder.AppendLine("</ul>");
+        }
+        if (report.CurrentHealthAssessment is { } health)
+        {
+            builder.AppendLine("<h2>Current Runtime Health Assessment</h2>");
+            builder.AppendLine($"<p>{AgentReportFormatting.EscapeHtml(health.SafeSummary)}</p>");
+            builder.AppendLine($"<p>TruthClass={AgentReportFormatting.EscapeHtml(health.TruthClass)}; AlgorithmVersion={AgentReportFormatting.EscapeHtml(health.AlgorithmVersion)}; HealthLevel={AgentReportFormatting.EscapeHtml(health.HealthLevel)}; HealthScore={health.HealthScore.ToString(CultureInfo.InvariantCulture)}/100; Confidence={health.Confidence.ToString("0.###", CultureInfo.InvariantCulture)}; MissingRate={health.MissingRate.ToString("0.###", CultureInfo.InvariantCulture)}; SourceAsOfUtc={health.SourceAsOfUtc.ToString("O", CultureInfo.InvariantCulture)}</p>");
+            builder.AppendLine("<ul>");
+            foreach (var finding in health.Findings)
+            {
+                builder.AppendLine($"<li>{AgentReportFormatting.EscapeHtml(finding)}</li>");
+            }
+
+            builder.AppendLine("</ul>");
+        }
+
         builder.AppendLine("<h2>Business Query Results</h2>");
         builder.AppendLine(BuildHtmlBusinessQueryResults(report.BusinessQueryResults ?? []));
         builder.AppendLine("<h2>Metrics Summary</h2>");

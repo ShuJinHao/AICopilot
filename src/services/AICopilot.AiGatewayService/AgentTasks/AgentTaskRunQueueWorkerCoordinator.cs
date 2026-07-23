@@ -52,14 +52,17 @@ internal sealed class AgentTaskRunQueueWorkerCoordinator(
             throw new InvalidOperationException("Durable task claim coordinator is unavailable.");
         }
 
+        var startedAtUtc = DateTimeOffset.UtcNow;
         var started = await durableTaskClaimCoordinator.MarkStartedAsync(
             claim,
-            DateTimeOffset.UtcNow,
+            startedAtUtc,
             cancellationToken);
         if (!started.IsSuccess)
         {
             return;
         }
+
+        AgentRuntimeTelemetry.RecordQueueWait(startedAtUtc - claim.QueueItem.CreatedAt);
 
         var result = await runtime.RunClaimedAsync(claim, cancellationToken);
         var now = DateTimeOffset.UtcNow;

@@ -1,8 +1,10 @@
 using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.AgentTasks;
 using System.Text;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
+using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging;
 
 namespace AICopilot.AiGatewayService.Workflows.Executors;
@@ -11,7 +13,7 @@ namespace AICopilot.AiGatewayService.Workflows.Executors;
 /// 数据分析执行器只负责 Analysis.* 意图分派，具体执行由 semantic/free-form runner 承担。
 /// </summary>
 public class DataAnalysisExecutor(
-    ISemanticIntentCatalog semanticIntentCatalog,
+    ISemanticQuerySchemaRegistry semanticQuerySchemaRegistry,
     SemanticAnalysisRunner semanticRunner,
     FreeFormDbaAnalysisRunner freeFormRunner,
     ILogger<DataAnalysisExecutor> logger)
@@ -19,19 +21,22 @@ public class DataAnalysisExecutor(
     public const string ExecutorId = nameof(DataAnalysisExecutor);
     public const string AnalysisIntentPrefix = "Analysis.";
 
-    public static bool IsRelevant(IEnumerable<IntentResult> intentResults)
+    internal static bool IsRelevant(
+        IEnumerable<IntentResult> intentResults,
+        AgentIntentRegistrySnapshot registry)
     {
-        return intentResults.Any(IsAnalysisIntent);
+        return intentResults.Any(intent => IsAnalysisIntent(intent, registry));
     }
 
     public async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,
+        AgentIntentRegistrySnapshot registry,
         AgentWorkflowSink? sink,
         SessionRuntimeSnapshot? session,
         CancellationToken ct = default)
     {
         var analysisIntents = intentResults
-            .Where(IsAnalysisIntent)
+            .Where(intent => IsAnalysisIntent(intent, registry))
             .ToList();
 
         if (analysisIntents.Count == 0)
@@ -43,10 +48,10 @@ public class DataAnalysisExecutor(
         logger.LogInformation("启动数据分析流程，命中 Analysis.* 意图数量: {Count}", analysisIntents.Count);
 
         var semanticIntents = analysisIntents
-            .Where(intent => semanticIntentCatalog.TryGet(intent.Intent, out _))
+            .Where(intent => semanticQuerySchemaRegistry.TryGet(intent.Intent, out _))
             .ToList();
         var databaseIntents = analysisIntents
-            .Where(intent => !semanticIntentCatalog.TryGet(intent.Intent, out _))
+            .Where(intent => !semanticQuerySchemaRegistry.TryGet(intent.Intent, out _))
             .ToList();
 
         logger.LogInformation(
@@ -54,24 +59,58 @@ public class DataAnalysisExecutor(
             semanticIntents.Count,
             databaseIntents.Count);
 
-        var output = new StringBuilder();
+        var nodeResults = new List<AgentAnalysisNodeResult>();
         foreach (var intent in semanticIntents)
         {
-            output.AppendLine(await semanticRunner.RunAsync(intent, sink, ct));
+            nodeResults.Add(await semanticRunner.RunAsync(intent, sink, ct));
         }
 
         foreach (var intent in databaseIntents)
         {
-            output.AppendLine(await freeFormRunner.RunAsync(intent, sink, session, ct));
+            nodeResults.Add(await freeFormRunner.RunAsync(intent, sink, session, ct));
         }
 
-        return BranchResult.FromDataAnalysis(output.ToString());
+        var failed = nodeResults.FirstOrDefault(result => result.Status == BranchExecutionStatus.Failed);
+        if (failed is not null)
+        {
+            return BranchResult.Failed(
+                BranchType.DataAnalysis,
+                failed.FailureCode ?? AppProblemCodes.ChatStreamFailed,
+                failed.SafeMessage ?? "A required data-analysis node failed.");
+        }
+
+        var succeededEvidence = nodeResults
+            .Where(result => result.Status == BranchExecutionStatus.Succeeded && result.Evidence is not null)
+            .Select(result => result.Evidence!)
+            .ToArray();
+        if (succeededEvidence.Length == 0)
+        {
+            return BranchResult.Empty(BranchType.DataAnalysis);
+        }
+
+        var output = new StringBuilder();
+        foreach (var evidence in succeededEvidence)
+        {
+            output.AppendLine(evidence.SafeContext);
+        }
+
+        return BranchResult.FromDataAnalysis(output.ToString(), succeededEvidence);
     }
 
-    private static bool IsAnalysisIntent(IntentResult intent)
+    private static bool IsAnalysisIntent(
+        IntentResult intent,
+        AgentIntentRegistrySnapshot registry)
     {
-        return intent.Intent.StartsWith(AnalysisIntentPrefix, StringComparison.OrdinalIgnoreCase)
-               && intent.Confidence > 0.6;
+        if (intent.Confidence <= 0.6 ||
+            !registry.TryGet(intent.Intent, out var descriptor))
+        {
+            return false;
+        }
+
+        return descriptor.IntentClass is
+            AgentIntentClass.CloudOnly or
+            AgentIntentClass.GovernedExploration or
+            AgentIntentClass.KnownButUnavailable;
     }
 
     private static AnalysisDto BuildSemanticAnalysis(

@@ -92,6 +92,68 @@ public sealed record AgentTaskRunAttemptPageDto(
     bool HasPrevious,
     bool HasNext);
 
+public sealed record AgentRuntimeNodeDto(
+    string NodeId,
+    string Label,
+    string Kind,
+    string Status,
+    bool IsRequired,
+    int DependencyCount,
+    string? JoinPolicy,
+    int AttemptNo,
+    int MaxAttempts,
+    int RetryCount,
+    int TimeoutSeconds,
+    long? DurationMs,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt,
+    string? FailureCode,
+    string? SafeMessage);
+
+public sealed record AgentRuntimeEvidenceQualityDto(
+    int? RowCount,
+    bool IsTruncated,
+    string Freshness,
+    double? MissingRate,
+    double? Confidence,
+    IReadOnlyCollection<string> Flags);
+
+public sealed record AgentRuntimeEvidenceDto(
+    string NodeId,
+    string NodeLabel,
+    string EvidenceKind,
+    string TruthClass,
+    string TruthLabel,
+    string SourceLabel,
+    string SourceMode,
+    bool IsSimulation,
+    DateTimeOffset? AsOfUtc,
+    DateTimeOffset? TimeRangeStartUtc,
+    DateTimeOffset? TimeRangeEndUtc,
+    AgentRuntimeEvidenceQualityDto Quality,
+    string SafeSummary,
+    IReadOnlyCollection<string> Findings,
+    IReadOnlyDictionary<string, decimal> TypedMetrics,
+    int CitationCount);
+
+public sealed record AgentRuntimeMetricDto(
+    string Code,
+    string Label,
+    decimal? Value,
+    string Unit,
+    string Status,
+    string Source);
+
+public sealed record AgentTaskRuntimeSnapshotDto(
+    Guid TaskId,
+    Guid? RunAttemptId,
+    string Status,
+    DateTimeOffset GeneratedAt,
+    string? EvidenceSetDigest,
+    IReadOnlyCollection<AgentRuntimeNodeDto> Nodes,
+    IReadOnlyCollection<AgentRuntimeEvidenceDto> Evidence,
+    IReadOnlyCollection<AgentRuntimeMetricDto> Metrics);
+
 public sealed record AgentTaskRunQueueItemDto(
     Guid Id,
     Guid TaskId,
@@ -214,7 +276,7 @@ internal static class AgentTaskDtoMapper
             task.ModelId?.Value,
             task.WorkspaceId?.Value,
             task.PlanJson,
-            task.FinalSummary,
+            ToolExecutionRecordSanitizer.Sanitize(task.FinalSummary, 4_000),
             task.CreatedAt,
             task.UpdatedAt,
             task.CompletedAt,
@@ -259,20 +321,22 @@ internal static class AgentTaskDtoMapper
             step.Status.ToString(),
             step.ToolCode,
             step.RequiresApproval,
-            step.ErrorMessage);
+            ToolExecutionRecordSanitizer.Sanitize(step.ErrorMessage, 2_000));
     }
 
     private static string? ResolveLastFailureReason(AgentTask task)
     {
         if (task.Status is AgentTaskStatus.Failed or AgentTaskStatus.Rejected)
         {
-            return task.FinalSummary;
+            return ToolExecutionRecordSanitizer.Sanitize(task.FinalSummary, 2_000);
         }
 
         return task.Steps
             .OrderByDescending(step => step.FinishedAt)
             .FirstOrDefault(step => step.Status == AgentStepStatus.Failed)
-            ?.ErrorMessage;
+            is { ErrorMessage: { } errorMessage }
+                ? ToolExecutionRecordSanitizer.Sanitize(errorMessage, 2_000)
+                : null;
     }
 }
 
@@ -458,7 +522,7 @@ internal static class AgentTaskFailureSummaryResolver
             failedStep?.StepIndex,
             failedStep?.ToolCode ?? failedRecord?.ToolCode,
             errorCode,
-            safeMessage,
+            ToolExecutionRecordSanitizer.Sanitize(safeMessage, 2_000) ?? "Agent task failed safely.",
             canRetry,
             canRetry ? "retry_after_fix" : "submit_new_plan");
     }

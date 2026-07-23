@@ -72,7 +72,7 @@ const agentTask = {
   planJson: JSON.stringify({
     planKind: 'PlanDraft',
     isExecutable: false,
-    skillName: '设备日志分析',
+    topologyProfile: 'LinearV1',
     visibleToolCount: 0,
     capabilityGaps: ['确认执行后才检查可执行工具目录。'],
     queryMode: null
@@ -142,7 +142,7 @@ function toRestoredApprovalTask(task) {
     planJson: JSON.stringify({
       planKind: 'ExecutablePlan',
       isExecutable: true,
-      skillName: '设备日志分析',
+      topologyProfile: 'LinearV1',
       visibleToolCount: 2,
       capabilityGaps: [],
       queryMode: 'CloudReadonly',
@@ -208,7 +208,7 @@ function toExecutablePlanTask(task) {
     planJson: JSON.stringify({
       planKind: 'ExecutablePlan',
       isExecutable: true,
-      skillName: '设备日志分析',
+      topologyProfile: 'LinearV1',
       visibleToolCount: 2,
       capabilityGaps: [],
       queryMode: 'CloudReadonly'
@@ -380,7 +380,7 @@ const samples = {
       name: 'IntentRoutingAgent',
       code: 'IntentRoutingAgent',
       scope: 'IntentRouting',
-      description: '意图识别和 Skill 路由约束',
+      description: '结构化意图识别与候选约束',
       systemPrompt: '你是 A助理的意图识别 Agent。可选意图列表：{{$IntentList}}',
       modelId: 'lm1',
       maxTokens: 2048,
@@ -699,42 +699,6 @@ const api = createServer((request, response) => {
     },
     '/api/aigateway/session/list': [session],
     '/api/aigateway/session': session,
-    '/api/aigateway/skills': [
-      {
-        id: 'skill-general',
-        skillCode: 'general_report',
-        displayName: '通用报告',
-        description: '默认分析与报告 Skill',
-        allowedToolCodes: ['read_uploaded_file', 'generate_markdown_report', 'finalize_artifacts'],
-        riskLevel: 'High',
-        approvalPolicy: 'ToolApproval',
-        allowedDataSourceModes: ['SimulationBusiness'],
-        allowedKnowledgeScopes: ['SelectedKnowledgeBase'],
-        outputComponentTypes: ['chart', 'markdown', 'pdf'],
-        isEnabled: true,
-        isBuiltIn: true,
-        version: 1,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        id: 'skill-knowledge',
-        skillCode: 'knowledge_research',
-        displayName: '知识检索',
-        description: '知识库检索与摘要 Skill',
-        allowedToolCodes: ['rag_search', 'generate_markdown_report', 'finalize_artifacts'],
-        riskLevel: 'Low',
-        approvalPolicy: 'FinalOutputApproval',
-        allowedDataSourceModes: [],
-        allowedKnowledgeScopes: ['SelectedKnowledgeBase'],
-        outputComponentTypes: ['markdown'],
-        isEnabled: true,
-        isBuiltIn: true,
-        version: 1,
-        createdAt: now,
-        updatedAt: now
-      }
-    ],
     '/api/aigateway/chat-message/list': {
       items: [
         {

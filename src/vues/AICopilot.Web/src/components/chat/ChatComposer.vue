@@ -8,13 +8,11 @@ import {
   Plus,
   Send,
   Sparkles,
-  Wrench,
+  X,
 } from 'lucide-vue-next'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useChatStore } from '@/stores/chatStore'
-import type { AgentPlannerToolSummary } from '@/types/app'
 import { shouldResetComposerForSessionChange } from '@/utils/composerSession'
-import { getSkillDisplayDescription } from '@/utils/skillDisplay'
 
 type ComposerMode = 'plan' | 'chat'
 
@@ -39,18 +37,14 @@ const isChatSubmissionBlocked = computed(
 const isSessionReady = computed(() =>
   Boolean(store.resolvedSessionId && !store.isSessionTransitionBlocked),
 )
-const planTypeValue = computed({
-  get: () => store.selectedSkillCode || 'auto',
-  set: (value: string) => {
-    void store.selectSkill(value === 'auto' ? null : value)
-  },
-})
 const attachmentSummary = computed(() =>
   store.uploadedFiles.length ? `${store.uploadedFiles.length} 个附件` : '未添加附件',
 )
-const planPathSummary = computed(() =>
-  store.selectedSkill ? `${store.selectedSkill.displayName} · 手动指定` : '自动选择执行路径',
-)
+const referencedTaskDigestLabel = computed(() => {
+  const digest = store.referencedAgentTask?.evidenceSetDigest
+  return digest ? `${digest.slice(0, 8)}…${digest.slice(-8)}` : null
+})
+const planPathSummary = computed(() => '自动生成执行路径')
 const composerPrimaryLabel = computed(() => (composerMode.value === 'plan' ? '生成计划' : '发送'))
 const composerPrimaryIcon = computed(() => (composerMode.value === 'plan' ? ListChecks : Send))
 const composerPlaceholder = computed(() => {
@@ -73,8 +67,6 @@ const isComposerSubmitDisabled = computed(
       ? !canCreatePlan.value || store.isAgentBusy
       : isChatSubmissionBlocked.value),
 )
-const visiblePluginTools = computed(() => store.availablePluginTools.slice(0, 12))
-
 async function sendDirectMessage() {
   const content = inputValue.value.trim()
   if (!content || !isSessionReady.value || isChatSubmissionBlocked.value) return
@@ -92,11 +84,6 @@ function handleComposerKeydown(event: KeyboardEvent) {
 function openFilePicker() {
   if (!isSessionReady.value) return
   fileInput.value?.click()
-}
-
-function handleSkillChange(event: Event) {
-  const target = event.target as HTMLSelectElement
-  planTypeValue.value = target.value || 'auto'
 }
 
 function handleKnowledgeBaseChange(event: Event) {
@@ -138,25 +125,11 @@ function setComposerMode(mode: ComposerMode) {
   if (!store.canEditComposerContext) return
 
   composerMode.value = mode
+  if (mode === 'plan') {
+    store.clearReferencedAgentTask()
+  }
   planAdvancedOpen.value = false
   store.clearCurrentSessionError()
-}
-
-function togglePluginTool(toolCode: string) {
-  store.togglePluginTool(toolCode)
-}
-
-function pluginToolLabel(tool: AgentPlannerToolSummary) {
-  return tool.displayName || tool.toolCode
-}
-
-function pluginToolMeta(tool: AgentPlannerToolSummary) {
-  const parts = [
-    tool.category || tool.providerKind || '能力',
-    tool.requiresApproval ? '需确认' : '只读',
-  ]
-
-  return parts.filter(Boolean).join(' · ')
 }
 
 onClickOutside(
@@ -229,8 +202,22 @@ watch(
         <template v-if="composerMode === 'plan'">
           {{ planPathSummary }} · {{ attachmentSummary }}
         </template>
-        <template v-else> 普通聊天 · {{ attachmentSummary }} </template>
+        <template v-else-if="referencedTaskDigestLabel">
+          基于已完成任务证据 {{ referencedTaskDigestLabel }} · {{ attachmentSummary }}
+        </template>
+        <template v-else>普通聊天 · {{ attachmentSummary }}</template>
       </span>
+      <button
+        v-if="composerMode === 'chat' && store.referencedAgentTaskId"
+        class="composer-add-button"
+        type="button"
+        :disabled="!store.canEditComposerContext"
+        aria-label="取消任务结果引用"
+        @click="store.clearReferencedAgentTask()"
+      >
+        <X :size="16" />
+        取消结果引用
+      </button>
     </div>
 
     <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange" />
@@ -238,7 +225,7 @@ watch(
     <div v-if="composerMode === 'plan'" class="composer-plan-strip">
       <div>
         <strong>输入目标，系统会自动生成可确认的计划</strong>
-        <span>默认自动选择 Skill、工具和知识库；需要人工覆盖时再展开高级选项。</span>
+        <span>系统根据目标生成业务能力和执行节点；需要限定资料范围时再展开高级选项。</span>
       </div>
       <button
         ref="planAdvancedButton"
@@ -258,39 +245,8 @@ watch(
       ref="planAdvancedPanel"
       class="composer-options-panel"
     >
-      <section class="composer-option-group">
-        <div class="option-title">
-          <Sparkles :size="17" />
-          <span>执行路径</span>
-        </div>
-        <label class="select-field">
-          <select
-            :value="planTypeValue"
-            :disabled="!store.canEditComposerContext"
-            aria-label="选择计划类型"
-            @change="handleSkillChange"
-          >
-            <option value="auto">自动识别</option>
-            <option
-              v-for="skill in store.availableSkills"
-              :key="skill.skillCode"
-              :value="skill.skillCode"
-            >
-              {{ skill.displayName }} · {{ getSkillDisplayDescription(skill.skillCode) }}
-            </option>
-          </select>
-        </label>
-        <p>
-          {{
-            store.selectedSkill
-              ? getSkillDisplayDescription(store.selectedSkill.skillCode)
-              : '保持自动识别，系统会根据目标选择合适路径。'
-          }}
-        </p>
-      </section>
-
       <section
-        v-if="store.selectedSkillSupportsKnowledge && store.availableKnowledgeBases.length"
+        v-if="store.availableKnowledgeBases.length"
         class="composer-option-group"
       >
         <div class="option-title">
@@ -317,38 +273,6 @@ watch(
         <p>{{ store.selectedKnowledgeBase?.description || '需要限定资料范围时再手动选择。' }}</p>
       </section>
 
-      <section class="composer-option-group plugin-option-group">
-        <div class="option-title">
-          <Wrench :size="17" />
-          <span>插件能力</span>
-          <small v-if="store.isLoadingPluginTools">加载中</small>
-        </div>
-        <div v-if="visiblePluginTools.length" class="plugin-tool-grid">
-          <button
-            v-for="tool in visiblePluginTools"
-            :key="tool.toolCode"
-            type="button"
-            class="plugin-tool-chip"
-            :class="{ active: store.selectedToolCodes.includes(tool.toolCode) }"
-            :disabled="!store.canEditComposerContext"
-            :title="tool.description"
-            @click="togglePluginTool(tool.toolCode)"
-          >
-            <strong>{{ pluginToolLabel(tool) }}</strong>
-            <span>{{ pluginToolMeta(tool) }}</span>
-          </button>
-        </div>
-        <div v-else class="panel-empty compact">当前计划类型暂无可选插件能力</div>
-        <button
-          v-if="store.selectedToolCodes.length"
-          class="quiet-link"
-          type="button"
-          :disabled="!store.canEditComposerContext"
-          @click="store.clearPluginTools()"
-        >
-          清空插件选择
-        </button>
-      </section>
     </div>
 
     <div class="composer-input-row">

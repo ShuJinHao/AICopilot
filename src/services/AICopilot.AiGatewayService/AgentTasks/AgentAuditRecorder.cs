@@ -209,6 +209,7 @@ public sealed class AgentAuditRecorder(IAuditLogWriter auditLogWriter)
                 ["isSandbox"] = artifact.IsSandbox.ToString(),
                 ["queryHash"] = artifact.QueryHash ?? string.Empty,
                 ["resultHash"] = artifact.ResultHash ?? string.Empty,
+                ["evidenceSetDigest"] = artifact.EvidenceSetDigest ?? string.Empty,
                 ["rowCount"] = artifact.RowCount.ToString(),
                 ["isTruncated"] = artifact.IsTruncated.ToString()
             },

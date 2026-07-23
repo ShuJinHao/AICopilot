@@ -9,7 +9,6 @@ using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.AiGatewayService.Runtime;
-using AICopilot.AiGatewayService.Skills;
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Uploads;
 using AICopilot.AiGatewayService.Workspaces;
@@ -20,7 +19,6 @@ using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
-using AICopilot.Core.AiGateway.Aggregates.Skills;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
@@ -54,6 +52,9 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
         tools["finalize_artifacts"].TargetName.Should().Be("ArtifactWorkspaceLifecycleCoordinator");
         tools["finalize_artifacts"].Description.Should()
             .Contain("approved durable NodeRun atomically commits final files");
+        tools["join_evidence"].DataBoundary.Should().Be(ToolDataBoundary.AuthorizedEvidenceOnly);
+        tools["assess_cloud_health"].DataBoundary.Should().Be(ToolDataBoundary.AuthorizedEvidenceOnly);
+        tools["agent_reasoning"].DataBoundary.Should().Be(ToolDataBoundary.AuthorizedEvidenceOnly);
         BuiltInToolRegistrations.IsLifecycleCheckpoint("finalize_artifacts").Should().BeTrue();
         var finalizationRegistration = CreateTool(
             "finalize_artifacts",
@@ -96,7 +97,7 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
     [Fact]
     public void BuiltInToolCatalog_ShouldOwnExactStrictInputSchemasForEveryRuntimeTool()
     {
-        BuiltInToolRegistrations.CurrentCatalogVersion.Should().Be(14);
+        BuiltInToolRegistrations.CurrentCatalogVersion.Should().Be(18);
         BuiltInToolRegistrations.CurrentSchemaVersion.Should().Be(3);
 
         foreach (var tool in BuiltInToolRegistrations.AgentRuntimeTools)
@@ -590,27 +591,23 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
         result.SanitizedUtf8ByteCount.Should().Be(8);
         result.IsTruncated.Should().BeTrue();
     }
-    [Fact]
-    public void AgentSkillRouterAutoSelector_ParseSelection_ShouldParseSimplifiedSkillObject()
-    {
-        var selected = AgentSkillRouterAutoSelector.ParseSelection(
-            """
-            ```json
-            {"skillCode":"cloud_readonly","reason":"用户要求查看云端设备日志并生成报告。"}
-            ```
-            """);
 
-        selected.Should().Be(new AgentSkillSelection(
-            "cloud_readonly",
-            "用户要求查看云端设备日志并生成报告。"));
-    }
-    [Fact]
-    public void AgentSkillRouterAutoSelector_ParseSelection_ShouldKeepNoMatchReason()
-    {
-        var selected = AgentSkillRouterAutoSelector.ParseSelection(
-            """{"skillCode":null,"reason":"目标不明确，需要用户补充。"}""");
 
-        selected.Should().Be(new AgentSkillSelection(null, "目标不明确，需要用户补充。"));
+    [Fact]
+    public void ToolExecutionSanitizer_ShouldRemoveProductUnsafeRuntimeDetails()
+    {
+        const string unsafeText = "<think>private reasoning</think> Bearer abc.def https://internal.example DB1.DBX0.0\n   at Company.Runtime.Run() in /Users/operator/app.cs:line 42";
+
+        var result = ToolExecutionRecordSanitizer.Sanitize(unsafeText, 2_000);
+
+        result.Should().Contain("[redacted-model-reasoning]");
+        result.Should().Contain("Bearer ******");
+        result.Should().Contain("[redacted-endpoint]");
+        result.Should().Contain("[redacted-plc-address]");
+        result.Should().Contain("[redacted-exception-frame]");
+        result.Should().NotContain("private reasoning");
+        result.Should().NotContain("internal.example");
+        result.Should().NotContain("/Users/operator");
     }
     [Fact]
     public void ToolInputSchemaValidator_ShouldValidateNestedObjectsAndArrayItems()

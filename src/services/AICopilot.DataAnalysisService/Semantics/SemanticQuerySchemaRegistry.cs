@@ -2,8 +2,8 @@ using AICopilot.Services.Contracts;
 
 namespace AICopilot.DataAnalysisService.Semantics;
 
-public sealed class SemanticIntentCatalog(
-    ISemanticDefinitionCatalog definitionCatalog) : ISemanticIntentCatalog
+public sealed class SemanticQuerySchemaRegistry(
+    ISemanticDefinitionCatalog definitionCatalog) : ISemanticQuerySchemaRegistry
 {
     private readonly IReadOnlyDictionary<string, SemanticIntentDescriptor> _descriptors =
         BuildDescriptors(definitionCatalog)

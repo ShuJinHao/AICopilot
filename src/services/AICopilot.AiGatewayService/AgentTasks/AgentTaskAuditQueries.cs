@@ -36,6 +36,10 @@ public sealed record GetAgentTaskRunAttemptsQuery(
     int PageSize = 20) : IQuery<Result<AgentTaskRunAttemptPageDto>>;
 
 [AuthorizeRequirement("AiGateway.GetAgentTask")]
+public sealed record GetAgentTaskRuntimeSnapshotQuery(Guid Id)
+    : IQuery<Result<AgentTaskRuntimeSnapshotDto>>;
+
+[AuthorizeRequirement("AiGateway.GetAgentTask")]
 public sealed record GetAgentTaskRunQueueQuery(
     Guid Id,
     int PageIndex = 1,
@@ -79,4 +83,14 @@ public sealed class GetAgentTaskRunQueueQueryHandler(
         GetAgentTaskRunQueueQuery request,
         CancellationToken cancellationToken) =>
         auditQueryCoordinator.GetRunQueueAsync(request, cancellationToken);
+}
+
+public sealed class GetAgentTaskRuntimeSnapshotQueryHandler(
+    AgentTaskAuditQueryCoordinator auditQueryCoordinator)
+    : IQueryHandler<GetAgentTaskRuntimeSnapshotQuery, Result<AgentTaskRuntimeSnapshotDto>>
+{
+    public Task<Result<AgentTaskRuntimeSnapshotDto>> Handle(
+        GetAgentTaskRuntimeSnapshotQuery request,
+        CancellationToken cancellationToken) =>
+        auditQueryCoordinator.GetRuntimeSnapshotAsync(request, cancellationToken);
 }

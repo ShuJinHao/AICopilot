@@ -45,7 +45,6 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             "AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy.ApprovalPolicy",
             "AICopilot.Core.AiGateway.Aggregates.RoutingModel.RoutingModelConfiguration",
             "AICopilot.Core.AiGateway.Aggregates.Tools.ToolRegistration",
-            "AICopilot.Core.AiGateway.Aggregates.Skills.SkillDefinition",
             "AICopilot.Core.AiGateway.Aggregates.RuntimeSettings.ChatRuntimeSettings",
             "AICopilot.Core.AiGateway.Aggregates.Uploads.UploadRecord",
             "AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase.BusinessDatabase",

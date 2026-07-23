@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { Bot, ClipboardList, Network, RefreshCw, Sparkles } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { Bot, ClipboardList, Network, RefreshCw } from 'lucide-vue-next'
 import AiButton from '@/components/ai/AiButton.vue'
 import AiCard from '@/components/ai/AiCard.vue'
 import AiCheckbox from '@/components/ai/AiCheckbox.vue'
@@ -18,18 +18,15 @@ import { showAiToast } from '@/composables/useAiFeedback'
 import { configService } from '@/services/configService'
 import { useConfigStore } from '@/stores/configStore'
 import { toStoreErrorMessage } from '@/stores/useDialogCrud'
-import { getSkillDisplayDescription } from '@/utils/skillDisplay'
 import type {
   CloudReadonlyStatus,
   ConversationTemplateSummary,
   LanguageModelSummary,
   LanguageModelTestResult,
-  LanguageModelUsage,
-  AgentPlannerToolSummary,
-  SkillDefinition
+  LanguageModelUsage
 } from '@/types/app'
 
-type AgentSlotKey = 'intent' | 'planner' | 'executor'
+type AgentSlotKey = 'intent' | 'planner' | 'executor' | 'reasoning'
 
 type AgentSlotDefinition = {
   key: AgentSlotKey
@@ -49,7 +46,7 @@ const slotDefinitions: AgentSlotDefinition[] = [
   {
     key: 'intent',
     title: '意图识别',
-    subtitle: '只选择技能和意图，不回答、不计划、不执行。',
+    subtitle: '只识别结构化意图，不回答、不计划、不执行。',
     modelUsage: 'Routing',
     icon: Network,
     tone: 'blue',
@@ -78,6 +75,17 @@ const slotDefinitions: AgentSlotDefinition[] = [
     templateCode: 'agent_executor',
     templateScope: 'AgentExecutor',
     defaultModelName: 'Executor Model'
+  },
+  {
+    key: 'reasoning',
+    title: '证据推理',
+    subtitle: '只综合已授权 Evidence，无工具、无子 Agent、最多一次恢复。',
+    modelUsage: 'Chat',
+    icon: Bot,
+    tone: 'violet',
+    templateCode: 'agent_reasoning_node',
+    templateScope: 'AgentExecutor',
+    defaultModelName: 'Evidence Reasoning Model'
   }
 ]
 
@@ -104,39 +112,6 @@ const templateScopeLabels: Record<string, string> = {
   AgentExecutor: '最终执行'
 }
 
-const dataSourceModeLabels: Record<string, string> = {
-  CloudReadOnly: 'Cloud 只读',
-  CloudReadonly: 'Cloud 只读',
-  SimulationBusiness: 'AI 模拟业务库',
-  BusinessDatabase: '只读业务库',
-  Workspace: '工作区文件',
-  UploadedFile: '上传文件',
-  FreeGoal: '自由目标'
-}
-
-const knowledgeScopeLabels: Record<string, string> = {
-  SelectedKnowledgeBase: '已选知识库',
-  AllVisibleKnowledgeBases: '可见知识库',
-  None: '不使用知识库'
-}
-
-const approvalPolicyLabels: Record<string, string> = {
-  ToolApproval: '工具执行需确认',
-  FinalOutputApproval: '最终输出需确认',
-  PlanApproval: '计划需确认',
-  None: '无需审批'
-}
-
-const outputComponentLabels: Record<string, string> = {
-  chart: '图表',
-  html: 'HTML',
-  markdown: 'Markdown',
-  pdf: 'PDF',
-  pptx: 'PPTX',
-  xlsx: 'XLSX',
-  text: '文本'
-}
-
 const connectivityLabels: Record<string, string> = {
   Unknown: '未测试',
   Succeeded: '配置完成',
@@ -145,11 +120,6 @@ const connectivityLabels: Record<string, string> = {
 
 const testingModelIds = ref<Set<string>>(new Set())
 const drawerTesting = ref(false)
-const skillDefinitions = ref<SkillDefinition[]>([])
-const toolSummaries = ref<AgentPlannerToolSummary[]>([])
-const isLoadingSkills = ref(false)
-const isLoadingToolCatalog = ref(false)
-const toolCatalogLoaded = ref(false)
 
 function setPageLoadError(error: unknown) {
   store.errorMessage = toStoreErrorMessage(
@@ -208,12 +178,6 @@ const slotsUseSingleModel = computed(() => {
     slot.model?.provider === firstModel.provider
   )
 })
-const sortedSkills = computed(() =>
-  [...skillDefinitions.value].sort((a, b) =>
-    Number(b.isBuiltIn) - Number(a.isBuiltIn) ||
-    a.displayName.localeCompare(b.displayName, 'zh-CN'))
-)
-
 const usageChat = computed({
   get: () => store.currentLanguageModel.usages.includes('Chat'),
   set: (value: boolean) => toggleUsage('Chat', value)
@@ -233,6 +197,7 @@ function findTemplate(slot: AgentSlotDefinition) {
     (template) => template.code?.toLowerCase() === code,
   )
   if (exactCodeMatch) return exactCodeMatch
+  if (slot.key === 'reasoning') return null
 
   return (
     store.conversationTemplates.find((template) => template.scope === slot.templateScope) ?? null
@@ -301,73 +266,6 @@ function temperatureLabel(value?: number | null) {
   return `创造 (${formattedValue})`
 }
 
-function mappedListText(values: string[], labels: Record<string, string>, empty = '未限制') {
-  return values.length ? values.map((value) => labels[value] ?? value).join(' / ') : empty
-}
-
-function approvalPolicyLabel(value?: string | null) {
-  if (!value) return '-'
-  return approvalPolicyLabels[value] ?? value
-}
-
-function skillTone(skill: SkillDefinition) {
-  if (!skill.isEnabled) return 'neutral'
-  if (skill.skillCode === 'cloud_readonly') return 'warning'
-  if (skill.riskLevel === 'Low') return 'success'
-  return 'teal'
-}
-
-function skillDisplayDescription(skill: SkillDefinition) {
-  return getSkillDisplayDescription(skill.skillCode)
-}
-
-function toolDisplayName(toolCode: string) {
-  return (toolSummaries.value ?? []).find((tool) => tool.toolCode === toolCode)?.displayName ?? toolCode
-}
-
-async function refreshSkillDefinitions() {
-  isLoadingSkills.value = true
-  try {
-    skillDefinitions.value = await configService.getSkills()
-  } catch (error) {
-    console.error('Failed to load skill definitions for config view.', error)
-    skillDefinitions.value = []
-    setPageLoadError(error)
-    throw error
-  } finally {
-    isLoadingSkills.value = false
-  }
-}
-
-async function refreshToolCatalog() {
-  isLoadingToolCatalog.value = true
-  try {
-    const catalog = await configService.getToolCatalog()
-    toolSummaries.value = Array.isArray(catalog.tools) ? catalog.tools : []
-    toolCatalogLoaded.value = true
-  } catch (error) {
-    console.error('Failed to load tool catalog for config view.', error)
-    toolSummaries.value = []
-    setPageLoadError(error)
-    throw error
-  } finally {
-    isLoadingToolCatalog.value = false
-  }
-}
-
-async function ensureToolCatalogLoaded() {
-  if (toolCatalogLoaded.value || isLoadingToolCatalog.value) {
-    return
-  }
-
-  try {
-    await refreshToolCatalog()
-  } catch (error) {
-    console.error('Tool catalog load failure already reported for config view.', error)
-    // refreshToolCatalog already records the user-facing error.
-  }
-}
-
 async function refreshCloudReadonlyStatus() {
   isLoadingCloudReadonlyStatus.value = true
   try {
@@ -386,13 +284,8 @@ async function refreshAllAgentSettings() {
   store.errorMessage = ''
   const refreshers = [
     store.refreshAgentSlots(),
-    refreshSkillDefinitions(),
     refreshCloudReadonlyStatus()
   ]
-
-  if (advancedConfigOpen.value) {
-    refreshers.push(refreshToolCatalog())
-  }
 
   try {
     await Promise.all(refreshers)
@@ -543,12 +436,6 @@ function onAdvancedConfigToggle(event: Event) {
   advancedConfigOpen.value = (event.currentTarget as HTMLDetailsElement).open
 }
 
-watch(advancedConfigOpen, (isOpen) => {
-  if (isOpen) {
-    void ensureToolCatalogLoaded()
-  }
-})
-
 function openModelDialog(slot: AgentSlotDefinition, model?: LanguageModelSummary | null) {
   if (model) {
     void store.openEditLanguageModelDialog(model.id)
@@ -604,10 +491,10 @@ onMounted(() => {
     <AiDataPage
       eyebrow="AI 设置"
       title="AI 配置"
-      description="先维护主模型连接和 Cloud 只读状态；三阶段模型、提示词和 Skill 边界放在高级设置。"
+      description="先维护主模型连接和 Cloud 只读状态；三阶段模型与提示词放在高级设置。"
     >
       <template #actions>
-        <AiButton :disabled="store.isLoading || isLoadingSkills || isLoadingCloudReadonlyStatus" @click="refreshAllAgentSettings()">
+        <AiButton :disabled="store.isLoading || isLoadingCloudReadonlyStatus" @click="refreshAllAgentSettings()">
           <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': store.isLoading || isLoadingCloudReadonlyStatus }" />
           刷新
         </AiButton>
@@ -728,7 +615,7 @@ onMounted(() => {
       <details class="advanced-config-fold" :open="advancedConfigOpen" @toggle="onAdvancedConfigToggle">
         <summary>
           <span>高级设置</span>
-          <small>三阶段模型、System Prompt、Skill 工具边界</small>
+          <small>三阶段模型与 System Prompt</small>
         </summary>
         <div class="advanced-config-body">
           <div v-if="!slotsUseSingleModel" class="advanced-config-note">
@@ -852,72 +739,6 @@ onMounted(() => {
         </AiCard>
       </div>
 
-      <section class="skill-section" data-testid="skill-definition-section">
-        <header class="skill-section-head">
-          <div class="slot-title">
-            <Sparkles class="h-5 w-5" />
-            <div>
-              <h2>Skill 能力</h2>
-              <p>意图识别会自动选择 Skill，Skill 再收窄本次可用的数据源、知识库、工具和输出类型。</p>
-            </div>
-          </div>
-          <AiButton size="sm" :disabled="isLoadingSkills" @click="refreshSkillDefinitions()">
-            <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoadingSkills }" />
-            刷新
-          </AiButton>
-        </header>
-
-        <div class="skill-grid">
-          <AiCard
-            v-for="skill in sortedSkills"
-            :key="skill.id"
-            class="skill-card"
-            :data-testid="`skill-card-${skill.skillCode}`"
-          >
-            <header class="skill-card-head">
-              <div>
-                <h3>{{ skill.displayName }}</h3>
-                <code>{{ skill.skillCode }}</code>
-              </div>
-              <AiTag :tone="skillTone(skill)">
-                {{ skill.isEnabled ? skill.riskLevel : '停用' }}
-              </AiTag>
-            </header>
-            <p>{{ skillDisplayDescription(skill) }}</p>
-            <div class="skill-meta-grid">
-              <div>
-                <span>数据源</span>
-                <strong>{{ mappedListText(skill.allowedDataSourceModes, dataSourceModeLabels) }}</strong>
-              </div>
-              <div>
-                <span>知识库</span>
-                <strong>{{ mappedListText(skill.allowedKnowledgeScopes, knowledgeScopeLabels) }}</strong>
-              </div>
-              <div>
-                <span>审批</span>
-                <strong>{{ approvalPolicyLabel(skill.approvalPolicy) }}</strong>
-              </div>
-              <div>
-                <span>输出</span>
-                <strong>{{ mappedListText(skill.outputComponentTypes, outputComponentLabels, '文本') }}</strong>
-              </div>
-            </div>
-            <details class="skill-tool-fold">
-              <summary>允许工具 · {{ skill.allowedToolCodes.length }}</summary>
-              <div class="tool-chip-list">
-                <span
-                  v-for="toolCode in skill.allowedToolCodes"
-                  :key="`${skill.skillCode}:${toolCode}`"
-                  class="tool-chip"
-                >
-                  <strong>{{ toolDisplayName(toolCode) }}</strong>
-                  <code>{{ toolCode }}</code>
-                </span>
-              </div>
-            </details>
-          </AiCard>
-        </div>
-      </section>
         </div>
       </details>
     </AiDataPage>
@@ -1096,127 +917,6 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-}
-
-.skill-section {
-  display: grid;
-  gap: 14px;
-  margin-top: 18px;
-}
-
-.skill-section-head,
-.skill-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.skill-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.skill-card {
-  display: grid;
-  gap: 12px;
-}
-
-.skill-card h3 {
-  margin: 0;
-  color: var(--ai-text);
-  font-size: 17px;
-  font-weight: 950;
-}
-
-.skill-card code {
-  color: var(--ai-accent);
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.skill-card p {
-  margin: 0;
-  color: var(--ai-text-muted);
-  font-size: 13px;
-  font-weight: 750;
-  line-height: 1.6;
-}
-
-.skill-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.skill-meta-grid div {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 12px;
-  padding: 10px;
-  background: rgba(255, 255, 255, 0.78);
-}
-
-.skill-meta-grid span {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.skill-meta-grid strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ai-text);
-  font-size: 13px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skill-tool-fold summary {
-  display: inline-flex;
-  min-height: 32px;
-  cursor: pointer;
-  align-items: center;
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.tool-chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.tool-chip {
-  display: inline-flex;
-  max-width: 100%;
-  min-height: 34px;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid rgba(63, 111, 115, 0.16);
-  border-radius: 999px;
-  padding: 5px 8px;
-  background: rgba(248, 250, 252, 0.84);
-}
-
-.tool-chip strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ai-text);
-  font-size: 12px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tool-chip-list code {
-  color: var(--ai-text-muted);
-  font-size: 11px;
 }
 
 .slot-card {
@@ -1423,8 +1123,7 @@ onMounted(() => {
 
 @media (max-width: 1240px) {
   .primary-config-grid,
-  .slot-grid,
-  .skill-grid {
+  .slot-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1432,13 +1131,11 @@ onMounted(() => {
 @media (max-width: 760px) {
   .model-grid,
   .form-grid,
-  .technical-grid,
-  .skill-meta-grid {
+  .technical-grid {
     grid-template-columns: 1fr;
   }
 
   .slot-head,
-  .skill-section-head,
   .section-title,
   .advanced-config-fold > summary,
   .form-row {

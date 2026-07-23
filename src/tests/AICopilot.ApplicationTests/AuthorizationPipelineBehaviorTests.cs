@@ -26,6 +26,20 @@ public sealed class AuthorizationPipelineBehaviorTests
     }
 
     [Fact]
+    public async Task ChatStreamRequestValidator_ShouldRejectEmptyReferencedAgentTaskId()
+    {
+        var validator = new ChatStreamRequestValidator();
+
+        var problem = await validator.ValidateAsync(
+            new ChatStreamRequest(Guid.NewGuid(), "继续解释", ReferencedAgentTaskId: Guid.Empty),
+            CancellationToken.None);
+
+        problem.Should().NotBeNull();
+        problem!.Code.Should().Be(AppProblemCodes.RequestValidationFailed);
+        problem.Detail.Should().Contain("ReferencedAgentTaskId");
+    }
+
+    [Fact]
     public async Task ValidationStream_ShouldRejectBeforeCallingNext()
     {
         var behavior = new ValidationStreamBehavior<ValidatedStreamRequest, int>(

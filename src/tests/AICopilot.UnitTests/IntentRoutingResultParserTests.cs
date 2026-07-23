@@ -10,7 +10,7 @@ public sealed class IntentRoutingResultParserTests
         var text =
             """
             ```json
-            [{"intent":"General.Chat","confidence":0.99,"reasoning":"normal chat"}]
+            [{"intent":"General.Chat","confidence":0.99,"query":null}]
             ```
             """;
 
@@ -32,25 +32,12 @@ public sealed class IntentRoutingResultParserTests
     }
 
     [Fact]
-    public void TryParse_ShouldNormalizeSimplifiedSkillSelection()
-    {
-        var parsed = IntentRoutingResultParser.TryParse(
-            """{"skillCode":"device_log_analysis","reason":"用户要求查看设备日志并分析根因"}""",
-            out var intents);
-
-        parsed.Should().BeTrue();
-        intents.Should().ContainSingle();
-        intents[0].Intent.Should().Be("Skill.device_log_analysis");
-        intents[0].Reasoning.Should().Be("用户要求查看设备日志并分析根因");
-    }
-
-    [Fact]
     public void TryParse_ShouldIgnoreThinkingBeforeJson()
     {
         var parsed = IntentRoutingResultParser.TryParse(
             """
             <think>[{"intent":"General.Chat","confidence":1,"reasoning":"wrong bracket in thinking"}]</think>
-            [{"intent":"Analysis.Device.List","confidence":0.92,"reasoning":"用户要求列出设备主数据","query":"{\"queryText\":\"列出设备主数据\",\"filters\":[]}"}]
+            [{"intent":"Analysis.Device.List","confidence":0.92,"query":"{\"queryText\":\"列出设备主数据\",\"filters\":[]}"}]
             """,
             out var intents);
 
@@ -58,5 +45,16 @@ public sealed class IntentRoutingResultParserTests
         intents.Should().ContainSingle();
         intents[0].Intent.Should().Be("Analysis.Device.List");
         intents[0].Confidence.Should().BeApproximately(0.92, 0.001);
+    }
+
+    [Fact]
+    public void TryParse_ShouldRejectReasoningOrUnknownFields()
+    {
+        var parsed = IntentRoutingResultParser.TryParse(
+            """[{"intent":"General.Chat","confidence":1,"reasoning":"must-not-cross-boundary"}]""",
+            out var intents);
+
+        parsed.Should().BeFalse();
+        intents.Should().BeEmpty();
     }
 }

@@ -90,8 +90,6 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? '产物已正式输出，不能继续编辑。'
     case 'workspace_manifest_invalid':
       return userFacingMessage ?? '工作区清单无效，请刷新后重试或联系管理员检查产物目录。'
-    case 'planner_model_unavailable':
-      return userFacingMessage ?? '规划模型不可用，请检查模型配置。'
     case 'tool_disabled':
       return userFacingMessage ?? '该工具已被禁用，不能执行。'
     case 'tool_blocked':
@@ -105,19 +103,13 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
     case 'evidence_payload_too_large':
       return userFacingMessage ?? '证据载荷超过固定大小上限，请缩小查询或分批生成。'
     case 'agent_plan_tool_denied':
-      return userFacingMessage ?? '计划包含当前 Skill 不允许的工具，请调整 Skill 或重新生成计划。'
+      return userFacingMessage ?? '计划包含超出当前请求范围或权限范围的工具，请调整目标后重新生成。'
     case 'agent_plan_schema_invalid':
       return userFacingMessage ?? '计划步骤输入不符合工具 schema，请重新生成计划。'
     case 'tool_output_schema_invalid':
       return userFacingMessage ?? '工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。'
-    case 'planner_tool_catalog_empty':
-      return userFacingMessage ?? '当前 Skill 没有可用工具，请检查 Skill 与 Tool Registry 配置。'
     case 'planner_tool_schema_unsupported':
       return userFacingMessage ?? 'Planner 收到不支持的工具 schema，请检查工具注册信息。'
-    case 'agent_skill_selection_required':
-      return (
-        userFacingMessage ?? '无法自动识别合适的 Skill，请补充任务目标或手动选择 Skill 后重试。'
-      )
     case 'agent_task_retry_not_allowed':
       return userFacingMessage ?? '当前任务状态不允许重试。'
     case 'approval_pending':

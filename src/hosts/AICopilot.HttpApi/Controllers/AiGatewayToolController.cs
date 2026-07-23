@@ -1,5 +1,4 @@
 using AICopilot.AiGatewayService.Tools;
-using AICopilot.AiGatewayService.Skills;
 using AICopilot.HttpApi.Infrastructure;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
@@ -18,12 +17,6 @@ public class AiGatewayToolController(ISender sender) : ApiControllerBase(sender)
 
     [HttpGet("tools/catalog")]
     public async Task<IActionResult> GetToolCatalog([FromQuery] GetToolCatalogQuery query)
-    {
-        return ReturnResult(await Sender.Send(query));
-    }
-
-    [HttpGet("skills")]
-    public async Task<IActionResult> GetSkillDefinitions([FromQuery] GetListSkillDefinitionsQuery query)
     {
         return ReturnResult(await Sender.Send(query));
     }

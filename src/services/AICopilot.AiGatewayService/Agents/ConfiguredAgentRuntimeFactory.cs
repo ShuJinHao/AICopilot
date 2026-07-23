@@ -152,6 +152,33 @@ public class ConfiguredAgentRuntimeFactory(
         return CreateAgent(model, template, configureOptions, instructions);
     }
 
+    public async Task<ScopedRuntimeAgent> CreateAgentAsync(
+        string templateName,
+        LanguageModelId modelId,
+        Func<string, string>? configureInstructions = null,
+        Action<AiChatOptions>? configureOptions = null,
+        CancellationToken cancellationToken = default)
+    {
+        var template = await templateRepository.FirstOrDefaultAsync(
+            new ConversationTemplateByNameSpec(templateName),
+            cancellationToken);
+        var model = await modelRepository.FirstOrDefaultAsync(
+            new LanguageModelByIdSpec(modelId),
+            cancellationToken);
+        if (template is null || model is null)
+        {
+            throw CreateConfigurationMissingException();
+        }
+
+        if (!template.IsEnabled)
+        {
+            throw CreateTemplateDisabledException();
+        }
+
+        var instructions = configureInstructions?.Invoke(template.SystemPrompt);
+        return CreateAgent(model, template, configureOptions, instructions);
+    }
+
     public async Task<RuntimeAgentConfigurationSnapshot> ReadConfigurationSnapshotAsync(
         string templateName,
         LanguageModel? modelOverride,
@@ -180,6 +207,37 @@ public class ConfiguredAgentRuntimeFactory(
         var options = BuildChatOptions(model, template, configureOptions, instructions);
         return CreateConfigurationSnapshot(model, template, options);
     }
+
+    public async Task<RuntimeAgentConfigurationSnapshot> ReadConfigurationSnapshotAsync(
+        string templateName,
+        LanguageModelId modelId,
+        Action<AiChatOptions>? configureOptions,
+        CancellationToken cancellationToken = default)
+    {
+        var model = await modelRepository.FirstOrDefaultAsync(
+            new LanguageModelByIdSpec(modelId),
+            cancellationToken);
+        if (model is null)
+        {
+            throw CreateConfigurationMissingException();
+        }
+
+        return await ReadConfigurationSnapshotAsync(
+            templateName,
+            model,
+            configureOptions: configureOptions,
+            cancellationToken: cancellationToken);
+    }
+
+    public Task<RuntimeAgentConfigurationSnapshot> ReadConfigurationSnapshotAsync(
+        string templateName,
+        LanguageModelId modelId,
+        CancellationToken cancellationToken = default) =>
+        ReadConfigurationSnapshotAsync(
+            templateName,
+            modelId,
+            configureOptions: null,
+            cancellationToken);
 
     public async Task<ScopedRuntimeAgent> CreateAgentAsync(
         ConversationTemplateId templateId,

@@ -525,6 +525,11 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("boolean")
                         .HasColumnName("is_required");
 
+                    b.Property<string>("JoinPolicy")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("join_policy");
+
                     b.Property<Guid?>("LeaseId")
                         .HasColumnType("uuid")
                         .HasColumnName("lease_id");
@@ -1590,6 +1595,11 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("character varying(128)")
                         .HasColumnName("result_hash");
 
+                    b.Property<string>("EvidenceSetDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("evidence_set_digest");
+
                     b.Property<int>("RowCount")
                         .HasColumnType("integer")
                         .HasColumnName("row_count");
@@ -2123,96 +2133,6 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasDatabaseName("ix_sessions_user_id");
 
                     b.ToTable("sessions", "aigateway");
-                });
-
-            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Skills.SkillDefinition", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.PrimitiveCollection<string[]>("AllowedDataSourceModes")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("allowed_data_source_modes");
-
-                    b.PrimitiveCollection<string[]>("AllowedKnowledgeScopes")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("allowed_knowledge_scopes");
-
-                    b.PrimitiveCollection<string[]>("AllowedToolCodes")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("allowed_tool_codes");
-
-                    b.Property<string>("ApprovalPolicy")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)")
-                        .HasColumnName("approval_policy");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("description");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(160)
-                        .HasColumnType("character varying(160)")
-                        .HasColumnName("display_name");
-
-                    b.Property<bool>("IsBuiltIn")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_built_in");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_enabled");
-
-                    b.PrimitiveCollection<string[]>("OutputComponentTypes")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("output_component_types");
-
-                    b.Property<string>("RiskLevel")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)")
-                        .HasColumnName("risk_level");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<string>("SkillCode")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)")
-                        .HasColumnName("skill_code");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer")
-                        .HasColumnName("version");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SkillCode")
-                        .IsUnique();
-
-                    b.ToTable("skill_definitions", "aigateway");
                 });
 
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Tools.ToolExecutionRecord", b =>

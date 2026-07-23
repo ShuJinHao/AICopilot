@@ -170,27 +170,6 @@ public readonly record struct ToolRegistrationId : IStronglyTypedGuidId
     public override string ToString() => Value.ToString();
 }
 
-public readonly record struct SkillDefinitionId : IStronglyTypedGuidId
-{
-    public SkillDefinitionId(Guid value)
-    {
-        if (value == Guid.Empty)
-        {
-            throw new ArgumentException("Skill definition id is required.", nameof(value));
-        }
-
-        Value = value;
-    }
-
-    public Guid Value { get; }
-
-    public static SkillDefinitionId New() => new(Guid.NewGuid());
-
-    public static implicit operator Guid(SkillDefinitionId id) => id.Value;
-
-    public override string ToString() => Value.ToString();
-}
-
 public readonly record struct ToolExecutionRecordId : IStronglyTypedGuidId
 {
     public ToolExecutionRecordId(Guid value)

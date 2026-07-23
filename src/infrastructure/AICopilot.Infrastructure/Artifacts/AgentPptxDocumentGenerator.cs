@@ -87,11 +87,34 @@ internal static class AgentPptxDocumentGenerator
         builder.AppendLine("Goal:");
         builder.AppendLine(document.Goal);
         builder.AppendLine();
+        builder.AppendLine($"EvidenceSetDigest: {document.EvidenceSetDigest ?? "NOT-RECORDED"}");
+        builder.AppendLine($"TruthClasses: {string.Join(", ", document.TruthClasses ?? [])}");
+        builder.AppendLine($"EvidenceAsOfUtc: {document.EvidenceAsOfUtc?.ToString("O") ?? "NOT-RECORDED"}");
+        if (document.AiInference is { } inference)
+        {
+            builder.AppendLine($"AIInference: truthClass={inference.TruthClass}; confidence={inference.Confidence:0.###}; conflictStatus={inference.ConflictStatus}");
+            builder.AppendLine(inference.SafeSummary);
+            foreach (var finding in inference.Findings.Take(4))
+            {
+                builder.AppendLine($"- {finding}");
+            }
+        }
+        if (document.CurrentHealthAssessment is { } health)
+        {
+            builder.AppendLine($"CurrentHealth: {health.HealthLevel}; score={health.HealthScore}/100; truthClass={health.TruthClass}; algorithm={health.AlgorithmVersion}");
+            builder.AppendLine(health.SafeSummary);
+        }
+
+        builder.AppendLine();
         builder.AppendLine("Data Source:");
         builder.AppendLine(AgentArtifactDocumentFormatting.BuildSourceMarker(document));
         if (!string.IsNullOrWhiteSpace(document.CloudReadonlySummary))
         {
             builder.AppendLine(document.CloudReadonlySummary);
+        }
+        foreach (var query in (document.CloudReadonlyQueries ?? []).Take(6))
+        {
+            builder.AppendLine($"CloudReadonly: {query.Intent}; sourceMode={query.SourceMode}; isSimulation={AgentArtifactDocumentFormatting.FormatBool(query.IsSimulation)}; sourceLabel={query.SourceLabel}; rows={query.RowCount}; truncated={AgentArtifactDocumentFormatting.FormatBool(query.IsTruncated)}; semanticPlanDigest={query.SemanticPlanDigest}");
         }
 
         foreach (var result in document.BusinessQueryResults ?? [])

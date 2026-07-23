@@ -366,7 +366,7 @@ public interface ISemanticDefinitionCatalog
     SemanticEntityDefinition Get(SemanticQueryTarget target);
 }
 
-public interface ISemanticIntentCatalog
+public interface ISemanticQuerySchemaRegistry
 {
     IReadOnlyCollection<SemanticIntentDescriptor> GetAll();
 

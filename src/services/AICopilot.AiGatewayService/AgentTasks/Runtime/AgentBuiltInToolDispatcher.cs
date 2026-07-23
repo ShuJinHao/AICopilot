@@ -4,6 +4,7 @@ using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 
@@ -18,10 +19,11 @@ internal sealed class AgentBuiltInToolDispatcher(
     IEnumerable<IKnowledgeBaseAccessChecker> knowledgeBaseAccessCheckers,
     ICloudReadonlyAgentToolExecutor cloudReadonlyToolExecutor,
     IIdentityAccessService identityAccessService,
-    IBusinessDatabaseReadService? businessDatabaseReadService,
-    IBusinessTextToSqlRuntime? businessTextToSqlRuntime,
-    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner,
-    AgentRuntimeArtifactBuilder artifactBuilder)
+    AgentRuntimeArtifactBuilder artifactBuilder,
+    IBusinessDatabaseReadService? businessDatabaseReadService = null,
+    IBusinessTextToSqlRuntime? businessTextToSqlRuntime = null,
+    CloudReadOnlyTextToSqlFallbackRunner? cloudTextToSqlFallbackRunner = null,
+    AgentReasoningNodeExecutor? reasoningNodeExecutor = null)
 {
     private readonly AgentRuntimeFileInputToolService fileInputTools = new(
         uploadRepository,
@@ -43,12 +45,20 @@ internal sealed class AgentBuiltInToolDispatcher(
 
     public Task<object> ExecuteAsync(AgentToolExecutionContext context)
     {
+        if (string.Equals(context.Step.ToolCode, "agent_reasoning", StringComparison.Ordinal))
+        {
+            return reasoningNodeExecutor is null
+                ? Task.FromException<object>(new InvalidOperationException("Agent reasoning runtime is unavailable."))
+                : reasoningNodeExecutor.ExecuteAsync(context);
+        }
+
         return ExecuteBuiltInStepAsync(
             context.Task,
             context.Workspace,
             context.Plan,
             context.Step,
             context.State,
+            context.InputEvidence,
             context.CancellationToken);
     }
 
@@ -58,17 +68,32 @@ internal sealed class AgentBuiltInToolDispatcher(
         AgentTaskPlanDocument plan,
         AgentStep step,
         AgentTaskRunState state,
+        IReadOnlyCollection<AgentEvidenceRecord>? inputEvidence,
         CancellationToken cancellationToken)
     {
+        if (step.ToolCode is
+            "generate_business_chart" or
+            "generate_chart_data" or
+            "generate_markdown_report" or
+            "generate_html_report" or
+            "generate_pdf" or
+            "generate_pptx" or
+            "generate_xlsx")
+        {
+            artifactBuilder.BindEvidenceSet(state, inputEvidence ?? []);
+        }
+
         return step.ToolCode switch
         {
             "read_uploaded_file" => await fileInputTools.ReadUploadedFilesAsync(task.UserId, workspace, step, plan, state, writeSourceArtifacts: true, cancellationToken: cancellationToken),
             "parse_csv_json" => await fileInputTools.ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "parse_table_file" => await fileInputTools.ParseTableFileAsync(task.UserId, workspace, step, plan, state, cancellationToken),
             "rag_search" => await ragTools.SearchRagAsync(task, plan, state, cancellationToken),
-            "query_cloud_data_readonly" => await cloudReadonlyTools.QueryCloudReadonlyAsync(plan, state, cancellationToken),
+            "query_cloud_data_readonly" => await cloudReadonlyTools.QueryCloudReadonlyAsync(plan, step, state, cancellationToken),
             "query_business_database_readonly" => await businessQueryTools.QueryBusinessDatabaseReadonlyP1Async(task, plan, state, cancellationToken),
             "summarize_business_query_result" => businessQueryTools.SummarizeBusinessQueryResult(state),
+            "join_evidence" => AgentRuntimeEvidenceJoinTool.Join(plan, step, inputEvidence ?? []),
+            "assess_cloud_health" => AgentCloudHealthAssessmentTool.Assess(plan, state, inputEvidence ?? []),
             "generate_business_chart" => await artifactBuilder.GenerateChartDataAsync(workspace, step, state, cancellationToken),
             "generate_chart_data" => await artifactBuilder.GenerateChartDataAsync(workspace, step, state, cancellationToken),
             "generate_markdown_report" => await artifactBuilder.GenerateMarkdownReportAsync(task, workspace, step, state, cancellationToken),

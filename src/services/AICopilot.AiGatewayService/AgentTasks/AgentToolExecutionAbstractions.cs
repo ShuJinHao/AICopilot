@@ -3,6 +3,8 @@ using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
@@ -14,7 +16,10 @@ internal sealed record AgentToolExecutionContext(
     AgentStep Step,
     AgentTaskRunState State,
     ToolRegistration ToolRegistration,
-    CancellationToken CancellationToken);
+    CancellationToken CancellationToken,
+    IReadOnlyCollection<AgentEvidenceRecord>? InputEvidence = null,
+    AgentTaskRunAttemptId? RunAttemptId = null,
+    AgentNodeRunId? NodeRunId = null);
 
 internal sealed record AgentToolOutputSnapshot(
     string CanonicalJson,
@@ -92,7 +97,14 @@ internal sealed class AgentToolExecutorResolver(IEnumerable<IAgentToolExecutor> 
     }
 }
 
-internal sealed class AgentToolExecutionException(string code, string message) : InvalidOperationException(message)
+internal sealed class AgentToolExecutionException(
+    string code,
+    string message,
+    int modelCalls = 0) : InvalidOperationException(message)
 {
     public string Code { get; } = code;
+
+    public int ModelCalls { get; } = modelCalls is >= 0 and <= 8
+        ? modelCalls
+        : throw new ArgumentOutOfRangeException(nameof(modelCalls));
 }
