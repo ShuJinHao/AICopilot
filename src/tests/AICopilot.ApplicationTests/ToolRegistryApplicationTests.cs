@@ -176,7 +176,8 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
             new PlanAgentTaskCommand(session.Id.Value, "read recipe version details", AgentTaskType.CloudDataReport, null),
             CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue(
+            string.Join(" | ", (result.Errors ?? []).Select(error => error?.ToString())));
         using var plan = JsonDocument.Parse(result.Value!.PlanJson);
         plan.RootElement.GetProperty("planKind").GetString().Should().Be("PlanDraft");
         plan.RootElement.GetProperty("cloudReadonlyIntents").GetArrayLength().Should().Be(0);
