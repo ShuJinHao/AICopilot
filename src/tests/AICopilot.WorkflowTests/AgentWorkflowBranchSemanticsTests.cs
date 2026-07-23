@@ -106,12 +106,17 @@ public sealed class AgentWorkflowBranchSemanticsTests
     [Fact]
     public void ContextAggregator_ShouldUseOnlySucceededBranchPayloads()
     {
+        var sessionId = Guid.NewGuid();
+        var succeeded = AgentWorkflowEvidenceNormalizer.Normalize(
+            BranchResult.FromDataAnalysis("verified rows"),
+            sessionId);
+        succeeded.IsSuccess.Should().BeTrue();
         var aggregator = new ContextAggregatorExecutor(NullLogger<ContextAggregatorExecutor>.Instance);
         var context = aggregator.Execute(
-            new ChatStreamRequest(Guid.NewGuid(), "query"),
+            new ChatStreamRequest(sessionId, "query"),
             ManufacturingSceneType.DeviceAnomalyDiagnosis,
             [
-                BranchResult.FromDataAnalysis("verified rows"),
+                succeeded.Value!,
                 BranchResult.Empty(BranchType.Knowledge),
                 BranchResult.Failed(
                     BranchType.BusinessPolicy,

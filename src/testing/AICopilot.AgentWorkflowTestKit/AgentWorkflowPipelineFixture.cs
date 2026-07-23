@@ -84,7 +84,8 @@ public static class AgentWorkflowPipelineFixture
                     Intent = "Knowledge.CancellationFixture",
                     Confidence = 1.0,
                     Query = "observe cancellation quiescence"
-                }),
+                },
+                knowledgeBaseReadService),
             new ToolsPackExecutor(null!, NullLogger<ToolsPackExecutor>.Instance),
             new KnowledgeRetrievalExecutor(
                 null!,
@@ -108,7 +109,8 @@ public static class AgentWorkflowPipelineFixture
 
     private static IntentRoutingExecutor CreateIntentRoutingExecutor(
         IAgentPluginCatalog pluginCatalog,
-        IntentResult intent)
+        IntentResult intent,
+        IKnowledgeBaseReadService? knowledgeBaseReadService = null)
     {
         var runtimeFactory = new FakeRuntimeAgentFactory();
         runtimeFactory.EnqueueText(JsonSerializer.Serialize(new[] { intent }, JsonSerializerOptions.Web));
@@ -132,7 +134,7 @@ public static class AgentWorkflowPipelineFixture
         var agentBuilder = new IntentRoutingAgentBuilder(
             configuredFactory,
             pluginCatalog,
-            EmptyKnowledgeBaseReadService.Instance,
+            knowledgeBaseReadService ?? EmptyKnowledgeBaseReadService.Instance,
             EmptyBusinessDatabaseReadService.Instance,
             businessSemantics,
             new FixedRoutingModelResolver(),

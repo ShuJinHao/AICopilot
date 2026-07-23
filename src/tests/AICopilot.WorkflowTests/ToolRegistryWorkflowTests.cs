@@ -39,7 +39,9 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
     [Fact]
     public async Task AgentTaskRuntime_P0ProductionGate_ShouldRejectDraftPlanBeforeAttemptOrToolExecution()
     {
-        var (task, workspace) = CreateApprovedTask("generate_chart_data");
+        var (task, workspace) = CreateApprovedTask(
+            "generate_chart_data",
+            executablePlan: false);
         var attempts = new InMemoryAgentTaskRunAttemptStore();
         var executions = new InMemoryToolExecutionAuditStore();
         var runtime = CreateRuntime(
@@ -1096,12 +1098,17 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
     [Fact]
     public async Task AgentTaskRuntime_ShouldRejectBuiltInContractDurableSplitBeforeAnySuccessSideEffect()
     {
-        const string toolCode = "builtin_split_output_fixture";
-        const string outputSchema =
-            """{"type":"object","properties":{"status":{"type":"string"}},"required":["status"],"additionalProperties":false}""";
-        var tool = CreateTool(toolCode, outputSchemaJson: outputSchema);
+        const string toolCode = "parse_table_file";
+        var outputSchema = BuiltInToolRegistrations.FindAgentRuntimeTool(toolCode)!.OutputSchemaJson;
+        var tool = CreateTool(toolCode);
         var contractOutput = ToolOutputSchemaValidator.ValidateAndCanonicalize(
-            new { status = "ok" },
+            new
+            {
+                status = "completed",
+                resultType = "table-summary",
+                itemCount = 1,
+                rowCount = 1
+            },
             outputSchema);
         contractOutput.IsValid.Should().BeTrue(contractOutput.Error);
         var secretDurableOutput = ToolOutputSchemaValidator.CanonicalizeForPersistence(new
@@ -1139,7 +1146,11 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         step.Status.Should().Be(AgentStepStatus.Failed);
         step.OutputJson.Should().BeNull();
         var record = executionRepository.Items.Should().ContainSingle().Which;
-        record.Status.Should().Be(ToolExecutionStatus.Failed);
+        record.Status.Should().Be(
+            ToolExecutionStatus.Failed,
+            "ErrorCode={0}; ErrorMessage={1}",
+            record.ErrorCode,
+            record.ErrorMessage);
         record.ErrorCode.Should().Be(AppProblemCodes.ToolOutputSchemaInvalid);
         record.OutputSummary.Should().BeNull();
         var dto = await CreateAgentTaskDtoQueryService(
@@ -1165,13 +1176,10 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
     [Fact]
     public async Task AgentTaskRuntime_ShouldRejectOutputMismatchBeforeAnySuccessSideEffect()
     {
-        const string toolCode = "invalid_runtime_output_fixture";
+        const string toolCode = "parse_table_file";
         const string maliciousProperty =
             "Bearer abc123 C:\\private\\provider.sql SELECT * FROM payroll -----BEGIN PRIVATE KEY-----";
-        var tool = CreateTool(
-            toolCode,
-            outputSchemaJson:
-            """{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}""");
+        var tool = CreateTool(toolCode);
         var (task, workspace) = CreateDownstreamRuntimeApprovedTask(toolCode);
         var approvalRepository = new InMemoryRepository<ApprovalRequest>();
         var executionRepository = new InMemoryToolExecutionAuditStore();
@@ -1202,7 +1210,11 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         step.Status.Should().Be(AgentStepStatus.Failed);
         step.OutputJson.Should().BeNull();
         var record = executionRepository.Items.Should().ContainSingle().Which;
-        record.Status.Should().Be(ToolExecutionStatus.Failed);
+        record.Status.Should().Be(
+            ToolExecutionStatus.Failed,
+            "ErrorCode={0}; ErrorMessage={1}",
+            record.ErrorCode,
+            record.ErrorMessage);
         record.ErrorCode.Should().Be(AppProblemCodes.ToolOutputSchemaInvalid);
         record.OutputSummary.Should().BeNull();
         record.ArtifactId.Should().BeNull();
@@ -1232,11 +1244,8 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
     [Fact]
     public async Task AgentTaskRuntime_ShouldRejectOversizedOutputBeforeAnySuccessSideEffect()
     {
-        const string toolCode = "oversized_runtime_output_fixture";
-        var tool = CreateTool(
-            toolCode,
-            outputSchemaJson:
-            """{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}""");
+        const string toolCode = "generate_chart_data";
+        var tool = CreateTool(toolCode, ToolProviderType.Artifact);
         var (task, workspace) = CreateDownstreamRuntimeApprovedTask(toolCode);
         var approvalRepository = new InMemoryRepository<ApprovalRequest>();
         var executionRepository = new InMemoryToolExecutionAuditStore();
@@ -1253,7 +1262,10 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
                     toolCode,
                     () => AgentToolExecutionResult.From(new
                     {
-                        value = new string('x', AgentStructuredPayloadPolicyV1.MaxInlineOutputUtf8Bytes)
+                        status = "completed",
+                        resultType = "artifact",
+                        artifactType = "chart",
+                        artifactId = new string('x', AgentStructuredPayloadPolicyV1.MaxInlineOutputUtf8Bytes)
                     }))
             ],
             runAttemptRepository: attempts,
@@ -1263,10 +1275,14 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
 
         result.IsSuccess.Should().BeTrue();
         task.Status.Should().Be(AgentTaskStatus.Failed);
-        task.Steps.Single().Status.Should().Be(AgentStepStatus.Failed);
-        task.Steps.Single().OutputJson.Should().BeNull();
+        task.Steps.Single(step => step.ToolCode == toolCode).Status.Should().Be(AgentStepStatus.Failed);
+        task.Steps.Single(step => step.ToolCode == toolCode).OutputJson.Should().BeNull();
         var record = executionRepository.Items.Should().ContainSingle().Which;
-        record.Status.Should().Be(ToolExecutionStatus.Failed);
+        record.Status.Should().Be(
+            ToolExecutionStatus.Failed,
+            "ErrorCode={0}; ErrorMessage={1}",
+            record.ErrorCode,
+            record.ErrorMessage);
         record.ErrorCode.Should().Be(AppProblemCodes.EvidencePayloadTooLarge);
         record.OutputSummary.Should().BeNull();
         approvalRepository.Items.Should().BeEmpty();
@@ -1330,7 +1346,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             }
             catch (InvalidOperationException exception)
             {
-                exception.Message.Should().Contain("Test PlanDraft fixture violates Plan v2");
+                exception.Message.Should().Contain("Test ExecutablePlan fixture violates Plan v2");
                 invoked.Should().BeFalse();
                 return;
             }
@@ -1507,7 +1523,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
     }
 
     [Fact]
-    public async Task AgentTaskRuntime_ShouldFailMcpTool_WhenRegistryInputSchemaDoesNotMatch()
+    public void AgentTaskRuntime_ShouldFailMcpTool_WhenRegistryInputSchemaDoesNotMatch()
     {
         using var provider = new ServiceCollection().BuildServiceProvider();
         var loader = new AgentPluginLoader([], provider);
@@ -1543,34 +1559,11 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
                 }
             ]
         });
-        var (task, workspace) = CreateApprovedTask(toolCode);
-        var approval = new ApprovalRequest(task.Id, AgentApprovalType.ToolCall, task.Steps.Single().Id.Value.ToString(), UserId, DateTimeOffset.UtcNow);
-        approval.Approve(UserId, "approved", DateTimeOffset.UtcNow);
-        var executionRepository = new InMemoryToolExecutionAuditStore();
-        var runtime = CreateRuntime(
-            new InMemoryRepository<AgentTask>(task),
-            new InMemoryRepository<ArtifactWorkspace>(workspace),
-            new InMemoryRepository<ApprovalRequest>(approval),
-            executionRepository,
-            CreateGuard(CreateTool(
-                toolCode,
-                ToolProviderType.Mcp,
-                ToolRegistrationTargetType.McpServer,
-                "runtime-mcp",
-                requiresApproval: true,
-                riskLevel: AiToolRiskLevel.RequiresApproval,
-                inputSchemaJson: """{"type":"object","required":["input"],"properties":{"input":{"type":"string"}}}""")),
-            toolExecutors: [new McpAgentToolExecutor(loader, provider)],
-            freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
+        Action createExecutablePlan = () => CreateApprovedTask(toolCode);
 
-        var result = await runtime.RunAsync(task, CancellationToken.None);
-
-        result.IsSuccess.Should().BeTrue();
+        createExecutablePlan.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain("Test ExecutablePlan fixture violates Plan v2");
         invoked.Should().BeFalse();
-        task.Status.Should().Be(AgentTaskStatus.Failed);
-        var record = executionRepository.Items.Should().ContainSingle().Which;
-        record.Status.Should().Be(ToolExecutionStatus.Rejected);
-        record.ErrorCode.Should().Be(AppProblemCodes.AgentPlanToolDenied);
     }
 
     private static (AgentTask Task, ArtifactWorkspace Workspace) CreateDownstreamRuntimeApprovedTask(
@@ -1578,10 +1571,20 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         bool requiresApproval = false)
     {
         var now = DateTimeOffset.UtcNow;
-        var planJson = AgentPlanV2TestData.CreateSingleStep(
-            toolCode,
-            executable: false,
-            requiresApproval: requiresApproval);
+        var planJson = AgentPlanV2TestData.Create(
+            [
+                new AgentPlanV2TestStep(
+                    "Execute runtime component",
+                    "Execute the frozen runtime component contract.",
+                    toolCode == "generate_chart_data"
+                        ? AgentStepType.ChartGeneration
+                        : AgentStepType.FileRead,
+                    toolCode,
+                    requiresApproval)
+            ],
+            executable: true,
+            taskType: AgentTaskType.ReportGeneration,
+            knowledgeBaseIds: null);
         var task = new AgentTask(
             SessionId.New(),
             UserId,

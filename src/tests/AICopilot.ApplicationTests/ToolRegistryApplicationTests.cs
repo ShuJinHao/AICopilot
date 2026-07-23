@@ -118,7 +118,7 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("isExecutable").GetBoolean().Should().BeFalse();
         plan.RootElement.GetProperty("capabilityGaps").EnumerateArray()
             .Select(item => item.GetString())
-            .Should().Contain(AgentPlanCapabilityGapCodes.PlannedToolUnavailable)
+            .Should().Contain(AgentPlanCapabilityGapCodes.CloudReadonlyIntentUnavailable)
             .And.Contain(AgentPlanCapabilityGapCodes.ExecutionSnapshotUnavailable);
 
         var approvalAudit = new CapturingAuditLogWriter();

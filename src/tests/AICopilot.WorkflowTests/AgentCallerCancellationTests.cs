@@ -368,7 +368,13 @@ public sealed class AgentCallerCancellationTests
 
         public Task<IReadOnlyList<KnowledgeBaseDescriptor>> ListAsync(
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<KnowledgeBaseDescriptor>>([]);
+            Task.FromResult<IReadOnlyList<KnowledgeBaseDescriptor>>(
+            [
+                new KnowledgeBaseDescriptor(
+                    Guid.Parse("77777777-7777-4777-8777-777777777777"),
+                    "CancellationFixture",
+                    "Cancellation quiescence test fixture")
+            ]);
 
         public async Task<IReadOnlyList<KnowledgeBaseDescriptor>> GetByNamesAsync(
             IReadOnlyCollection<string> names,

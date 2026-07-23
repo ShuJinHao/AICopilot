@@ -342,6 +342,42 @@ public static class AgentPlanV2TestData
                         20),
                     1))
             : null;
+        var intentCandidates = new List<AgentIntentCandidateDocument> { candidate };
+        if (executable &&
+            artifactTargets.Length > 0 &&
+            !string.Equals(capabilityCode, "General.Chat", StringComparison.Ordinal))
+        {
+            intentCandidates.Add(new AgentIntentCandidateDocument(
+                AgentPlanContractVersions.IntentV1,
+                "General.Chat",
+                AgentIntentClass.General,
+                AgentIntentAvailability.Available,
+                "BuiltIn",
+                1,
+                new AgentIntentRequiredDocument(true, AgentIntentRequiredSource.ExplicitUserGoal, null),
+                new AgentIntentRequestedResourcesDocument([], [], [], []),
+                new AgentIntentFiltersDocument(null, []),
+                artifactTargets,
+                new AgentIntentProvenanceDocument(
+                    AgentIntentRegistryV1.RouterVersion,
+                    AgentIntentRegistryV1.PromptVersion,
+                    AgentIntentRegistryV1.RegistryVersion,
+                    AgentIntentRegistryV1.RegistryDigest),
+                null));
+        }
+
+        var canonicalIntentCandidates = intentCandidates
+            .OrderBy(item => item.IntentCode, StringComparer.Ordinal)
+            .ToArray();
+        IReadOnlyCollection<AgentPlanNodeDocument> nodes = executable
+            ? BuildExecutableComponentNodes(
+                stepArray,
+                canonicalIntentCandidates,
+                toolCatalog,
+                cloudIntent,
+                canonicalKnowledgeBaseIds,
+                artifactTargets)
+            : [];
         var approvals = stepArray
             .Where(step => step.RequiresApproval)
             .Select(step => step.ToolCode)
@@ -397,22 +433,25 @@ public static class AgentPlanV2TestData
             ToolRiskSummary: riskSummary,
             MockMcpOnly: false,
             ToolApprovalCheckpoints: approvals,
-            PlanKind: AgentTaskPlanKinds.PlanDraft,
-            IsExecutable: false,
-            LifecycleSealPadding: "0000",
-            CapabilityGaps: [AgentPlanCapabilityGapCodes.PlanCompilerUnavailable],
+            PlanKind: executable ? AgentTaskPlanKinds.ExecutablePlan : AgentTaskPlanKinds.PlanDraft,
+            IsExecutable: executable,
+            LifecycleSealPadding: executable ? string.Empty : "0000",
+            CapabilityGaps: executable ? [] : [AgentPlanCapabilityGapCodes.PlanCompilerUnavailable],
             SchemaVersion: AgentPlanContractVersions.PlanV2,
             PlanId: Guid.NewGuid(),
             PlanVersion: 1,
             PlanDigest: null,
             TopologyProfile: "LinearV1",
-            IntentCandidates: [candidate],
+            IntentCandidates: canonicalIntentCandidates,
             CapabilitySelectionMode: AgentCapabilitySelectionMode.InferredFromGoal,
-            RequestedCapabilityCodes: [capabilityCode],
+            RequestedCapabilityCodes: canonicalIntentCandidates
+                .Select(item => item.IntentCode)
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToArray(),
             PluginSelectionMode: AgentPluginSelectionMode.BuiltInOnly,
             SelectedPluginIds: [],
             ArtifactTargets: artifactTargets,
-            Nodes: [],
+            Nodes: nodes,
             JoinPolicies: [],
             Budgets: new AgentPlanBudgetDocument(
                 AgentPlanContractVersions.BudgetPolicyV1,
@@ -437,7 +476,7 @@ public static class AgentPlanV2TestData
                 RoutingConfiguration,
                 [],
                 canonicalKnowledgeBaseIds,
-                [candidate]),
+                canonicalIntentCandidates),
             SecuritySummary: new AgentPlanSecuritySummaryDocument(
                 true,
                 false,
@@ -446,34 +485,137 @@ public static class AgentPlanV2TestData
                 false,
                 false));
         var canonicalizer = new AgentPlanCanonicalizer();
-        var draftResult = canonicalizer.Seal(plan);
-        if (!draftResult.IsSuccess)
+        var result = canonicalizer.Seal(plan);
+        if (!result.IsSuccess)
         {
             throw new InvalidOperationException(
-                $"Test PlanDraft fixture violates Plan v2: {string.Join(" | ", draftResult.Errors ?? [])}");
+                $"Test {(executable ? "ExecutablePlan" : "PlanDraft")} fixture violates Plan v2: {string.Join(" | ", result.Errors ?? [])}");
         }
 
-        var sealedPlan = draftResult.Value!;
-        if (!executable)
+        return result.Value!.CanonicalJson;
+    }
+
+    /// <summary>
+    /// Creates a canonical executable graph for isolated runtime component tests.
+    /// Production plans remain owned by DeterministicAgentPlanCompiler; this helper
+    /// only binds already selected, registry-allowed Steps to their frozen Node v1
+    /// contracts so runtime tests cannot bypass the durable execution plane.
+    /// </summary>
+    private static IReadOnlyCollection<AgentPlanNodeDocument> BuildExecutableComponentNodes(
+        IReadOnlyCollection<AgentPlanV2TestStep> steps,
+        IReadOnlyCollection<AgentIntentCandidateDocument> candidates,
+        PlannerToolCatalog toolCatalog,
+        AgentTaskPlanCloudReadonlyIntentDocument? cloudIntent,
+        IReadOnlyCollection<Guid> knowledgeBaseIds,
+        IReadOnlyCollection<string> artifactTargets)
+    {
+        const long artifactBytesPerNode = 33_554_432;
+        var tools = toolCatalog.Tools.ToDictionary(tool => tool.ToolCode, StringComparer.Ordinal);
+        var candidateCodes = candidates.Select(candidate => candidate.IntentCode).ToHashSet(StringComparer.Ordinal);
+        var primaryCapability = candidates
+            .FirstOrDefault(candidate => !string.Equals(
+                candidate.IntentCode,
+                "General.Chat",
+                StringComparison.Ordinal))
+            ?.IntentCode ?? "General.Chat";
+        var nodes = new List<AgentPlanNodeDocument>(steps.Count);
+        var previousNodeId = string.Empty;
+        var index = 0;
+        foreach (var step in steps)
         {
-            return sealedPlan.CanonicalJson;
+            index++;
+            if (!tools.TryGetValue(step.ToolCode, out var tool))
+            {
+                throw new InvalidOperationException(
+                    $"Executable component fixture tool '{step.ToolCode}' is absent from its frozen catalog.");
+            }
+
+            var isCloudRead = string.Equals(step.ToolCode, "query_cloud_data_readonly", StringComparison.Ordinal);
+            var isKnowledgeRead = string.Equals(step.ToolCode, "rag_search", StringComparison.Ordinal);
+            var isFinalization = string.Equals(
+                step.ToolCode,
+                BuiltInToolRegistrations.FinalizationCheckpointToolCode,
+                StringComparison.Ordinal);
+            var isArtifact = step.ToolCode is
+                "generate_business_chart" or "generate_chart_data" or "generate_markdown_report" or
+                "generate_html_report" or "generate_pdf" or "generate_pptx" or "generate_xlsx";
+            var capabilityCode = isCloudRead || isKnowledgeRead
+                ? primaryCapability
+                : candidateCodes.Contains("General.Chat")
+                    ? "General.Chat"
+                    : primaryCapability;
+            var nodeKind = step.ToolCode switch
+            {
+                "query_cloud_data_readonly" => "CloudReadNode",
+                "rag_search" => "KnowledgeRetrievalNode",
+                "read_uploaded_file" or "parse_table_file" => "FileAnalysisNode",
+                "finalize_artifacts" => "ApprovalCheckpointNode",
+                "generate_business_chart" or "generate_chart_data" or "generate_markdown_report" or
+                    "generate_html_report" or "generate_pdf" or "generate_pptx" or "generate_xlsx" =>
+                    "ArtifactGenerationNode",
+                _ => "DeterministicComputeNode"
+            };
+            var sideEffectClass = isArtifact || isFinalization ? "ArtifactDraftOnly" : "ReadOnly";
+            var retryPolicy = sideEffectClass == "ReadOnly"
+                ? new AgentPlanRetryPolicyDocument("retry-policy:v1", 2, "Exponential")
+                : new AgentPlanRetryPolicyDocument("retry-policy:v1", 1, "None");
+            var artifactCount = isFinalization ? Math.Max(1, artifactTargets.Count) : isArtifact ? 1 : 0;
+            var nodeId = $"{index:00}-component-step";
+            var dependencies = previousNodeId.Length == 0
+                ? Array.Empty<string>()
+                : [previousNodeId];
+            nodes.Add(new AgentPlanNodeDocument(
+                AgentPlanContractVersions.NodeV1,
+                nodeId,
+                nodeKind,
+                dependencies,
+                Required: true,
+                "node-input:v1",
+                $"evidence:{step.ToolCode}:v1",
+                [step.ToolCode],
+                [capabilityCode],
+                [],
+                isKnowledgeRead ? knowledgeBaseIds : [],
+                dependencies,
+                new AgentPlanNodeInputDocument(
+                    SemanticIntent: isCloudRead ? cloudIntent?.Intent : null,
+                    SemanticPlanDigest: isCloudRead ? cloudIntent?.SemanticPlanDigest : null,
+                    TypedProvider: isCloudRead ? "CloudAiRead" : null,
+                    RequestedScope: isCloudRead ? cloudIntent?.QueryScope ?? [] : [],
+                    MaxRows: isCloudRead ? cloudIntent?.Limit : null,
+                    ExecutionMode: null,
+                    DataSourceId: null,
+                    BusinessDomains: [],
+                    GovernedSchemaDigest: null,
+                    RequestedPermission: null,
+                    CanonicalInputJson: step.InputJson is null ? null : CanonicalJson.Canonicalize(step.InputJson),
+                    TimeRange: isCloudRead && cloudIntent?.TimeRange is { } timeRange
+                        ? new AgentIntentTimeRangeDocument(timeRange.Start, timeRange.End, timeRange.TimeZone)
+                        : null),
+                ModelPolicy: null,
+                new AgentPlanTimeoutPolicyDocument("timeout-policy:v1", tool.TimeoutSeconds),
+                retryPolicy,
+                new AgentPlanNodeBudgetDocument(
+                    retryPolicy.MaxAttempts,
+                    0,
+                    0,
+                    0,
+                    isCloudRead ? cloudIntent?.Limit ?? 0 : 0,
+                    0m,
+                    artifactCount,
+                    artifactBytesPerNode * artifactCount),
+                new AgentPlanApprovalPolicyDocument(
+                    step.RequiresApproval,
+                    string.IsNullOrWhiteSpace(tool.ApprovalPolicy) ? "None" : tool.ApprovalPolicy),
+                new AgentPlanIdempotencyPolicyDocument(
+                    "idempotency-policy:v1",
+                    sideEffectClass == "ReadOnly" ? "ReadOnly" : "Fenced"),
+                sideEffectClass,
+                JoinPolicy: null));
+            previousNodeId = nodeId;
         }
 
-        var executableResult = canonicalizer.Seal(sealedPlan.Document with
-        {
-            PlanKind = AgentTaskPlanKinds.ExecutablePlan,
-            IsExecutable = true,
-            LifecycleSealPadding = string.Empty,
-            CapabilityGaps = [],
-            PlanDigest = null
-        });
-        if (!executableResult.IsSuccess)
-        {
-            throw new InvalidOperationException(
-                $"Test ExecutablePlan fixture violates Plan v2: {string.Join(" | ", executableResult.Errors ?? [])}");
-        }
-
-        return executableResult.Value!.CanonicalJson;
+        return nodes;
     }
 
     private static PlannerToolCatalog BuildCanonicalBuiltInCatalog(
@@ -559,7 +701,7 @@ public static class AgentPlanV2TestData
         IReadOnlyCollection<AgentPlanV2TestStep> steps)
     {
         var plannerTools = steps
-            .Select(step => CreateSyntheticComponentTool(step.ToolCode, step.RequiresApproval))
+            .Select(CreateSyntheticComponentTool)
             .ToArray();
         return new PlannerToolCatalog(
             PlannerToolCatalog.CurrentVersion,
@@ -567,8 +709,9 @@ public static class AgentPlanV2TestData
             plannerTools);
     }
 
-    private static AgentPlannerToolSummary CreateSyntheticComponentTool(string toolCode, bool requiresApproval)
+    private static AgentPlannerToolSummary CreateSyntheticComponentTool(AgentPlanV2TestStep step)
     {
+        var toolCode = step.ToolCode;
         var provider = toolCode switch
         {
             "query_cloud_data_readonly" => "CloudReadonly",
@@ -590,7 +733,7 @@ public static class AgentPlanV2TestData
             builtIn?.TargetType.ToString() ?? "AgentRuntime",
             builtIn?.TargetName ?? "AgentTaskRuntime",
             inputSchema,
-            requiresApproval,
+            step.RequiresApproval,
             "Low",
             ProviderKind: provider,
             OutputSchemaJson: outputSchema,

@@ -1174,6 +1174,62 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
                 isTruncated = false,
                 resultHash = "business-hash"
             },
+            "join_evidence" => new
+            {
+                status = "completed",
+                resultType = "evidence-join",
+                joinPolicy = "AllRequired",
+                requiredEvidenceCount = 1,
+                optionalEvidenceCount = 0,
+                missingOptionalCount = 0
+            },
+            "assess_cloud_health" => new
+            {
+                status = "completed",
+                resultType = "cloud-health-assessment",
+                algorithmVersion = "cloud-health-assessment:v1",
+                assessmentType = "CurrentDeviceRuntimeHealth",
+                truthClass = "DerivedFact",
+                healthScore = 100,
+                healthLevel = "Stable",
+                safeSummary = "Current device runtime health is stable.",
+                findings = Array.Empty<string>(),
+                confidence = 1.0,
+                missingRate = 0.0,
+                inputEvidenceCount = 1,
+                evidenceSetDigest = "evidence-set-hash",
+                sourceAsOfUtc = "2026-07-23T00:00:00.0000000+00:00",
+                sourceMode = "Simulation",
+                isSimulation = true,
+                rowCount = 1,
+                isTruncated = false,
+                typedMetrics = new
+                {
+                    futureHeartbeatCount = 0,
+                    missingHeartbeatCount = 0,
+                    reportedIssueStatusCount = 0,
+                    staleHeartbeatCount = 0,
+                    totalDeviceCount = 1,
+                    unknownRuntimeStatusCount = 0
+                }
+            },
+            "agent_reasoning" => new
+            {
+                status = "completed",
+                resultType = "agent-reasoning",
+                childRunId = "child-run-001",
+                completionStatus = "Completed",
+                truthClass = "LlmInference",
+                safeSummary = "Evidence-only reasoning completed.",
+                findings = Array.Empty<string>(),
+                citationRefs = new[] { "evidence-001" },
+                evidenceWarnings = Array.Empty<string>(),
+                conflictStatus = "None",
+                confidence = 1.0,
+                noFurtherToolCalls = true,
+                recoveryUsed = false,
+                modelCalls = 1
+            },
             "generate_business_chart" or "generate_chart_data" => BuildArtifactSample("chart"),
             "generate_markdown_report" => BuildArtifactSample("markdown"),
             "generate_html_report" => BuildArtifactSample("html"),

@@ -150,12 +150,13 @@ public abstract class ToolRegistryGovernanceTestBase
 
     internal static (AgentTask Task, ArtifactWorkspace Workspace) CreateApprovedTask(
         string toolCode,
-        bool requiresApproval = false)
+        bool requiresApproval = false,
+        bool executablePlan = true)
     {
         var now = DateTimeOffset.UtcNow;
         var planJson = AgentPlanV2TestData.CreateSingleStep(
             toolCode,
-            executable: false,
+            executable: executablePlan,
             requiresApproval: requiresApproval);
         var task = new AgentTask(
             SessionId.New(),
@@ -194,7 +195,7 @@ public abstract class ToolRegistryGovernanceTestBase
             AgentTaskType.DataAnalysis,
             AgentTaskRiskLevel.Low,
             null,
-            CreateRagPlanJson(knowledgeBaseId),
+            AgentPlanV2TestData.CreateRag(knowledgeBaseId, executable: true),
             now);
         var trackedSteps = AddTrackedPlanSteps(task, task.PlanJson, now);
         var workspace = new ArtifactWorkspace(
@@ -223,7 +224,7 @@ public abstract class ToolRegistryGovernanceTestBase
             AgentTaskType.CloudDataReport,
             AgentTaskRiskLevel.Medium,
             null,
-            CreateCloudPlanJson(),
+            AgentPlanV2TestData.CreateCloud(executable: true),
             now);
         var trackedSteps = AddTrackedPlanSteps(task, task.PlanJson, now);
         var workspace = new ArtifactWorkspace(

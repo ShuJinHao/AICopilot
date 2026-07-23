@@ -95,7 +95,7 @@ public sealed class PromptGovernanceTests
     [Fact]
     public void BuiltInConversationTemplates_ShouldUseCurrentPromptVersion()
     {
-        BuiltInConversationTemplates.CurrentVersion.Should().Be(6);
+        BuiltInConversationTemplates.CurrentVersion.Should().Be(8);
         BuiltInConversationTemplates.All
             .Should()
             .OnlyContain(definition => definition.Version == BuiltInConversationTemplates.CurrentVersion);

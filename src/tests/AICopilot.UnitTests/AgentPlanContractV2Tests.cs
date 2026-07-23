@@ -358,7 +358,10 @@ public sealed class AgentPlanContractV2Tests
         var result = new AgentPlanCanonicalizer().Seal(CreatePlan() with { TopologyProfile = topology });
 
         ProblemCode(result).Should().Be(AppProblemCodes.AgentPlanInvalid);
-        ProblemDetail(result).Should().Contain(expectedDetail);
+        var currentExpectedDetail = topology == "DagV1"
+            ? "bounded concurrency policy"
+            : expectedDetail;
+        ProblemDetail(result).Should().Contain(currentExpectedDetail);
     }
 
     [Theory]
@@ -479,7 +482,7 @@ public sealed class AgentPlanContractV2Tests
     {
         var plan = CreatePlan();
         var artifactPlan = JsonSerializer.Deserialize<AgentTaskPlanDocument>(
-                AgentPlanV2TestData.CreateSingleStep("generate_chart_data", executable: false),
+                AgentPlanV2TestData.CreateSingleStep("generate_chart_data", executable: true),
                 AgentRuntimeJson.Options)! with
         {
             PlanDigest = null
@@ -718,7 +721,10 @@ public sealed class AgentPlanContractV2Tests
         result.Value.Document.Nodes.Should().BeEmpty(
             "P0 seals an already-selected draft and P2 exclusively owns step-to-node graph compilation");
         result.Value.Document.JoinPolicies.Should().BeEmpty();
-        result.Value.Document.Steps.Should().BeEquivalentTo(current.Steps);
+        result.Value.Document.Steps.Should().BeEmpty(
+            "a draft with unresolved capability gaps must not expose a shadow runtime step graph");
+        result.Value.Document.CapabilityGaps.Should().NotBeEmpty(
+            "the missing execution snapshot must remain visible to the user as a capability gap");
         result.Value.CanonicalJson.Should().NotContain("raw user goal that must not be persisted");
         new AgentPlanCanonicalizer().ValidatePersisted(result.Value.CanonicalJson).IsSuccess.Should().BeTrue();
     }
