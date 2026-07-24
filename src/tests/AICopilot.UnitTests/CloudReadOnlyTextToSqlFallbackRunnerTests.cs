@@ -54,7 +54,7 @@ public sealed class CloudReadOnlyTextToSqlFallbackRunnerTests
         generator.Requests.Should().OnlyContain(request =>
             request.SourceProfile.QuerySecurity.AllowedTables.Contains("devices") &&
             !request.SourceProfile.QuerySecurity.AllowedTables.Contains("device_logs") &&
-            request.SourceProfile.Capabilities.SetEquals([BusinessDataCapability.Device]));
+            request.SourceProfile.Capabilities.SetEquals(new[] { BusinessDataCapability.Device }));
         connector.ExecutedSql.Should().ContainSingle()
             .Which.Should().Contain("client_code");
         result.Context.Should().NotContain("device_code");

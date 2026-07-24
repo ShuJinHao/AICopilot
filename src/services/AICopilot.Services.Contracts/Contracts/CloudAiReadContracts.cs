@@ -309,6 +309,8 @@ public static class CloudAiReadSemanticSchemaRegistry
                 Rule("typeKey"),
                 Rule("processId", CloudAiReadFilterValueKind.Guid),
                 Rule("deviceId", CloudAiReadFilterValueKind.Guid),
+                Rule("plcCode"),
+                Rule("plcName"),
                 Rule("preset", CloudAiReadFilterValueKind.Preset),
                 Rule("barcode"),
                 Rule("result"),

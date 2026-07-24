@@ -66,7 +66,7 @@ internal static class IntentRoutingFallbackClassifier
                 out intents);
         }
 
-        if (ContainsAny(normalized, "生产记录", "过站", "条码", "barcode", "record"))
+        if (ContainsAny(normalized, "生产记录", "过站", "条码", "弹夹", "冲切", "barcode", "record"))
         {
             var intent = ContainsAny(normalized, "最新", "current", "当前")
                 ? "Analysis.ProductionData.Latest"

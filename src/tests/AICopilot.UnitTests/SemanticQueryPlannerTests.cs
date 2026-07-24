@@ -194,6 +194,67 @@ public sealed class SemanticQueryPlannerTests
         result.Plan.TimeRange.Should().NotBeNull();
     }
 
+    [Theory]
+    [InlineData("查询今天正极模切05的弹夹、冲切数量和速度", "cp", "正极模切05", "today")]
+    [InlineData("查询昨日负极模切12生产记录", "ap", "负极模切12", "yesterday")]
+    [InlineData("查询最近24小时正极模切生产记录", "cp", null, "last_24h")]
+    public void Planner_ShouldCompleteCpApProductionSemantics(
+        string query,
+        string expectedTypeKey,
+        string? expectedPlcName,
+        string expectedPreset)
+    {
+        var result = _planner.Plan("Analysis.ProductionData.ByDevice", query);
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan.Should().NotBeNull();
+        result.Plan!.Filters.Should().Contain(filter =>
+            filter.Field == "typeKey" &&
+            filter.Operator == SemanticFilterOperator.Equal &&
+            filter.Value == expectedTypeKey);
+        result.Plan.Filters.Should().Contain(filter =>
+            filter.Field == "preset" &&
+            filter.Operator == SemanticFilterOperator.Equal &&
+            filter.Value == expectedPreset);
+        if (expectedPlcName is null)
+        {
+            result.Plan.Filters.Should().NotContain(filter => filter.Field == "plcName");
+        }
+        else
+        {
+            result.Plan.Filters.Should().Contain(filter =>
+                filter.Field == "plcName" &&
+                filter.Operator == SemanticFilterOperator.Equal &&
+                filter.Value == expectedPlcName);
+        }
+    }
+
+    [Fact]
+    public void Planner_ShouldNormalizeChineseTypeKeyAlias()
+    {
+        var result = _planner.Plan(
+            "Analysis.ProductionData.ByDevice",
+            """{"queryText":"查询正极模切生产记录","filters":[{"field":"typeKey","operator":"eq","value":"正极模切"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan!.Filters.Should().Contain(filter =>
+            filter.Field == "typeKey" &&
+            filter.Value == "cp");
+    }
+
+    [Fact]
+    public void Planner_ShouldAcceptPlcNameAsSingleDeviceScope()
+    {
+        var result = _planner.Plan(
+            "Analysis.ProductionData.ByDevice",
+            """{"queryText":"查询正极模切05","filters":[{"field":"plcName","operator":"eq","value":"正极模切05"}]}""");
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan!.Filters.Should().ContainSingle(filter =>
+            filter.Field == "plcName" &&
+            filter.Value == "正极模切05");
+    }
+
     [Fact]
     public void Planner_ShouldNotTreatBroadDeviceInformationAsInfoLevelLog()
     {

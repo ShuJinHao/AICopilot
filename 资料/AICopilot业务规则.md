@@ -27,6 +27,8 @@
 
 模型、prompt、plugin、MCP server、approval threshold 等运行行为优先使用配置或明确存储数据，不得隐藏在业务代码常量中。
 
+系统已进入生产模式。当前正式生产工序只有 `cp / 正极模切` 与 `ap / 负极模切`；Cloud 是 AI 唯一真实生产数据源，AICopilot 全程只读。测试/示例工序、Simulation 数据和模型推断不得冒充生产事实。
+
 ## 2. Cloud 只读边界
 
 允许：
@@ -57,13 +59,15 @@ Human-in-the-loop 不能作为放开云端业务写入的理由。
 Cloud AiRead 设备契约：
 
 - `deviceId` 是正式 Cloud 设备身份参数，用于产能、日志、生产记录等业务读取。
-- `deviceCode`/`ClientCode` 只用于设备查询、展示或 bootstrap 寻址，不得作为 `deviceId` 发送。
+- `deviceCode` 只用于设备查询或解析，`ClientCode` 只用于 Cloud 内部身份/寻址；二者不得作为 `deviceId` 发送，普通用户回答不得展示 Cloud ClientCode。
 - `Analysis.Device.List/Detail` 只表达 `/api/v1/ai/read/devices` 的设备主数据；`Analysis.Device.Status` 只读取 `/api/v1/ai/read/device-client-states` 的 Cloud 权威 `softwareStatus`、运行心跳原值和唯一 freshness 时间。无心跳设备返回 `MissingRuntimeHeartbeat` 行；只有超过 24 小时才是 `RuntimeHeartbeatStale`，恰好 24 小时不 stale，Stale 不得冒充 Offline/Stopped；空集只表示授权范围内无匹配设备。
 - `Analysis.Process.List/Detail` 只读取 `/api/v1/ai/read/processes`；支持 `processId` 精确过滤及 `keyword/processCode/processName` 搜索，详情必须唯一精确命中且搜索结果未截断，`processId` 必须作为正式 GUID 参数发送、不得塞入 keyword，不得回退其它数据源。
 - `Analysis.ClientRelease.List` 的 Cloud business plugin 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐。`Empty`、`NeedClarification`、`Unauthorized` 不 fallback；只有该插件返回 `Unsupported` 或同源 `Unavailable` 时，才允许按统一规则尝试同源 Text-to-SQL，绝不切换来源或进入 Simulation。
 - AICopilot 的 Cloud AiRead 客户端和 endpoint allowlist 必须逐项覆盖 Cloud `AI只读接口契约.md` 已批准的正式 `GET /api/v1/ai/read/*` 表面；高频 DeviceLog/Capacity/ProductionData 接通不等于全量接口对齐。
 - Cloud AiRead 客户端只保留八个正式 typed GET，不得暴露任意 method/path 传输、可配置 POST allowlist、legacy adapter 或双轨接口；非 GET 必须在发送 HTTP 请求前拒绝。
-- `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName` 等字段，不提供 `processName/stationName/deviceCode`；缺失字段保持不存在或空，不得用 `typeName`、`typeKey` 或其他显示字段代填、推断工序、工位或设备编码。
+- `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName`、弹夹/结果/时间公共字段及 schema 化 `fields`；CP/AP 业务字段为 `plcCode`、`plcName`、`startTime`、`punchingQuantity`、`punchingSpeed`。它不提供 `processName/stationName/deviceCode/ClientCode`，缺失字段保持不存在或空，不得用其他显示字段代填或推断。
+- 生产语义固定映射：“正极模切”→`typeKey=cp`，“负极模切”→`typeKey=ap`；“正极模切05”“负极模切12”等带编号表达必须同时形成对应 typeKey 与中文 `plcName` 精确过滤。Cloud AiRead 客户端必须透传 `plcCode` / `plcName`，不得在模型回答阶段再做无证据筛选。
+- CP/AP 回答优先展示中文客户端名、中文 PLC 名、弹夹号、冲切数量、冲切速度、开始/完成时间；不得向普通用户展示 Cloud ClientCode，也不得把 MES `P2-CPUC` / `P1-APUC` 当作 Cloud 身份。
 - 需要从自然语言里的设备编码定位设备时，必须先走显式设备查询/解析；无法唯一命中时要求用户补充，不做隐式兼容。
 - AICopilot 的 Pilot 场景参数不得直接透传给 Cloud；只有 Cloud 端点真实声明的参数可以进入请求。
 
@@ -88,6 +92,7 @@ Cloud AiRead 设备契约：
 - 每个分析任务首次执行前必须确认数据源、数据类型、设备/业务对象、时间范围和过滤条件；来源不唯一、信息不足或置信度不足时先询问。同一任务后续追问复用已确认 `BusinessQueryContext`。
 - 数据能力统一为 `Device`、`DeviceLog`、`Capacity`、`ProductionRecord`、`Process`、`ClientRelease`，插件必须声明支持范围和结果契约。
 - 插件结果统一为 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable`、`Unauthorized`。只有 `Unsupported` 或同一来源的 `Unavailable` 可由模型决定是否尝试同源 Text-to-SQL；`Empty` 是真实空集，`NeedClarification` 继续询问，权限/凭据失败不得绕过，禁止跨源 fallback。
+- CP/AP 生产查询继续复用唯一 `ProductionRecord` 通用业务数据插件，不得按工序复制插件、端点、Runner 或结果语义。
 - SQL 安全唯一 owner 是执行咽喉的共享 AST guard + 已选择 source profile；只允许单条只读查询，拒绝 DML、DDL、管理语句和多语句，表列范围来自 profile，数据库账号保持只读。
 - 查询结果只用于分析展示，不产生业务写入。
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。

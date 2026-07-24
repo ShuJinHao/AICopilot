@@ -102,6 +102,7 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
         "Choose Analysis.Recipe.* only to return the configured recipe data-read boundary message; AICopilot must not read Cloud recipe master data or recipe version records.",
         "Choose Analysis.Capacity.* only for capacity, output, yield, or qualified quantity questions.",
         "Choose Analysis.ProductionData.* only for production record, station record, or barcode trace questions.",
+        "For production records, map 正极模切 to typeKey=cp and 负极模切 to typeKey=ap. A name such as 正极模切05 is the exact plcName and must keep the matching typeKey=cp.",
         "Choose Analysis.Process.* only for Cloud process master-data questions.",
         "Choose Analysis.ClientRelease.List only for Cloud client-release version questions; do not invent a version, hash, download URL, or release notes.",
         "Analysis intents are read-only. Device master/status, device logs, capacity, production data, process master data, and client releases first use their typed Cloud AiRead plugin. Only structured Unsupported or same-source Unavailable may attempt same-source governed Text-to-SQL within the already-confirmed business query scope. Empty, NeedClarification, Unauthorized, and credential failures are terminal. Never switch to Simulation, MCP, another data source, or a hidden HTTP path; recipe data remains blocked."
@@ -109,7 +110,8 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
     [
         "Concrete recipe list/detail/version-history data questions should choose Analysis.Recipe.* only for the boundary response; recipe lifecycle rule questions should choose Policy.RecipeVersioning.",
         "Capacity questions require one device. Choose Analysis.Capacity.Range when a device and explicit time range are present, or Analysis.Capacity.ByDevice for an explicitly identified device. Process-wide capacity is not a supported semantic intent.",
-        "Production questions with explicit latest/最新 should choose Analysis.ProductionData.Latest; with an explicit time range choose Analysis.ProductionData.Range; otherwise choose Analysis.ProductionData.ByDevice."
+        "Production questions with explicit latest/最新 should choose Analysis.ProductionData.Latest; with an explicit time range choose Analysis.ProductionData.Range; otherwise choose Analysis.ProductionData.ByDevice.",
+        "今天/今日 production questions use preset=today; 昨天/昨日 use preset=yesterday; 最近24小时 use preset=last_24h."
     ],
     [
         "If the user question does not clearly match the structured semantic intents, fall back to General.Chat.",
@@ -206,8 +208,8 @@ public sealed class BusinessSemanticsCatalog : IBusinessSemanticsCatalog
                 """{"queryText":"查看 DEV-001 在 2026-04-20 到 2026-04-21 的生产记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"timeRange":{"field":"completedAt","start":"2026-04-20T00:00:00Z","end":"2026-04-21T23:59:59Z"},"sort":{"field":"completedAt","direction":"desc"},"limit":50}"""),
             "Analysis.ProductionData.ByDevice" => new(
                 intent,
-                ["查看设备 DEV-001 的生产记录"],
-                """{"queryText":"查看设备 DEV-001 的生产记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"sort":{"field":"completedAt","direction":"desc"},"limit":50}"""),
+                ["查看设备 DEV-001 的生产记录", "查询今天正极模切05的弹夹、冲切数量和速度"],
+                """{"queryText":"查询今天正极模切05的弹夹、冲切数量和速度","filters":[{"field":"typeKey","operator":"eq","value":"cp"},{"field":"plcName","operator":"eq","value":"正极模切05"},{"field":"preset","operator":"eq","value":"today"}],"sort":{"field":"completedAt","direction":"desc"},"limit":50}"""),
             "Analysis.Process.List" => new(
                 intent,
                 ["列出工序主数据"],

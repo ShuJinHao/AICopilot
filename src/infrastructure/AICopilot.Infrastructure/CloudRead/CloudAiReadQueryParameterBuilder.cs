@@ -189,6 +189,8 @@ internal static class CloudAiReadQueryParameterBuilder
             ["typeKey"] = typeKey,
             ["processId"] = processId,
             ["deviceId"] = deviceId,
+            ["plcCode"] = GetFilterValue(query, "plcCode"),
+            ["plcName"] = GetFilterValue(query, "plcName"),
             ["startTime"] = start.HasValue ? FormatCloudTime(start.Value) : null,
             ["endTime"] = end.HasValue ? FormatCloudTime(end.Value) : null,
             ["preset"] = preset,

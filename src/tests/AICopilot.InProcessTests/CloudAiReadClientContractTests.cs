@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
+using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Infrastructure.CloudRead;
 using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -213,7 +214,7 @@ public sealed class CloudAiReadClientContractTests
                     {
                         id = DeviceId,
                         deviceCode = "DEV-001",
-                        deviceName = "叠片一号",
+                        deviceName = "正极模切客户端",
                         processId = ProcessId
                     }
                 },
@@ -239,7 +240,7 @@ public sealed class CloudAiReadClientContractTests
         result.ProviderSource.Should().Be("devices");
         result.QueryScope.Should().Be("test=present");
         result.RowCount.Should().Be(1);
-        result.Rows[0]["deviceName"].Should().Be("叠片一号");
+        result.Rows[0]["deviceName"].Should().Be("正极模切客户端");
         result.Rows[0].Should().NotContainKey("status");
         result.Rows[0].Should().NotContainKey("lineName");
         result.Rows[0].Should().NotContainKey("updatedAt");
@@ -262,7 +263,7 @@ public sealed class CloudAiReadClientContractTests
                 new CloudAiReadFilter("deviceId", "eq", DeviceId),
                 new CloudAiReadFilter("deviceCode", "eq", "DEV-001"),
                 new CloudAiReadFilter("processId", "eq", ProcessId),
-                new CloudAiReadFilter("deviceName", "contains", "叠片")
+                new CloudAiReadFilter("deviceName", "contains", "正极模切")
             ],
             null,
             "deviceCode",
@@ -275,7 +276,7 @@ public sealed class CloudAiReadClientContractTests
         query.Should().Contain("deviceId", DeviceId);
         query.Should().Contain("deviceCode", "DEV-001");
         query.Should().Contain("processId", ProcessId);
-        query.Should().Contain("keyword", "叠片");
+        query.Should().Contain("keyword", "正极模切");
         query.Should().Contain("maxRows", "20");
         AssertNoLegacyParameters(query);
     }
@@ -733,7 +734,7 @@ public sealed class CloudAiReadClientContractTests
                             {
                                 id = DeviceId,
                                 deviceCode = "DEV-001",
-                                deviceName = "叠片一号",
+                                deviceName = "正极模切客户端",
                                 processId = ProcessId
                             }
                         },
@@ -785,7 +786,7 @@ public sealed class CloudAiReadClientContractTests
                         new
                         {
                             deviceId = DeviceId,
-                            deviceName = "叠片一号",
+                            deviceName = "正极模切客户端",
                             clientCode = "DEV-001",
                             primaryIp = (string?)null,
                             channel = (string?)null,
@@ -1063,9 +1064,11 @@ public sealed class CloudAiReadClientContractTests
             "不要作为 queryText 发送",
             [
                 new CloudAiReadFilter("deviceId", "eq", DeviceId),
-                new CloudAiReadFilter("typeKey", "eq", "stacking"),
-                new CloudAiReadFilter("barcode", "eq", "CELL-001"),
-                new CloudAiReadFilter("result", "eq", "Pass"),
+                new CloudAiReadFilter("typeKey", "eq", "cp"),
+                new CloudAiReadFilter("plcCode", "eq", "P2-CP05"),
+                new CloudAiReadFilter("plcName", "eq", "正极模切05"),
+                new CloudAiReadFilter("barcode", "eq", "CP-CLIP-001"),
+                new CloudAiReadFilter("result", "eq", "OK"),
                 new CloudAiReadFilter("fieldMode", "eq", "full")
             ],
             CreateRange("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
@@ -1076,14 +1079,17 @@ public sealed class CloudAiReadClientContractTests
         capturedRequest.Should().NotBeNull();
         capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/production-records");
         var query = ParseQuery(capturedRequest.RequestUri);
-        query.Should().Contain("typeKey", "stacking");
+        query.Should().Contain("typeKey", "cp");
         query.Should().Contain("deviceId", DeviceId);
+        query.Should().Contain("plcCode", "P2-CP05");
+        query.Should().Contain("plcName", "正极模切05");
         query.Should().Contain("startTime", "2026-04-20T00:00:00.0000000Z");
         query.Should().Contain("endTime", "2026-04-21T00:00:00.0000000Z");
-        query.Should().Contain("barcode", "CELL-001");
-        query.Should().Contain("result", "Pass");
+        query.Should().Contain("barcode", "CP-CLIP-001");
+        query.Should().Contain("result", "OK");
         query.Should().Contain("fieldMode", "full");
         query.Should().Contain("maxRows", "40");
+        query.Should().NotContainKey("clientCode");
         AssertNoLegacyParameters(query);
     }
 
@@ -1098,36 +1104,29 @@ public sealed class CloudAiReadClientContractTests
                     new
                     {
                         recordId = "dddddddd-dddd-dddd-dddd-dddddddddddd",
-                        typeKey = "stacking",
-                        typeName = "叠片",
+                        typeKey = "cp",
+                        typeName = "正极模切",
                         deviceId = DeviceId,
-                        deviceName = "叠片一号",
-                        barcode = "CELL-001",
-                        result = "Pass",
+                        deviceName = "正极模切客户端",
+                        barcode = "CP-CLIP-001",
+                        result = "OK",
                         completedAt = "2026-04-20T01:02:03Z",
                         receivedAt = (string?)null,
                         fields = new
                         {
-                            pressure = 12.5m,
-                            sequenceNo = 7,
-                            largeSequence = 9223372036854775808m,
-                            enabled = true,
-                            capturedAt = "2026-04-20T01:02:03Z",
-                            mode = "Auto",
-                            trayCode = "TRAY-001",
-                            optionalNote = (string?)null
+                            plcCode = "P2-CP05",
+                            plcName = "正极模切05",
+                            startTime = "2026-04-20T00:58:03Z",
+                            punchingQuantity = 123,
+                            punchingSpeed = 1.25m
                         },
                         fieldSchema = new[]
                         {
-                            new { key = "pressure", label = "压力", type = "number", unit = (string?)"N", precision = (int?)1, required = true },
-                            new { key = "sequenceNo", label = "序号", type = "integer", unit = (string?)null, precision = (int?)null, required = true },
-                            new { key = "largeSequence", label = "大整数", type = "integer", unit = (string?)null, precision = (int?)null, required = true },
-                            new { key = "enabled", label = "启用", type = "boolean", unit = (string?)null, precision = (int?)null, required = true },
-                            new { key = "capturedAt", label = "采集时间", type = "datetime", unit = (string?)null, precision = (int?)null, required = true },
-                            new { key = "mode", label = "模式", type = "enum", unit = (string?)null, precision = (int?)null, required = true },
-                            new { key = "trayCode", label = "托盘码", type = "string", unit = (string?)null, precision = (int?)null, required = true },
-                            new { key = "optionalNote", label = "备注", type = "string", unit = (string?)null, precision = (int?)null, required = false },
-                            new { key = "omittedCount", label = "可省略必填字段", type = "integer", unit = (string?)null, precision = (int?)null, required = true }
+                            new { key = "plcCode", label = "PLC 编码", type = "string", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "plcName", label = "PLC 名称", type = "string", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "startTime", label = "开始时间", type = "datetime", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "punchingQuantity", label = "冲切数量", type = "integer", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "punchingSpeed", label = "冲切速度", type = "number", unit = (string?)null, precision = (int?)2, required = true }
                         }
                     }
                 },
@@ -1148,17 +1147,88 @@ public sealed class CloudAiReadClientContractTests
             20));
 
         result.Items.Should().ContainSingle();
-        result.Items[0].TypeKey.Should().Be("stacking");
-        result.Items[0].Fields.Should().ContainKey("pressure");
-        result.Items[0].Fields.Should().ContainKey("optionalNote");
-        result.Items[0].Fields["optionalNote"].Should().BeNull();
-        result.Items[0].Fields.Should().NotContainKey("omittedCount");
-        result.Items[0].FieldSchema.Should().HaveCount(9);
-        result.Items[0].FieldSchema[0].Key.Should().Be("pressure");
+        result.Items[0].TypeKey.Should().Be("cp");
+        result.Items[0].DeviceName.Should().Be("正极模切客户端");
+        result.Items[0].Fields["plcCode"].Should().Be("P2-CP05");
+        result.Items[0].Fields["plcName"].Should().Be("正极模切05");
+        result.Items[0].Fields["punchingQuantity"].Should().Be(123L);
+        result.Items[0].Fields["punchingSpeed"].Should().Be(1.25m);
+        result.Items[0].FieldSchema.Should().HaveCount(5);
+        result.Items[0].FieldSchema[0].Key.Should().Be("plcCode");
         result.Rows[0].Should().NotContainKey("processName");
         result.Rows[0].Should().NotContainKey("stationName");
         result.Rows[0]["fields"].Should().BeAssignableTo<IReadOnlyDictionary<string, object?>>();
         result.Rows[0]["fieldSchema"].Should().BeAssignableTo<IReadOnlyList<CloudAiReadProductionFieldSchemaDto>>();
+    }
+
+    [Fact]
+    public async Task SemanticQuery_ShouldCallGenericProductionRecordApiForChineseCpPlcQuestion()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(CreateEnvelope(
+                    new[]
+                    {
+                        new
+                        {
+                            recordId = "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                            typeKey = "cp",
+                            typeName = "正极模切",
+                            deviceId = DeviceId,
+                            deviceName = "正极模切客户端",
+                            barcode = "CP-CLIP-005",
+                            result = "OK",
+                            completedAt = "2026-07-24T01:02:03Z",
+                            receivedAt = "2026-07-24T01:02:04Z",
+                            fields = new
+                            {
+                                plcName = "正极模切05",
+                                punchingQuantity = 123,
+                                punchingSpeed = 1.25m
+                            },
+                            fieldSchema = new[]
+                            {
+                                new { key = "plcName", label = "PLC 名称", type = "string", unit = (string?)null, precision = (int?)null, required = true },
+                                new { key = "punchingQuantity", label = "冲切数量", type = "integer", unit = (string?)null, precision = (int?)null, required = true },
+                                new { key = "punchingSpeed", label = "冲切速度", type = "number", unit = (string?)null, precision = (int?)2, required = true }
+                            }
+                        }
+                    },
+                    rowCount: 1,
+                    source: "production_records"))
+            };
+        }));
+        var definitions = new SemanticDefinitionCatalog();
+        var planner = new SemanticQueryPlanner(
+            new SemanticQuerySchemaRegistry(definitions),
+            definitions);
+        var planning = planner.Plan(
+            "Analysis.ProductionData.ByDevice",
+            "查询今天正极模切05的弹夹、冲切数量和速度");
+        planning.IsSuccess.Should().BeTrue(planning.ErrorMessage);
+        var client = CreateClient(httpClient);
+
+        var result = await client.QuerySemanticAsync(planning.Plan!);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/production-records");
+        var query = ParseQuery(capturedRequest.RequestUri);
+        query.Should().Contain("typeKey", "cp");
+        query.Should().Contain("plcName", "正极模切05");
+        query.Should().Contain("preset", "today");
+        query.Should().NotContainKey("clientCode");
+        result.Rows.Should().ContainSingle();
+        result.Rows[0]["deviceName"].Should().Be("正极模切客户端");
+        result.Rows[0]["barcode"].Should().Be("CP-CLIP-005");
+        var fields = result.Rows[0]["fields"].Should()
+            .BeAssignableTo<IReadOnlyDictionary<string, object?>>().Subject;
+        fields["plcName"].Should().Be("正极模切05");
+        fields["punchingQuantity"].Should().Be(123L);
+        fields["punchingSpeed"].Should().Be(1.25m);
     }
 
     [Fact]
@@ -1496,7 +1566,7 @@ public sealed class CloudAiReadClientContractTests
                 }),
             new MalformedEndpointCase(
                 "production-records",
-                $$"""{"recordId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","typeKey":"stacking","typeName":"Stacking","deviceId":"{{DeviceId}}","deviceName":"Device 1","barcode":null,"result":null,"completedAt":null,"receivedAt":null,"fields":{},"fieldSchema":[{"key":"pressure","label":"Pressure","type":"number","unit":null,"precision":1,"required":true}]}""",
+                $$"""{"recordId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","typeKey":"cp","typeName":"正极模切","deviceId":"{{DeviceId}}","deviceName":"正极模切客户端","barcode":null,"result":null,"completedAt":null,"receivedAt":null,"fields":{},"fieldSchema":[{"key":"pressure","label":"Pressure","type":"number","unit":null,"precision":1,"required":true}]}""",
                 "typeName",
                 "fields",
                 "[]",

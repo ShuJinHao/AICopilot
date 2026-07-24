@@ -269,7 +269,7 @@ public sealed class AgentPlanContractV2Tests
         schemas[CloudAiReadOperation.CapacitySummary].Filters.Select(rule => rule.Field).Should()
             .NotContain("deviceCode");
         schemas[CloudAiReadOperation.ProductionRecord].Filters.Select(rule => rule.Field).Should()
-            .BeEquivalentTo("typeKey", "processId", "deviceId", "preset", "barcode", "result", "fieldMode");
+            .BeEquivalentTo("typeKey", "processId", "deviceId", "plcCode", "plcName", "preset", "barcode", "result", "fieldMode");
         schemas[CloudAiReadOperation.ProductionRecord].Filters.Select(rule => rule.Field).Should()
             .NotContain("deviceCode");
         var processDetailSchema = CloudAiReadSemanticSchemaRegistry.GetIntentSchemas()

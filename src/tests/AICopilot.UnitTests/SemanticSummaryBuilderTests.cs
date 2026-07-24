@@ -114,11 +114,39 @@ public sealed class SemanticSummaryBuilderTests
     [Fact]
     public void Builder_ShouldSummarizeProductionPassFail()
     {
-        var plan = CreatePlan(SemanticQueryTarget.ProductionData, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
+        var plan = CreatePlan(SemanticQueryTarget.ProductionData, SemanticQueryKind.ByDevice, ("typeKey", "cp"), ("plcName", "正极模切05"));
         var rows = new List<Dictionary<string, object?>>
         {
-            CreateRow(("deviceId", "11111111-1111-1111-1111-111111111111"), ("deviceName", "Cutter A"), ("typeKey", "Type-A"), ("typeName", "类型 A"), ("barcode", "CELL-0001"), ("result", "Pass"), ("completedAt", "2026-04-21T09:00:00Z")),
-            CreateRow(("deviceId", "11111111-1111-1111-1111-111111111111"), ("deviceName", "Cutter A"), ("typeKey", "Type-B"), ("typeName", "类型 B"), ("barcode", "CELL-0002"), ("result", "Fail"), ("completedAt", "2026-04-21T09:30:00Z"))
+            CreateRow(
+                ("deviceId", "11111111-1111-1111-1111-111111111111"),
+                ("deviceName", "正极模切客户端"),
+                ("typeKey", "cp"),
+                ("typeName", "正极模切"),
+                ("barcode", "CP-CLIP-0001"),
+                ("result", "OK"),
+                ("completedAt", "2026-07-24T09:00:00Z"),
+                ("fields", new Dictionary<string, object?>
+                {
+                    ["plcName"] = "正极模切05",
+                    ["startTime"] = "2026-07-24T08:55:00Z",
+                    ["punchingQuantity"] = 123L,
+                    ["punchingSpeed"] = 1.25m
+                })),
+            CreateRow(
+                ("deviceId", "11111111-1111-1111-1111-111111111111"),
+                ("deviceName", "正极模切客户端"),
+                ("typeKey", "cp"),
+                ("typeName", "正极模切"),
+                ("barcode", "CP-CLIP-0002"),
+                ("result", "NG"),
+                ("completedAt", "2026-07-24T09:30:00Z"),
+                ("fields", new Dictionary<string, object?>
+                {
+                    ["plcName"] = "正极模切05",
+                    ["startTime"] = "2026-07-24T09:25:00Z",
+                    ["punchingQuantity"] = 120L,
+                    ["punchingSpeed"] = 1.20m
+                }))
         };
 
         var summary = SemanticSummaryBuilder.Build(plan, rows);
@@ -126,7 +154,13 @@ public sealed class SemanticSummaryBuilderTests
         summary.Metrics.Should().Contain(item => item.Name == "passCount" && item.Value == "1 条");
         summary.Metrics.Should().Contain(item => item.Name == "failCount" && item.Value == "1 条");
         summary.Metrics.Should().Contain(item => item.Name == "passRate" && item.Value == "50.00%");
-        summary.Metrics.Should().Contain(item => item.Name == "groupBreakdown" && item.Value.Contains("类型 A 1条"));
+        summary.Metrics.Should().Contain(item => item.Name == "groupBreakdown" && item.Value.Contains("正极模切 2条"));
+        summary.Highlights[0].Should().Contain("客户端 正极模切客户端");
+        summary.Highlights[0].Should().Contain("PLC 正极模切05");
+        summary.Highlights[0].Should().Contain("弹夹号 CP-CLIP-0001");
+        summary.Highlights[0].Should().Contain("冲切数量 123");
+        summary.Highlights[0].Should().Contain("冲切速度 1.25");
+        summary.Highlights[0].Should().NotContain("ClientCode");
     }
 
     [Fact]

@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This document defines the current preparation boundary for aligning `AICopilot` with `IIoT.CloudPlatform`.
+This document defines the current production boundary for aligning `AICopilot` with `IIoT.CloudPlatform`.
 
 `AICopilot` may use Cloud business data only as read-only analysis input. It may explain, summarize, search, compare, diagnose, and generate suggestions. It must not create, update, delete, backfill, approve, dispatch, or trigger Cloud business records or workflows.
 
-This is a planning and integration-boundary document. It does not introduce Cloud APIs, AICopilot tools, database migrations, DTO changes, or frontend protocol changes. Current execution entry points are `../AGENTS.md`, `AICopilot业务规则.md`, and `../AICopilot 项目部署与维护指南.md`.
+This is a production integration-boundary document. Current execution entry points are `../AGENTS.md`, `AICopilot业务规则.md`, and `../AICopilot 项目部署与维护指南.md`.
 
 ## Non-goals
 
@@ -68,9 +68,11 @@ The current Cloud-facing read contract is explicit and narrow:
 | Capacity summary | `GET /api/v1/ai/read/capacity/summary` | `deviceId`, `startDate`, `endDate`, `maxRows` |
 | Device logs | `GET /api/v1/ai/read/device-logs` | `deviceId`, `startTime`/`endTime` or `preset`, optional `level` or `minLevel`, optional `keyword`, `maxRows` |
 | Capacity hourly | `GET /api/v1/ai/read/capacity/hourly` | `deviceId`, `date` or `preset`, optional `plcName`, `maxRows` |
-| Production records | `GET /api/v1/ai/read/production-records` | one of `typeKey`/`processId`/`deviceId`, `startTime`/`endTime` or `preset`, optional `barcode`, `result`, `fieldMode`, `maxRows` |
+| Production records | `GET /api/v1/ai/read/production-records` | one of `typeKey`/`processId`/`deviceId`, `startTime`/`endTime` or `preset`, optional `plcCode`, `plcName`, `barcode`, `result`, `fieldMode`, `maxRows` |
 
 `deviceCode` is a device query/display value only. It must not be sent to Cloud as `deviceId`. P12/P13 pilot metadata such as `scenarioId`, `from`, `to`, `boundary`, `intentId`, `goalHash`, `analysisType`, or `pilotWindowId` is internal AICopilot audit context and must not be forwarded as Cloud query parameters.
+
+Production `typeKey` values are currently limited to `cp` (正极模切) and `ap` (负极模切). Their schema fields are `plcCode`, `plcName`, `startTime`, `punchingQuantity`, and `punchingSpeed`. User-facing answers prefer the Chinese Cloud client name and Chinese PLC name and must not expose Cloud `ClientCode`; `P2-CPUC` / `P1-APUC` are MES identifiers only.
 
 Recipe master data and recipe version records are outside the AICopilot Cloud read-only API.
 

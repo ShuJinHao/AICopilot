@@ -58,6 +58,22 @@ public sealed class IntentRoutingFallbackClassifierTests
         intents.Should().BeEmpty();
     }
 
+    [Fact]
+    public void TryClassify_ShouldRouteCpPlcProductionQuestionToGenericProductionPlugin()
+    {
+        var classified = IntentRoutingFallbackClassifier.TryClassify(
+            "查询今天正极模切05的弹夹、冲切数量和速度",
+            "routing model call failed",
+            AgentIntentRegistryV1.FrozenSnapshot,
+            out var intents);
+
+        classified.Should().BeTrue();
+        intents.Should().ContainSingle().Which.Intent.Should().Be("Analysis.ProductionData.ByDevice");
+        using var document = JsonDocument.Parse(intents[0].Query!);
+        document.RootElement.GetProperty("queryText").GetString()
+            .Should().Be("查询今天正极模切05的弹夹、冲切数量和速度");
+    }
+
     [Theory]
     [InlineData("列出工序主数据", "Analysis.Process.List")]
     [InlineData("列出 stable 通道的客户端发布版本", "Analysis.ClientRelease.List")]

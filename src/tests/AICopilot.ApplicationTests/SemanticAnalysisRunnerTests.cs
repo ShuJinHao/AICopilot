@@ -74,7 +74,7 @@ public sealed class SemanticAnalysisRunnerTests
             CancellationToken.None);
 
         result.Status.Should().Be(BranchExecutionStatus.Failed);
-        GetSafeOutput(result).Should().Contain("置信度不足");
+        GetSafeOutput(result).Should().Contain("请确认");
         cloudClient.RequestedPlans.Should().BeEmpty();
     }
 
