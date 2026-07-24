@@ -175,6 +175,7 @@ Cloud AiRead 设备契约：
 - Web 到 HttpApi 的标准生产路径必须是 nginx 同源 `/api/` 反代；HttpApi CORS 默认不开放跨源。确需浏览器直连后端时，只允许配置精确 http/https origin，禁止 `*`、通配子域、带 path/query/fragment 的 origin 或运行时任意放行。
 - macOS Keychain 是本机生产密钥唯一 canonical 来源；仓库只提交无值 schema。现有非 git 私密手册/旧 env 只允许一次性静默迁移且不删除旧文件，标准部署不得回退读取。服务器只消费由部署生成的受限 `.env`。
 - Cloud readonly 连接、AiRead token、模式开关和 readonly role 不得通过 GitHub secrets 加手动 workflow 写入生产。新环境或清空重建只由工作区 `Deploy-FromZero.ps1` 从 Keychain 建立；明确批准的独立基础设施维护只可调用内部 apply/check 脚本并消费服务器受限 `.env`，不得形成第二套 secret 真值或应用重建入口。
+- Cloud/AI 人员管理员账号与 Cloud PostgreSQL 只读技术角色不得混用：人员管理员可以使用纯数字工号，readonly role 使用独立技术名称；canonical schema 的数据库项必须接受生产真实库名 `iiot-db`，不能套用要求字母开头且禁止连字符的角色名校验。
 - 如果当前真实部署根目录、稳定 Runner、Docker Root Dir、基础设施维护目标、工作区入口参数或标准部署用户与模板不同，必须先更新工作区 `deploy/Deploy.ps1`、`deploy/Invoke-WorkspaceDeploy.ps1`、`deploy/profiles/*.json`、项目部署指南/README 和工作区部署总览，再允许继续改脚本或发布。
 - 如果当前 `AICopilot` 与 `Cloud` 共用同一台生产宿主机，必须在工作区总入口明确写出共享宿主机事实、共享标准发布人和两个独立部署根；不得把同机双部署根问题写成两套互不相关的环境。
 - root 应急路径一旦写入 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`；不得留下 root-owned 状态文件后直接收口。

@@ -56,6 +56,8 @@ pwsh ./deploy/Deploy.ps1 -Target AICopilot -Services httpapi,web -DryRun
 3. 用 Keychain 中的真实模型配置执行 seed，并校验受保护密钥格式。
 4. 验证 Cloud OIDC、Cloud readonly 负权限、模型、常驻容器和 HTTP 健康。
 
+人员管理员账号与 Cloud PostgreSQL readonly role 分开配置：Cloud/AI 管理员工号可以是纯数字，readonly role 使用独立技术名称；readonly 数据库固定为 Cloud 当前真实库名 `iiot-db`，并由 canonical schema 原样校验和写入连接串。
+
 每阶段写 checkpoint；失败恢复不得重新清空 Cloud/AI 数据。此入口只验收配置、迁移、播种、权限和健康，不运行普通业务测试、全量、coverage、mutation、duplication 或三端联合质量。
 
 ## 2. 镜像和服务器目录

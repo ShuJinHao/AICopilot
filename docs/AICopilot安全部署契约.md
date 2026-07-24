@@ -66,6 +66,7 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 - 模型、Embedding、endpoint pool API key 必须是 `encv2:` AES-GCM 受保护格式；旧 `encv1:` 只能由 migration worker 迁移重加密，runtime provider 不得长期兼容旧格式或明文。
 - 私有模型 seed 的本机真实值只来自 macOS Keychain canonical schema，并由从零部署生成服务器受限 `.env`；标准流程不读取私密 Markdown 或旧 env。仓库默认使用占位 URL、空 API key 和禁用状态，API key 入库前必须加密为 `encv2:`。
 - Cloud readonly 连接、AiRead token、模式开关和 readonly role 不得通过 GitHub secrets 加手动 workflow 写入生产。新环境或清空重建只由工作区 `Deploy-FromZero.ps1` 从 Keychain 建立；用户明确批准的独立基础设施维护只能调用内部 apply/check 脚本并消费服务器受限 `.env`，不得形成第二套 secret 真值或应用重建入口。
+- Cloud/AI 人员管理员账号与 Cloud PostgreSQL readonly role 是两类身份：人员账号可以是纯数字工号，readonly role 使用独立技术名称；只读数据库配置必须精确指向生产真实库名 `iiot-db`，canonical schema 不得用角色名规则拒绝该数据库名。
 
 ## 7. 镜像、SSH 和 runner
 
