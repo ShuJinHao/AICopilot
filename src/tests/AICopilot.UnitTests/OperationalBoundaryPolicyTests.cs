@@ -8,6 +8,7 @@ public sealed class OperationalBoundaryPolicyTests
 
     [Theory]
     [InlineData("please restart the server")]
+    [InlineData("please update cloud recipe")]
     [InlineData("请重启服务器")]
     [InlineData("请帮我下发参数到 PLC")]
     public void TryBlockControlRequest_ShouldRejectControlMessages(string message)
@@ -34,6 +35,7 @@ public sealed class OperationalBoundaryPolicyTests
     [InlineData("客户端可以跳过 bootstrap 直接用设备名称上传生产数据吗？")]
     [InlineData("配方修改是覆盖还是新建版本？")]
     [InlineData("当前生效配方修改后会覆盖旧版本吗？")]
+    [InlineData("Can I update cloud recipe, and which permission is required?")]
     public void TryBlockControlRequest_ShouldAllowReadOnlyQuestions(string message)
     {
         var blocked = _policy.TryBlockControlRequest(message, out _);

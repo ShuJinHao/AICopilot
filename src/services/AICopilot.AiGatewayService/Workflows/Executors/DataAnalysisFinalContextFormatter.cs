@@ -32,8 +32,13 @@ public static class DataAnalysisFinalContextFormatter
 
     private static readonly string[] InternalFieldFragments =
     [
+        "apikey",
         "connection",
+        "credential",
+        "password",
+        "secret",
         "tablename",
+        "token",
         "viewname",
         "sourcename",
         "databasename"

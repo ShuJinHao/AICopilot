@@ -252,17 +252,17 @@ public sealed class AgentCallerCancellationTests
             new ToolExecutionAuditRecorder(audit),
             null!);
         return new AgentWorkflowPipeline(
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            null!,
-            agentRun,
-            store,
-            serializer,
-            NullLogger<AgentWorkflowPipeline>.Instance);
+            intentRouting: null!,
+            toolsPack: null!,
+            knowledgeRetrieval: null!,
+            dataAnalysis: null!,
+            businessPolicy: null!,
+            contextAggregator: null!,
+            agentBuild: null!,
+            agentRun: agentRun,
+            finalAgentContextStore: store,
+            finalAgentContextSerializer: serializer,
+            logger: NullLogger<AgentWorkflowPipeline>.Instance);
     }
 
     private static FinalAgentContext CreateContext(IRuntimeChatAgent agent)

@@ -88,14 +88,17 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             : new CloudOidcLoginResolution(
                 await LoadBoundUserAsync(profile, binding, now, rejectionAudit, cancellationToken),
                 IsFirstBinding: false,
-                IsBootstrapAdminAdoption: false);
+                IsBootstrapAdminAdoption: false,
+                RejectionProblem: null);
         var user = resolution.User;
 
         if (user is null)
         {
-            return Result.Unauthorized(new ApiProblemDescriptor(
-                AuthProblemCodes.ExternalIdentityConflict,
-                "Cloud 身份与现有 AI 账号存在冲突，已拒绝自动绑定。"));
+            return Result.Unauthorized(
+                resolution.RejectionProblem ??
+                new ApiProblemDescriptor(
+                    AuthProblemCodes.ExternalIdentityConflict,
+                    "Cloud 身份与现有 AI 账号存在冲突，已拒绝自动绑定。"));
         }
 
         if (IdentityGovernanceHelper.IsUserDisabled(user))
@@ -153,6 +156,61 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         var existingUser = await userManager.FindByNameAsync(localUserName);
         if (existingUser is not null)
         {
+            if (IdentityGovernanceHelper.IsUserDisabled(existingUser))
+            {
+                rejectionAudit.Set(CreateRejectedAudit(
+                    "Identity.CloudOidcLocalUserDisabled",
+                    profile,
+                    $"AI 本地用户 {existingUser.UserName} 已禁用，拒绝 Cloud 登录。",
+                    existingUser.Id.ToString(),
+                    existingUser.UserName));
+                return CloudOidcLoginResolution.Rejected(
+                    new ApiProblemDescriptor(
+                        AuthProblemCodes.AccountDisabled,
+                        "AICopilot 本地账号已禁用，请联系 AI 管理员恢复启用。"));
+            }
+
+            var existingUserBinding = await bindingStore.FindByUserProviderAsync(
+                existingUser.Id,
+                ExternalIdentityProviders.Cloud,
+                cancellationToken);
+            if (existingUserBinding is not null)
+            {
+                if (string.Equals(existingUserBinding.TenantId, profile.TenantId, StringComparison.Ordinal) &&
+                    string.Equals(existingUserBinding.ExternalUserId, profile.Subject, StringComparison.Ordinal))
+                {
+                    await bindingStore.UpdateSnapshotAsync(
+                        new UpdateExternalIdentityBindingSnapshotRequest(
+                            existingUserBinding.Id,
+                            profile.EmployeeId,
+                            profile.EmployeeNo,
+                            profile.DisplayName,
+                            profile.DepartmentId,
+                            profile.DepartmentName,
+                            profile.StatusVersion,
+                            profile.AccountEnabled,
+                            profile.EmployeeActive,
+                            now),
+                        cancellationToken);
+                    return new CloudOidcLoginResolution(
+                        existingUser,
+                        IsFirstBinding: false,
+                        IsBootstrapAdminAdoption: false,
+                        RejectionProblem: null);
+                }
+
+                rejectionAudit.Set(CreateRejectedAudit(
+                    "Identity.CloudOidcBindingConflict",
+                    profile,
+                    $"AI 本地用户 {existingUser.UserName} 已绑定其他 Cloud 身份，拒绝覆盖。",
+                    existingUser.Id.ToString(),
+                    existingUser.UserName));
+                return CloudOidcLoginResolution.Rejected(
+                    new ApiProblemDescriptor(
+                        AuthProblemCodes.ExternalIdentityConflict,
+                        "AICopilot 本地账号已绑定其他 Cloud 身份，请联系 AI 管理员处理。"));
+            }
+
             var adoptedUser = await TryAdoptBootstrapAdminAsync(
                 existingUser,
                 profile,
@@ -163,16 +221,34 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 return new CloudOidcLoginResolution(
                     adoptedUser,
                     IsFirstBinding: true,
-                    IsBootstrapAdminAdoption: true);
+                    IsBootstrapAdminAdoption: true,
+                    RejectionProblem: null);
+            }
+
+            if (!await userManager.HasPasswordAsync(existingUser))
+            {
+                rejectionAudit.Set(CreateRejectedAudit(
+                    "Identity.CloudOidcExistingAccountHasNoPassword",
+                    profile,
+                    $"AI 本地用户 {localUserName} 没有可用于确认的本地密码，拒绝绑定。",
+                    existingUser.Id.ToString(),
+                    existingUser.UserName));
+                return CloudOidcLoginResolution.Rejected(
+                    new ApiProblemDescriptor(
+                        AuthProblemCodes.ExternalIdentityConflict,
+                        "AICopilot 本地账号没有可用于确认的密码，请联系 AI 管理员处理。"));
             }
 
             rejectionAudit.Set(CreateRejectedAudit(
-                "Identity.CloudOidcBindingConflict",
+                "Identity.CloudOidcExistingAccountConfirmationRequired",
                 profile,
-                $"Cloud 身份 {profile.Subject} 的本地用户名 {localUserName} 已存在，拒绝自动绑定。",
+                $"Cloud 身份 {profile.Subject} 的本地用户名 {localUserName} 已存在，需要本地密码确认。",
                 existingUser.Id.ToString(),
                 existingUser.UserName));
-            return CloudOidcLoginResolution.RejectedFirstBinding;
+            return CloudOidcLoginResolution.Rejected(
+                new ApiProblemDescriptor(
+                    AuthProblemCodes.ExternalIdentityConfirmationRequired,
+                    "检测到同名的 AICopilot 本地账号，请输入该账号的本地密码完成绑定。"));
         }
 
         if (!await roleManager.RoleExistsAsync(IdentityRoleNames.User))
@@ -217,7 +293,8 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         return new CloudOidcLoginResolution(
             user,
             IsFirstBinding: true,
-            IsBootstrapAdminAdoption: false);
+            IsBootstrapAdminAdoption: false,
+            RejectionProblem: null);
     }
 
     private async Task<ApplicationUser?> TryAdoptBootstrapAdminAsync(
@@ -523,12 +600,23 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     private sealed record CloudOidcLoginResolution(
         ApplicationUser? User,
         bool IsFirstBinding,
-        bool IsBootstrapAdminAdoption)
+        bool IsBootstrapAdminAdoption,
+        ApiProblemDescriptor? RejectionProblem)
     {
         public static CloudOidcLoginResolution RejectedFirstBinding { get; } = new(
             User: null,
             IsFirstBinding: true,
-            IsBootstrapAdminAdoption: false);
+            IsBootstrapAdminAdoption: false,
+            RejectionProblem: null);
+
+        public static CloudOidcLoginResolution Rejected(ApiProblemDescriptor problem)
+        {
+            return new CloudOidcLoginResolution(
+                User: null,
+                IsFirstBinding: true,
+                IsBootstrapAdminAdoption: false,
+                RejectionProblem: problem);
+        }
     }
 
     private sealed class RejectionAuditBuffer

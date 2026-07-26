@@ -1,6 +1,6 @@
 # Agent 工作流与异常契约
 
-本文档约束 AICopilot Agent workflow、Plan/Chat 模式、MCP/Tool/Human-in-the-loop 边界、后端异常和前端错误展示。`docs/AI架构治理清单.md` 仅用于按具体 Rule ID 追溯历史治理状态，不是本契约的默认前置材料。
+本文档约束 AICopilot Agent workflow、Plan/Chat 模式、MCP/Tool/Human-in-the-loop 边界、后端异常、前端错误展示和后端拥有的错误码目录。未完成架构方向见 `docs/AI架构路线图.md`；历史治理状态只通过 Git 追溯。
 
 ## 1. 统一工作流主干
 
@@ -86,7 +86,7 @@ Cloud 只读 Agent 当前正式能力限定为：
 - `code` 与 `traceId` 是大小写不敏感的保留 extension key；descriptor extensions 中的 `Code`/`TRACEID` 等任意大小写变体必须在复制时丢弃，再分别由 `ApiProblemDescriptor.Code` 与当前 `HttpContext.TraceIdentifier` 以唯一 canonical `code`/`traceId` 写入，调用方不能通过 extensions 注入伪值或歧义键。
 - 用户可见文案必须是安全摘要，不能包含 raw exception message、SQL、prompt、token、endpoint、连接串、密码、API key 或内部 provider 细节。
 - `UseCaseExceptionHandler` catch-all 不得把原始 exception 对象交给 logger 形成敏感日志。
-- 新增、删除或重命名错误码时，必须同步更新 `docs/frontend-integration-contract-package-2026-05-17.md` 并运行错误码目录测试。
+- 新增、删除或重命名错误码时，必须同步更新本文第 11 节并运行错误码目录测试。
 - `agent_plan_invalid`、`agent_plan_schema_invalid` 与 `plan_payload_too_large` 的公开 `code/detail/userFacingMessage` 必须由同一共享披露策略固定产生，REST unhandled、普通 `ReturnResult`、SSE exception/Result、AgentEvent 和 queue/DTO 不得从 exception `SafeDetail`、`ApiProblemDescriptor.Detail`、string error 或任何 Plan 可控文本派生用户可见内容。
 - `Result.Errors` 是有序多项序列：出口必须按序选择首个可公开的 Plan descriptor，安全 match 只能携带固定 disclosure 与精确 non-empty `Guid taskId`，不得携带原始 descriptor/extensions。没有 descriptor 时 Plan draft 按固定 `agent_plan_invalid` 处理；只有未知 descriptor 时保留原首项的普通 fallback 语义。
 - SSE `AgentEvent` payload 字段名固定为 `stage/code/detail/recoverable/suggestedAction/metadata`；不得因全局 serializer 默认而输出 PascalCase 变体，也不得为修单一 event 去改全局 JSON 契约。
@@ -178,3 +178,106 @@ rg -n "Log(Critical|Error|Warning|Information|Debug|Trace)\\(\\s*[a-zA-Z_][a-zA-
 
 - 本契约不授权 Cloud 业务写接口，也不替代 CloudPlatform 权限、审计或接口契约。
 - 真实生产日志、前端线上错误和 AgentTask worker 行为仍需发布后通过日志、trace、UI 和任务记录验收。
+
+## 11. 前端错误码目录
+
+本节是后端拥有的前端错误契约。前端必须为每个后端 code 提供明确用户文案。结构化 Chat Error 优先展示 `userFacingMessage`，其次是安全 `detail`，最后才使用 code fallback。
+
+HTTP `ProblemDetails.extensions.code` 与 `traceId` 是保留键；descriptor extension 不能伪造。Plan 完整性错误只允许公开固定 detail/userFacingMessage 和合法 `taskId`，不得泄露内部错误。`AgentEvent` 使用 `stage/code/detail/recoverable/suggestedAction/metadata` 的 camelCase 字段。
+
+### 11.1 Auth codes
+
+| Code | 前端语义 |
+|---|---|
+| `account_disabled` | 账号已禁用 |
+| `session_revoked` | 当前会话已撤销 |
+| `user_missing` | 当前用户不存在 |
+| `missing_permission` | 缺少所需权限 |
+| `invalid_credentials` | 登录凭据无效 |
+| `unauthorized` | 请求未认证 |
+| `cloud_oidc_not_configured` | Cloud OIDC 未配置 |
+| `cloud_oidc_invalid_principal` | Cloud OIDC 身份无效 |
+| `cloud_identity_inactive` | 绑定的 Cloud 身份已失效 |
+| `cloud_identity_unverified` | Cloud 身份未验证 |
+| `external_identity_confirmation_required` | 同名本地账号需要使用本地密码确认绑定 |
+| `external_identity_conflict` | 外部身份与现有绑定冲突 |
+| `last_enabled_admin_required` | 该操作会移除最后一个启用管理员；不得自动重试 |
+
+### 11.2 Application/Agent codes
+
+| Code | 前端语义 |
+|---|---|
+| `request_validation_failed` | 请求在 handler 前校验失败 |
+| `internal_server_error` | 全局异常边界处理的意外错误 |
+| `persistence_commit_outcome_unknown` | 写入可能已提交但无法确认；不得自动重试 |
+| `rate_limit_exceeded` | 超过限流 |
+| `chat_context_expired` | 对话上下文已过期 |
+| `chat_configuration_missing` | 对话运行配置缺失 |
+| `chat_stream_failed` | 对话流失败 |
+| `model_provider_unavailable` | 模型服务不可用或暂时失败 |
+| `model_request_timeout` | 模型请求超时 |
+| `approval_stream_failed` | 审批流失败 |
+| `approval_already_processed` | 审批已处理 |
+| `agent_approval_state_conflict` | 审批状态与耐久 checkpoint 冲突 |
+| `agent_approval_rejected` | 用户已拒绝审批，不得自动继续 |
+| `approval_pending` | 审批等待中 |
+| `capability_not_allowed` | 请求能力不允许 |
+| `control_action_blocked` | 控制或写操作被阻断 |
+| `token_budget_exceeded` | Token 预算已用尽 |
+| `onsite_presence_required` | 需要现场在场证明 |
+| `onsite_presence_expired` | 现场在场证明已过期 |
+| `approval_reconfirmation_required` | 需要重新确认审批 |
+| `tool_not_registered` | Tool 未注册 |
+| `tool_disabled` | Tool 已禁用 |
+| `tool_blocked` | Tool 被策略阻断 |
+| `tool_permission_denied` | 缺少 Tool 权限 |
+| `tool_requires_approval` | Tool 需要审批 |
+| `tool_input_invalid` | Tool 输入无效 |
+| `tool_output_schema_invalid` | Tool 输出不符合封闭 schema/耐久输出契约 |
+| `tool_execution_timeout` | Tool 执行超时 |
+| `cloud_readonly_tool_disabled` | Cloud 只读 Tool 已禁用 |
+| `cloud_readonly_intent_unsupported` | Cloud 只读意图不支持 |
+| `planner_model_unavailable` | Planner 模型不可用 |
+| `planner_tool_catalog_empty` | Planner Tool catalog 为空 |
+| `planner_tool_schema_unsupported` | Planner Tool schema 不支持 |
+| `agent_plan_invalid` | Agent Plan 无效 |
+| `plan_payload_too_large` | canonical Plan v2 超过 UTF-8 字节上限，未持久化 |
+| `evidence_payload_too_large` | inline canonical Evidence 超过字节上限，未接受 |
+| `agent_plan_tool_denied` | Plan 请求了被拒绝的 Tool |
+| `agent_plan_schema_invalid` | Plan schema 无效 |
+| `tool_execution_not_found` | Tool 执行记录不存在 |
+| `artifact_finalized` | Artifact 已完成，不能修改 |
+| `artifact_generation_failed` | Artifact 生成失败 |
+| `workspace_manifest_invalid` | Workspace manifest 无效 |
+| `agent_task_run_in_progress` | AgentTask 已在运行 |
+| `agent_task_retry_not_allowed` | 当前任务不允许重试 |
+| `agent_task_run_lease_expired` | 任务 lease 已过期 |
+| `agent_task_cancellation_requested` | 已请求取消任务 |
+| `agent_task_run_queued` | 任务已入队 |
+| `agent_task_run_queue_not_found` | 队列项不存在 |
+| `agent_task_run_queue_lease_expired` | 队列 lease 已过期 |
+| `agent_task_run_fence_stale` | 任务 fencing token 过期，worker 必须停止写入 |
+| `agent_node_run_fence_stale` | 节点 fencing token 过期，必须对账 |
+| `agent_node_run_state_conflict` | 节点状态迁移冲突 |
+| `agent_run_budget_exceeded` | 封存预算已超限 |
+| `agent_worker_unavailable` | Agent worker 不可用 |
+| `agent_worker_workspace_mismatch` | Worker 与 HttpApi workspace 不一致 |
+| `agent_finalization_state_conflict` | 最终审批或耐久完成状态冲突 |
+| `agent_run_queue_dead_letter_not_allowed` | 不允许 dead-letter 操作 |
+| `agent_run_queue_operation_denied` | 队列操作被拒绝 |
+
+### 11.3 Cloud AiRead codes
+
+| Code | 前端语义 |
+|---|---|
+| `cloud_ai_read_not_configured` | Cloud AiRead 未配置 |
+| `cloud_ai_read_request_blocked` | 请求被 endpoint policy 阻断 |
+| `cloud_ai_read_invalid_request` | 参数超出正式 endpoint 契约 |
+| `cloud_ai_read_unauthorized` | Cloud AiRead 未认证 |
+| `cloud_ai_read_forbidden` | Cloud AiRead 无权限 |
+| `cloud_ai_read_not_found` | Cloud 资源不存在 |
+| `cloud_ai_read_rate_limited` | Cloud AiRead 被限流 |
+| `cloud_ai_read_unavailable` | Cloud AiRead 不可用 |
+| `cloud_ai_read_missing_required_parameter` | 缺少正式接口必填参数 |
+
+Cloud typed GET 的路径、参数、结果 envelope、设备解析和 no-fallback 规则只在[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)维护，本节不复制第二份接口表。

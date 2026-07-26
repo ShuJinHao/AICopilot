@@ -34,7 +34,7 @@ public sealed class ErrorCodeCatalogFilesystemContractTests
             var candidate = Path.Combine(
                 directory.FullName,
                 "docs",
-                "frontend-integration-contract-package-2026-05-17.md");
+                "Agent工作流与异常契约.md");
             if (File.Exists(candidate))
             {
                 return candidate;
@@ -43,6 +43,6 @@ public sealed class ErrorCodeCatalogFilesystemContractTests
             directory = directory.Parent;
         }
 
-        throw new FileNotFoundException("AICopilot frontend integration contract document was not found.");
+        throw new FileNotFoundException("AICopilot agent workflow and error contract document was not found.");
     }
 }

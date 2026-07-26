@@ -2,7 +2,7 @@
 
 > 读取边界：只有 AICopilot 部署实现或具体故障命中本目录时才读取对应章节；普通发布不默认读取历史状态和未命中的旧事务细节。
 
-本目录是 AICopilot 镜像构建和旧事务维护实现目录。新接手日常部署先读工作区根 `deploy/README.md` 和 `deploy/Deploy-Changed.ps1`，再按需查看本文件、仓库根目录的 `AICopilot 项目部署与维护指南.md`、`AGENTS.md` 和 `资料/AICopilot业务规则.md`。
+本文件是 AICopilot 部署的唯一项目级操作入口。新接手日常部署先读工作区根 `deploy/README.md` 和 `deploy/Deploy-Changed.ps1`，再按需查看本文件、仓库 `AGENTS.md`、`docs/AICopilot业务规则.md` 与 `docs/AICopilot安全部署契约.md`。
 
 > 当前状态（2026-07-11）：AICopilot 全量应用已完成真实 Harbor、生产 Runner、PostgreSQL 备份、migration、rollout 与健康检查；自动增量入口的编译门禁、依赖影响测试和生产 SHA 只读 inspect 已通过，但尚未用新的单服务业务变更执行生产发布，因此不得把全量成功冒充增量生产 E2E。
 
@@ -12,7 +12,7 @@
 - 当前生产现场口径：当前标准部署根目录是 `/srv/enterprise-ai/deploy`，稳定日常 Runner 是 `runner/iiot-release-runner.sh`，Runner work root 是 `/data/iiot-platform/runners/aicopilot`，Docker Root Dir 是 `/data/iiot-platform/runtime/docker`；`releases/routine-*` 与备份目录必须保持 non-root 可访问。旧 support files 只在基础设施维护时同步。
 - 当前与 Cloud 共用同一台生产宿主机，但部署根独立；共享宿主机事实、当前标准发布账号和 Cloud 根目录统一以工作区 [`docs/上传部署总览.md`](../../../docs/上传部署总览.md) 为准。AICopilot 当前未因同类权限问题失败，但必须和 Cloud 一样维持 release state / support files 的 non-root owner/mode 门禁。
 
-## 部署口径
+## 工作区标准发布
 
 - 生产环境使用 Docker Compose 单机编排，服务器目录为 `/srv/enterprise-ai/deploy`。
 - 工作区日常标准发布走 `pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot`；入口只接受 clean、已提交的 main，可 push 现有 HEAD但不创建提交或修改 tracked 文件；复用同 SHA 证据，只补受影响 Architecture/Security/DeploymentContract，再按依赖闭包发布受影响镜像。全量、coverage、mutation、duplication 和 CrossProject 不属于部署。

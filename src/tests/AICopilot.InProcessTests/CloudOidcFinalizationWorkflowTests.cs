@@ -67,6 +67,31 @@ public sealed class CloudOidcFinalizationWorkflowTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ShouldRetainExternalSession_OnlyWhenResultMatchesRetentionPolicy()
+    {
+        var signOutCount = 0;
+
+        var result = await CloudOidcFinalizationWorkflow.ExecuteAsync(
+            _ => Task.FromResult<ClaimsPrincipal?>(CreateCloudPrincipal()),
+            "https://cloud.example.com",
+            (_, _) => Task.FromResult<Result<TestLoginResult>>(Result.Unauthorized(
+                new ApiProblemDescriptor(
+                    AuthProblemCodes.ExternalIdentityConfirmationRequired,
+                    "confirmation required"))),
+            _ =>
+            {
+                signOutCount++;
+                return Task.CompletedTask;
+            },
+            retainExternalSession: candidate =>
+                candidate.Errors?.OfType<ApiProblemDescriptor>().Any(problem =>
+                    problem.Code == AuthProblemCodes.ExternalIdentityConfirmationRequired) == true);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        signOutCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ShouldClearExternalSession_WhenFinalizeThrows()
     {
         var signOutCount = 0;

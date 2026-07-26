@@ -26,7 +26,7 @@
 - 唯一数据库执行接口、共享 AST guard 和 governed column inspector：`src/services/AICopilot.Services.Contracts/Contracts/IDatabaseConnector.cs`、`src/infrastructure/AICopilot.Dapper/DapperDatabaseConnector.cs`、`src/infrastructure/AICopilot.Dapper/Security/AstSqlGuardrail.cs`、`src/services/AICopilot.Services.CrossCutting/Sql/SqlAllowlistColumnInspector.cs`。
 - Cloud readonly 授权脚本：`deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql`、`deploy/enterprise-ai/cloud-readonly/check-readonly-grants.sql`。
 - Cloud readonly 授权 preflight：`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh`、`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh`。
-- 关键测试：`AICopilotArchitectureAnalyzerTests` 的 `AIARCH006/AIARCH007`、`ArchitectureBoundaryTests`、`BusinessQueryPipelineTests`、`AgentRuntimeBusinessQueryToolServiceTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`SqlGuardrailTests`、`SemanticSqlGenerationTests`、`CloudAiReadClientContractTests`、`SemanticDefinitionTests`、`SemanticAnalysisRunnerTests`、`DataAnalysisFinalContextFormatterTests`、`AgentSafetyApplicationTests`、`PromptGovernanceTests`、`DeviceLogFollowUpIntentRewriterTests`。已退役的 `CloudReadonlySimulationTests` 与 `TextToSqlReadOnlyTests` 不再是契约入口。
+- 关键测试：`AICopilotArchitectureAnalyzerTests` 的 `AIARCH006/AIARCH007`、`ArchitectureBoundaryTests`、`BusinessQueryPipelineTests`、`AgentRuntimeBusinessQueryToolServiceTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`SqlGuardrailTests`、`SemanticSqlGenerationTests`、`CloudAiReadClientContractTests`、`SemanticDefinitionTests`、`SemanticAnalysisRunnerTests`、`DataAnalysisFinalContextFormatterTests`、`AgentSafetyApplicationTests`、`ToolSafetyAndApprovalIdentityTests.CloudReadOnlyToolSafety_ShouldRejectForbiddenWriteVerbs`、`PromptGovernanceTests`、`DeviceLogFollowUpIntentRewriterTests`。已退役的 `CloudReadonlySimulationTests` 与 `TextToSqlReadOnlyTests` 不再是契约入口。
 
 ### 编译型只读门禁
 
@@ -116,7 +116,7 @@ Cloud AiRead transport 只允许以上八个固定 GET。AICopilot 不提供任�
 - `Analysis.Device.Status` 只调用 `/device-client-states`，以 `softwareStatus` 为 Cloud 权威派生状态，`runtimeStatus` 保留心跳原值，`lastRuntimeHeartbeatAtUtc` 是唯一 freshness 时间。无心跳设备必须返回 `MissingRuntimeHeartbeat` 行；仅 `asOfUtc - lastRuntimeHeartbeatAtUtc > 24h` 为 `RuntimeHeartbeatStale`，恰好 24 小时不 stale；Stale 不得翻译为 Offline/Stopped。零条只表示授权范围内没有匹配设备。
 - `Analysis.Device.Status` 的合法空集不回退，权限/凭据失败不回退；只有统一 plugin 结果为 `Unsupported`/同源 `Unavailable` 时才允许统一 orchestrator 决定同源 Text-to-SQL。Direct DB 设备主数据映射不得连接 `device_logs`，最新日志级别只属于 `Analysis.DeviceLog.*`。
 - `Analysis.Process.List` 只调用 `/processes`，支持正式 `processId/keyword/maxRows`；`processCode/processName` 作为搜索语义规范化为 keyword。`Analysis.Process.Detail` 必须至少携带 `processId/processCode/processName` 之一，`keyword` 只能用于 List，keyword-only Detail 必须在 sealed plan/provider/HTTP 前拒绝。`processId` 必须作为 GUID 精确参数发送，并且直查响应只能有一条、不得截断且返回 `processId` 必须与请求完全一致；非 `processId` 搜索分支必须先形成非空 `processCode/processName` exact filters，再在未截断结果中唯一精确命中。空 exact filters、只有模糊命中、零命中、多命中或截断都必须返回明确边界，不得让 `All(empty)` 变成成功、猜测或选择第一条。
-- `Analysis.ClientRelease.List` 只调用 `/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`。版本、hash、下载地址、发布说明、归档和发布状态只能逐字段使用 Cloud 返回，不能由模型推断、拼接或补默认值。
+- `Analysis.ClientRelease.List` 只调用 `/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`。版本、hash、下载地址、发布说明、归档和发布状态只能逐字段使用 Cloud 返回，不能由模型推断、拼接或补默认值。当前没有 `ClientRelease` 的 governed Text-to-SQL capability profile，因此该能力保持 typed plugin-only，任何结果都不得转入 Text-to-SQL。
 - `Analysis.ProductionData.*` 只调用通用 `/production-records`，允许 `typeKey/processId/deviceId/plcCode/plcName/barcode/result/startTime/endTime/preset/fieldMode/maxRows` 中由 Cloud 正式声明的组合；CP/AP 不新增按工序复制的插件或端点。
 - `Analysis.Device.*`、`Analysis.DeviceLog.*`、`Analysis.Capacity.*`、`Analysis.ProductionData.*`、`Analysis.Process.*` 与 `Analysis.ClientRelease.*` 当前都精确绑定 Cloud；领域能力枚举对应 `ProductionRecord`。不得回退其他数据源。Cloud 空集保持空；模糊条件形成 `NeedClarification`；拒绝形成 `Unauthorized`；仅 `Unsupported`/同源 `Unavailable` 可进入同源 fallback 决策。
 - `scenarioId`、`from`、`to`、`pilotWindowId`、`boundary` 等 AICopilot 内部试点/执行元数据不得透传 Cloud。
@@ -178,6 +178,7 @@ dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj
 dotnet test src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj --filter "BusinessQueryPipelineTests|CloudReadOnlyTextToSqlFallbackRunnerTests|CloudReadOnlyLlmTextToSqlGeneratorTests" --no-restore
 dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "AgentRuntimeBusinessQueryToolServiceTests|SemanticAnalysisRunnerTests" --no-restore
 dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "SqlGuardrailTests|SemanticSqlGenerationTests|CloudAiReadClientContractTests" --no-restore
+dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "CloudReadonlyChatBoundaryTests" --no-restore
 rg -n "CloudAiRead|CloudReadOnly|production-records|PreviousSqlForRepair|CloudReadOnlyGovernedSchema|Simulation|MockOnly" src deploy docs
 ```
 

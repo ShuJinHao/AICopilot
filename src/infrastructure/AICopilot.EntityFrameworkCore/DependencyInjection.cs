@@ -105,6 +105,9 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         builder.Services.AddScoped<IIdentityAuditLogWriter, IdentityAuditLogWriter>();
         builder.Services.AddScoped<IExternalIdentityBindingStore, ExternalIdentityBindingStore>();
+        builder.Services.AddScoped<
+            IExternalIdentityBindingInvariantGuard,
+            PostgresExternalIdentityBindingInvariantGuard>();
         builder.Services.AddScoped<IAuditLogQueryService, AuditLogQueryService>();
         builder.Services.AddScoped<PersistenceCommitEngine>();
         builder.Services.AddScoped<PersistenceCommitScope>();

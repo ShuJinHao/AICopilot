@@ -260,9 +260,23 @@ public sealed class SecurityDeploymentTests
         {
             workflow.Source.Should().Contain("permissions:\n  contents: read", workflow.FileName);
             workflow.Source.Should().Contain("runs-on: [self-hosted, iiot-linux-prod]", workflow.FileName);
-            workflow.Source.Should().Contain("if [ \"$(id -u)\" -eq 0 ]; then", workflow.FileName);
-            workflow.Source.Should().Contain("Self-hosted runner must not run as root.", workflow.FileName);
-            workflow.Source.Should().Contain("check-runner-security-attestation.sh", workflow.FileName);
+            if (workflow.FileName == "aicopilot-routine-request.yml")
+            {
+                workflow.Source.Should().Contain(
+                    "[ \"$(id -un)\" = \"github-runner\" ] && [ \"$(id -u)\" -ne 0 ]",
+                    workflow.FileName);
+                workflow.Source.Should().Contain(
+                    "awk -F= '$1 ~ /^(RUNNER_PROTOCOL|TARGET|INVOCATION_ID|GIT_SHA|RELEASE_TAG|SERVICES|REQUEST_DIGEST|STATUS|FINISHED_AT_UTC)$/ { print }'",
+                    workflow.FileName);
+                workflow.Source.Should().Contain("retention-days: 1", workflow.FileName);
+            }
+            else
+            {
+                workflow.Source.Should().Contain("if [ \"$(id -u)\" -eq 0 ]; then", workflow.FileName);
+                workflow.Source.Should().Contain("Self-hosted runner must not run as root.", workflow.FileName);
+                workflow.Source.Should().Contain("check-runner-security-attestation.sh", workflow.FileName);
+            }
+
             workflow.Source.Should().NotContain("runs-on: ubuntu-latest", workflow.FileName);
             workflow.Source.Should().NotContain("runs-on: windows-latest", workflow.FileName);
             workflow.Source.Should().NotContain("id-token: write", workflow.FileName);
@@ -278,15 +292,14 @@ public sealed class SecurityDeploymentTests
     {
         var solutionRoot = FindSolutionRoot();
         var deployRoot = Path.Combine(solutionRoot, "deploy", "enterprise-ai");
-        var deployGuide = File.ReadAllText(Path.Combine(solutionRoot, "AICopilot 项目部署与维护指南.md"));
         var cloudReadonlyContract = File.ReadAllText(
             Path.Combine(solutionRoot, "docs", "Cloud只读数据分析契约.md"));
         var agentWorkflowContract = File.ReadAllText(
             Path.Combine(solutionRoot, "docs", "Agent工作流与异常契约.md"));
         var securityDeploymentContract = File.ReadAllText(
             Path.Combine(solutionRoot, "docs", "AICopilot安全部署契约.md"));
-        var architectureChecklist = File.ReadAllText(
-            Path.Combine(solutionRoot, "docs", "AI架构治理清单.md"));
+        var architectureRoadmap = File.ReadAllText(
+            Path.Combine(solutionRoot, "docs", "AI架构路线图.md"));
         var agentInstructions = File.ReadAllText(Path.Combine(solutionRoot, "AGENTS.md"));
         var deployReadme = File.ReadAllText(Path.Combine(deployRoot, "README.md"));
         var envTemplate = File.ReadAllText(Path.Combine(deployRoot, ".env.example"));
@@ -323,21 +336,19 @@ public sealed class SecurityDeploymentTests
             "AICopilot.Web",
             "nginx.conf.template"));
 
-        deployGuide.Should().Contain("工作区标准发布");
-        deployGuide.Should().Contain("Docker Hub 不作为生产依赖源");
-        deployGuide.Should().Contain("MCR 也不得作为生产构建的直接依赖源");
-        deployGuide.Should().Contain("`aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口");
-        deployGuide.Should().Contain("单个镜像 build/push 默认 15 分钟超时");
-        deployGuide.Should().Contain("mirror-base-images.sh");
-        deployGuide.Should().Contain("deploy-release.sh");
-        deployGuide.Should().Contain("日常生产发布不得等待这些 workflow");
-        deployGuide.Should().Contain("deploy/enterprise-ai/README.md");
-        deployGuide.Should().NotContain("docs/企业AI首次部署记录");
+        deployReadme.Should().Contain("工作区标准发布");
+        deployReadme.Should().Contain("不从 Docker Hub/MCR 作为生产依赖源直接拉取");
+        deployReadme.Should().Contain("`aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口");
+        deployReadme.Should().Contain("单个镜像 build/push 默认 15 分钟超时");
+        deployReadme.Should().Contain("mirror-base-images.sh");
+        deployReadme.Should().Contain("deploy-release.sh");
+        deployReadme.Should().Contain("日常生产发布不得等待这些 workflow");
+        deployReadme.Should().NotContain("docs/企业AI首次部署记录");
         foreach (var expectedDiagnosticCommand in new[]
                  {
                      "dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --filter \"AIARCH006|AIARCH007_ShouldRequireControllerMetadataAndCloudReadOnlySafetyMetadata\" --no-restore",
                      "dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --filter \"CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables\" --no-restore",
-                     "dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"CloudAiReadClientContractTests\" --no-restore",
+                     "dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"SqlGuardrailTests|SemanticSqlGenerationTests|CloudAiReadClientContractTests\" --no-restore",
                      "dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter \"CloudReadonlyChatBoundaryTests\" --no-restore"
                  })
         {
@@ -359,10 +370,10 @@ public sealed class SecurityDeploymentTests
             "AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests\"");
         securityDeploymentContract.Should().NotContain(
             "AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj --filter \"CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests\"");
-        architectureChecklist.Should().Contain("CloudAiReadClientContractTests");
-        architectureChecklist.Should().Contain("AgentSafetyApplicationTests");
-        architectureChecklist.Should().NotContain("CloudAiReadClientTests");
-        architectureChecklist.Should().NotContain("AiEvalBehaviorGuardrailTests");
+        architectureRoadmap.Should().Contain("CloudAiReadClientContractTests");
+        architectureRoadmap.Should().Contain("AgentSafetyApplicationTests");
+        architectureRoadmap.Should().NotContain("CloudAiReadClientTests");
+        architectureRoadmap.Should().NotContain("AiEvalBehaviorGuardrailTests");
         agentInstructions.Should().Contain(
             "必须用同一项目和 filter 的 `--list-tests` 证明至少命中 1 项");
         agentInstructions.Should().Contain(
@@ -397,14 +408,6 @@ public sealed class SecurityDeploymentTests
         deployReadme.Should().Contain("已批准的基础设施例外");
         deployReadme.Should().Contain("自动运行 `scripts/check-release-security-attestation.sh`");
         deployReadme.Should().Contain("summary 会包含 release security attestation 输出");
-        deployGuide.Should().Contain("./scripts/check-release-security-attestation.sh");
-        deployGuide.Should().Contain("./scripts/check-model-secret-migration.sh");
-        deployGuide.Should().Contain("check-runner-security-attestation.sh");
-        deployGuide.Should().Contain("runner-platform-attestation.template.md");
-        deployGuide.Should().Contain("check-platform-attestation-record.sh --record <filled-attestation.md>");
-        deployGuide.Should().Contain("release-security-attestation");
-        deployGuide.Should().Contain("./deploy-release.sh --validate-only");
-
         envTemplate.Should().Contain("AICOPILOT_PUBLIC_URL=http://aicopilot.internal.example:82");
         envTemplate.Should().Contain("CLOUD_PLATFORM_URL=http://cloud.internal.example:81");
         envTemplate.Should().Contain("POSTGRES_IMAGE=harbor.internal.example:80/enterprise-ai/base-postgres:17.6");
@@ -415,7 +418,7 @@ public sealed class SecurityDeploymentTests
         envTemplate.Should().NotContain("AICOPILOT_BOOTSTRAP_ADMIN_USERNAME=101650");
         envTemplate.Should().Contain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=false");
         deployReadme.Should().Contain("生产模板和 compose fallback 均默认关闭");
-        deployGuide.Should().Contain("生产模板和 compose fallback 默认使用 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=false`");
+        deployReadme.Should().Contain("生产模板和 compose fallback 均默认关闭");
         envTemplate.Should().Contain("AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=false");
         envTemplate.Should().NotContain("10.98.");
         envTemplate.Should().NotContain("CHANGE_ME");

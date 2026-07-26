@@ -13,13 +13,15 @@ internal static class CloudOidcFinalizationWorkflow
         string issuer,
         Func<CloudOidcIdentityProfile, CancellationToken, Task<Result<T>>> finalize,
         Func<CancellationToken, Task> signOut,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<Result<T>, bool>? retainExternalSession = null)
     {
         ArgumentNullException.ThrowIfNull(authenticate);
         ArgumentNullException.ThrowIfNull(finalize);
         ArgumentNullException.ThrowIfNull(signOut);
 
         Exception? primaryException = null;
+        var shouldSignOut = true;
         try
         {
             var principal = await authenticate(cancellationToken);
@@ -35,7 +37,9 @@ internal static class CloudOidcFinalizationWorkflow
                 return Result.Unauthorized(problem!);
             }
 
-            return await finalize(profile!, cancellationToken);
+            var result = await finalize(profile!, cancellationToken);
+            shouldSignOut = retainExternalSession?.Invoke(result) != true;
+            return result;
         }
         catch (Exception exception)
         {
@@ -44,13 +48,16 @@ internal static class CloudOidcFinalizationWorkflow
         }
         finally
         {
-            try
+            if (shouldSignOut)
             {
-                await signOut(CancellationToken.None);
-            }
-            catch (Exception signOutException) when (primaryException is not null)
-            {
-                RecordSignOutFailure(primaryException, signOutException);
+                try
+                {
+                    await signOut(CancellationToken.None);
+                }
+                catch (Exception signOutException) when (primaryException is not null)
+                {
+                    RecordSignOutFailure(primaryException, signOutException);
+                }
             }
         }
     }

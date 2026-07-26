@@ -127,7 +127,7 @@ public static class DependencyInjection
 
         AddScopedComponents(builder.Services,
             typeof(IntentRoutingAgentBuilder),
-            typeof(IntentRoutingExecutor), typeof(KnowledgeRetrievalExecutor),
+            typeof(IntentRoutingExecutor), typeof(ToolsPackExecutor), typeof(KnowledgeRetrievalExecutor),
             typeof(SemanticAnalysisRunner), typeof(BusinessTextToSqlFallbackRunner),
             typeof(DataAnalysisWidgetEmitter), typeof(DataAnalysisAuditRecorder), typeof(ToolExecutionAuditRecorder),
             typeof(DataAnalysisExecutor), typeof(BusinessPolicyExecutor), typeof(ContextAggregatorExecutor),

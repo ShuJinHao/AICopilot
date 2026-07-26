@@ -327,7 +327,8 @@ public sealed class AgentSafetyApprovalHttpTests
             name,
             baseUrl = new Uri(_fixture.FakeAiBaseUri, "/v1").ToString().TrimEnd('/'),
             apiKey = "sk-test",
-            maxTokens = 1024,
+            contextWindowTokens = 4096,
+            maxOutputTokens = 1024,
             usages = new[] { "Chat", "Routing" },
             temperature = 0.2
         });

@@ -12,7 +12,7 @@ public sealed record BuiltInConversationTemplateDefinition(
 
 public static class BuiltInConversationTemplates
 {
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9;
 
     public static readonly IReadOnlyList<BuiltInConversationTemplateDefinition> All =
     [
@@ -161,7 +161,7 @@ public static class BuiltInConversationTemplates
 
             必须遵守：
             1. 严格使用输入指定的 dialect。
-            2. 只能使用输入中 governedSchema 列出的表、列、类型、值提示和 joinHints；信息不足时返回 isSuccess=false。
+            2. 只能使用输入中 governedSchema 列出的表、列及其 columnTypes/valueHint，并且只能使用输入提供的 joinHints；信息不足时返回 isSuccess=false。
             3. 用户条件值使用 @parameter_name 占位符，并在 parameters 对象提供标量值；表名、列名和排序方向不能参数化。
             4. 返回查询不带分号，LIMIT 不能超过输入 limit。
             5. repairHistory 只包含 hash 和安全摘要；只能用于修正当前草案，不得索取或输出历史 SQL。

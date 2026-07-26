@@ -76,16 +76,13 @@ internal sealed class BusinessQueryProviderRegistry(
 
             foreach (var capability in provider.Capabilities)
             {
-                if (!profile.TryResolveCapabilityQueryProfile(
-                        capability,
-                        out var capabilityProfile))
-                {
-                    throw new InvalidOperationException(
-                        $"Business query provider '{provider.ProviderCode}' capability has no matching capability profile.");
-                }
-
+                var blockedFieldFragments = profile.TryResolveCapabilityQueryProfile(
+                    capability,
+                    out var capabilityProfile)
+                    ? capabilityProfile.QuerySecurity.BlockedIdentifierFragments
+                    : profile.QuerySecurity.BlockedIdentifierFragments;
                 var resultContract = provider.ResultContracts[capability];
-                if (capabilityProfile.QuerySecurity.BlockedIdentifierFragments.Any(profileBlocker =>
+                if (blockedFieldFragments.Any(profileBlocker =>
                         !resultContract.BlockedFieldFragments.Contains(
                             profileBlocker,
                             StringComparer.OrdinalIgnoreCase)))

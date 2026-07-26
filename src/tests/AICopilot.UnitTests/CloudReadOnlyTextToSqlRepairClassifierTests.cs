@@ -69,18 +69,20 @@ public sealed class CloudReadOnlyTextToSqlRepairClassifierTests
     {
         var decision = CloudReadOnlyTextToSqlRepairClassifier.Classify(
             CloudReadOnlyTextToSqlFailureStage.Runtime,
-            "42501: permission denied for table mfg_processes; Password=secret");
+            "42501: permission denied for table mfg_processes; Password=secret",
+            StandardBusinessDataSourceProfiles.CloudReadOnly.QuerySecurity);
 
         decision.Code.Should().Be(CloudReadOnlyTextToSqlFailureCode.Forbidden);
         decision.CanRepairSql.Should().BeFalse();
         decision.CanRetry.Should().BeFalse();
-        decision.SafeSummary.Should().Be("CloudReadOnly permission denied for table mfg_processes.");
+        decision.SafeSummary.Should().Be("Readonly permission denied for table mfg_processes.");
         decision.SafeSummary.Should().NotContain("secret");
 
         var disallowed = CloudReadOnlyTextToSqlRepairClassifier.Classify(
             CloudReadOnlyTextToSqlFailureStage.Runtime,
-            "42501: permission denied for table pg_user");
-        disallowed.SafeSummary.Should().Be("CloudReadOnly permission denied.");
+            "42501: permission denied for table pg_user",
+            StandardBusinessDataSourceProfiles.CloudReadOnly.QuerySecurity);
+        disallowed.SafeSummary.Should().Be("Readonly permission denied.");
         disallowed.SafeSummary.Should().NotContain("pg_user");
     }
 

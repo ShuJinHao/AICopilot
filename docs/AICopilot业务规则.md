@@ -5,11 +5,11 @@
 ## 0. 改动收口门禁
 
 - 工作区 `../../docs/总规则.md` 是唯一默认必读入口。进入 AICopilot 实际修改后，只读取本文档与本批模块相关的章节、相关源码和受影响测试；专题契约按边界触发，近期 git/GitHub 历史按回归或故障追溯条件读取。
-- 只有形成长期规则、修复历史回归、处理生产事故或改变部署机制时，才更新 `../docs/改动复盘与规则沉淀.md`；普通业务修改和测试同批调整不写流水。
+- 长期规则直接进入本文或对应专题契约；真实事故只进入工作区 `../../docs/事故/`。禁止新建滚动复盘、阶段总结或日期式治理快照。
 - 形成长期约束时直接写入本文档、专题契约或工作区总规则；项目 `AGENTS.md` 只保留按需路由和少量不可缺失的项目硬边界，不作为第二份详细规则库。
-- 新增、删除或重命名后端错误码时，必须同批更新 `docs/frontend-integration-contract-package-2026-05-17.md`，并运行 `ErrorCodeCatalogTests`，确保前端错误契约不漂移。
+- 新增、删除或重命名后端错误码时，必须同批更新 `Agent工作流与异常契约.md` 的错误码目录，并运行错误码目录测试，确保前端错误契约不漂移。
 - 默认只运行 Architecture/Security 与 owner 映射选出的受影响 Business；全量、coverage、mutation、duplication 和 CrossProject 只在用户明确要求时运行。
-- `资料/` 保留为 AICopilot 业务规则入口；执行复盘和改动沉淀流水统一放在项目 `docs/`。
+- 本文是 AICopilot 业务规则入口；专题契约和唯一架构路线图统一位于项目 `docs/`。
 
 ## 1. 核心职责
 
@@ -62,7 +62,7 @@ Cloud AiRead 设备契约：
 - `deviceCode` 只用于设备查询或解析，`ClientCode` 只用于 Cloud 内部身份/寻址；二者不得作为 `deviceId` 发送，普通用户回答不得展示 Cloud ClientCode。
 - `Analysis.Device.List/Detail` 只表达 `/api/v1/ai/read/devices` 的设备主数据；`Analysis.Device.Status` 只读取 `/api/v1/ai/read/device-client-states` 的 Cloud 权威 `softwareStatus`、运行心跳原值和唯一 freshness 时间。无心跳设备返回 `MissingRuntimeHeartbeat` 行；只有超过 24 小时才是 `RuntimeHeartbeatStale`，恰好 24 小时不 stale，Stale 不得冒充 Offline/Stopped；空集只表示授权范围内无匹配设备。
 - `Analysis.Process.List/Detail` 只读取 `/api/v1/ai/read/processes`；支持 `processId` 精确过滤及 `keyword/processCode/processName` 搜索，详情必须唯一精确命中且搜索结果未截断，`processId` 必须作为正式 GUID 参数发送、不得塞入 keyword，不得回退其它数据源。
-- `Analysis.ClientRelease.List` 的 Cloud business plugin 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐。`Empty`、`NeedClarification`、`Unauthorized` 不 fallback；只有该插件返回 `Unsupported` 或同源 `Unavailable` 时，才允许按统一规则尝试同源 Text-to-SQL，绝不切换来源或进入 Simulation。
+- `Analysis.ClientRelease.List` 的 Cloud business plugin 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐。当前没有 `ClientRelease` 的 governed Text-to-SQL capability profile，因此该能力保持 typed plugin-only；任何结果都不得转入 Text-to-SQL、切换来源或进入 Simulation。
 - AICopilot 的 Cloud AiRead 客户端和 endpoint allowlist 必须逐项覆盖 Cloud `AI只读接口契约.md` 已批准的正式 `GET /api/v1/ai/read/*` 表面；高频 DeviceLog/Capacity/ProductionData 接通不等于全量接口对齐。
 - Cloud AiRead 客户端只保留八个正式 typed GET，不得暴露任意 method/path 传输、可配置 POST allowlist、legacy adapter 或双轨接口；非 GET 必须在发送 HTTP 请求前拒绝。
 - `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName`、弹夹/结果/时间公共字段及 schema 化 `fields`；CP/AP 业务字段为 `plcCode`、`plcName`、`startTime`、`punchingQuantity`、`punchingSpeed`。它不提供 `processName/stationName/deviceCode/ClientCode`，缺失字段保持不存在或空，不得用其他显示字段代填或推断。
@@ -77,6 +77,10 @@ Cloud AiRead 设备契约：
 - AICopilot 保留本地 AI 用户、AI 角色、AI 权限、SecurityStamp、本地禁用、审计和 emergency admin。
 - Cloud role 不直接映射 AI role。
 - AICopilot 不读取 Cloud Cookie、不接收 Cloud 密码、不直连 Cloud 用户表。
+- Cloud 身份首次登录命中同名、启用且尚未绑定其他 Cloud 身份的本地 AI 账号时，不得自动覆盖或创建重名账号；必须在短期 external cookie 有效期内要求用户用该账号的本地密码确认。确认请求只接收密码，本地用户名必须由已验证 Cloud profile 的 `employeeNo -> preferred_username -> sub` 规则推导，不得由浏览器提交。
+- 本地密码确认成功只建立 Cloud identity 与现有 AI 用户的一对一绑定，必须保留该用户已有 AI 角色、权限、SecurityStamp 治理和禁用状态；Cloud role 仍不得映射或覆盖 AI role。密码不得进入 JWT、Pinia、storage、URL、日志或审计。
+- 绑定确认必须在 Identity 事务内锁定并重新核对 `(provider, tenantId, externalUserId)` 与 `(userId, provider)` 两个唯一关系；完全相同的既有绑定幂等复用，任一侧指向其他身份则稳定拒绝且不得覆盖。密码错误允许在原 external cookie 有效期与登录限流内重试，取消、过期、账号禁用、Cloud 身份失效和不可恢复冲突必须清除 external cookie。
+- 同名确认要求、密码拒绝、绑定冲突和确认成功都必须写结构化 Identity 审计，但审计不得记录密码或原始凭据。
 - EdgeClient 不参与 Cloud-AICopilot OIDC 身份对齐。
 
 ## 4. RAG 规则
@@ -207,10 +211,10 @@ Cloud AiRead 设备契约：
 ## 9. 文档入口
 
 - 当前规则入口只保留 `AGENTS.md`、本文档和按边界触发的专题契约；项目复盘与工作区历史记录只供命中追溯条件时定向检索，不是规则入口。
-- `docs/AI架构治理清单.md` 是历史治理状态与 Rule ID 索引，不是默认执行入口。只有当前任务命中具体 `AIARCH`/`AI-SEC` 编号、修复历史回归或需要追溯未关闭风险时，才按编号读取对应条目；不得全文加载，也不得把其中的旧候选、旧数量或旧全量验收口径当成当前门禁。
+- `AI架构路线图.md` 只记录当前未完成架构方向、阶段状态和退出门，不保存历史测试数量、任务流水或 Rule ID 账本；历史实现通过 Git 追溯。
 - 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md`、`docs/Agent工作流与异常契约.md` 和 `docs/DDD聚合根边界.md`；触碰部署、Cloud 只读、Text-to-SQL、Agent workflow、MCP/Tool、异常、前端错误、聚合/repository 或 DB owner 时必须先读对应契约。
 - 只有修改 `src/vues/AICopilot.Web` 时才读取该目录的 `AGENTS.md`；后端、部署和数据查询任务不得顺带加载前端会话/UI 规则。
-- 部署说明只保留 `AICopilot 项目部署与维护指南.md`；工作区 `../../deploy/Deploy-Changed.ps1` 和 `../../deploy/Deploy-FromZero.ps1` 是操作入口，`deploy/enterprise-ai` 仅是被统一入口调用的 AI 内部实现与支持目录。
+- 部署说明只保留 `../deploy/enterprise-ai/README.md`；工作区 `../../deploy/Deploy-Changed.ps1` 和 `../../deploy/Deploy-FromZero.ps1` 是操作入口，`deploy/enterprise-ai` 仅是被统一入口调用的 AI 内部实现与支持目录。
 - 阶段计划、批次验收报告、PR 草案和一次性 acceptance 输出不得继续作为执行入口；有效结论必须沉淀到长期规则或部署指南后再清理。
 - 清理文档时必须先检查引用，避免留下指向已删除阶段文件的脚本、测试或说明。
 - 旧的 Simulation/Real/Sandbox/Pilot 阶段说明只可作为历史材料，不得覆盖当前部署指南和生产验收口径。

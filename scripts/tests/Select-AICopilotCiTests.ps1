@@ -475,7 +475,7 @@ if ($Mode -eq 'Quality') {
             }
             continue
         }
-        if ($file -match '^(?:docs/|资料/|AGENTS\.md$|README(?:\.[^/]+)?$|LICENSE(?:\.[^/]+)?$)') {
+        if ($file -match '^(?:docs/|AGENTS\.md$|README(?:\.[^/]+)?$|LICENSE(?:\.[^/]+)?$)') {
             continue
         }
         if ($file -match '^(?:\.github/workflows/|scripts/tests/)') {

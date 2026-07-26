@@ -23,6 +23,7 @@ public sealed record AgentPlanDraftWorkflowResult(
 
 public class AgentWorkflowPipeline(
     IntentRoutingExecutor intentRouting,
+    ToolsPackExecutor toolsPack,
     KnowledgeRetrievalExecutor knowledgeRetrieval,
     DataAnalysisExecutor dataAnalysis,
     BusinessPolicyExecutor businessPolicy,
@@ -32,18 +33,18 @@ public class AgentWorkflowPipeline(
     IFinalAgentContextStore finalAgentContextStore,
     IFinalAgentContextSerializer finalAgentContextSerializer,
     ILogger<AgentWorkflowPipeline> logger,
-    IAgentTaskChatEvidenceProvider? taskChatEvidenceProvider = null,
-    IBusinessQueryContextStore? businessQueryContextStore = null)
+    IAgentTaskChatEvidenceProvider? taskChatEvidenceProvider = null)
 {
     public async Task<AgentPlanDraftWorkflowResult> RunPlanDraftWorkflowAsync(
         ChatStreamRequest request,
         CancellationToken ct = default)
     {
         var routing = await intentRouting.ExecuteAsync(request, ct);
+        var tools = await DiscoverSafeToolsAsync(routing.Intents, routing.RegistrySnapshot, ct);
         return new AgentPlanDraftWorkflowResult(
             routing.Scene.ToString(),
             routing.Intents,
-            [],
+            tools.Tools ?? [],
             routing.ExecutionMetadata)
         {
             RegistrySnapshot = routing.RegistrySnapshot
@@ -72,16 +73,7 @@ public class AgentWorkflowPipeline(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         IntentRoutingStepResult routing;
-        if (businessQueryContextStore?.TryConfirmPending(
-                request.SessionId,
-                request.Message,
-                out var confirmedBusinessQuery) == true)
-        {
-            routing = CreateServerConfirmedRouting(
-                confirmedBusinessQuery,
-                "server-confirmed-business-query");
-        }
-        else
+        if (!dataAnalysis.TryCreateServerConfirmedRouting(request, out routing))
         {
             routing = await intentRouting.ExecuteAsync(request, ct);
         }
@@ -262,28 +254,6 @@ public class AgentWorkflowPipeline(
         }
     }
 
-    private static IntentRoutingStepResult CreateServerConfirmedRouting(
-        BusinessQueryContext context,
-        string routingNote)
-    {
-        return new IntentRoutingStepResult(
-            [
-                new IntentResult
-                {
-                    Intent = context.SemanticPlan!.Intent,
-                    Query = context.Question,
-                    Confidence = 1,
-                    RoutingNote = routingNote,
-                    BusinessDataSourceExplicitlySelected = true,
-                    ConfirmedBusinessQueryContext = BusinessQueryConfirmation.Complete,
-                    ConfirmedBusinessQuery = context
-                }
-            ],
-            ManufacturingSceneType.FallbackToExistingRouting,
-            ResponseText: null,
-            new ChatExecutionMetadataSnapshot());
-    }
-
     public async IAsyncEnumerable<ChatChunk> ResumeFinalAgentAsync(
         FinalAgentContext agentContext,
         SessionRuntimeSnapshot? session,
@@ -416,7 +386,7 @@ public class AgentWorkflowPipeline(
         var nodeId = $"chat-{branchType.ToString().ToLowerInvariant()}-branch";
         var nodeKind = branchType switch
         {
-            BranchType.BusinessPolicy => "PolicyValidationNode",
+            BranchType.Tools or BranchType.BusinessPolicy => "PolicyValidationNode",
             BranchType.Knowledge => "KnowledgeRetrievalNode",
             BranchType.DataAnalysis => "DeterministicComputeNode",
             _ => "DeterministicComputeNode"
@@ -559,6 +529,7 @@ public class AgentWorkflowPipeline(
     {
         return branchType switch
         {
+            BranchType.Tools => ToolsPackExecutor.IsRelevant(intents, registry),
             BranchType.Knowledge => KnowledgeRetrievalExecutor.IsRelevant(intents, registry),
             BranchType.DataAnalysis => DataAnalysisExecutor.IsRelevant(intents, registry),
             BranchType.BusinessPolicy => businessPolicy.IsRelevant(intents, registry),
@@ -577,11 +548,53 @@ public class AgentWorkflowPipeline(
     {
         return branchType switch
         {
+            BranchType.Tools => DiscoverSafeToolsAsync(intents, registry, ct),
             BranchType.Knowledge => knowledgeRetrieval.ExecuteAsync(intents, registry, ct),
             BranchType.DataAnalysis => dataAnalysis.ExecuteAsync(intents, registry, sink, session, ct),
             BranchType.BusinessPolicy => businessPolicy.ExecuteAsync(intents, message, registry, ct),
             _ => throw new ArgumentOutOfRangeException(nameof(branchType), branchType, "Unknown branch type.")
         };
+    }
+
+    private async Task<BranchResult> DiscoverSafeToolsAsync(
+        List<IntentResult> intents,
+        AgentIntentRegistrySnapshot registry,
+        CancellationToken ct)
+    {
+        var discovered = await toolsPack.DiscoverAsync(intents, registry, ct);
+        if (discovered.Tools is null)
+        {
+            return discovered;
+        }
+
+        var safeTools = discovered.Tools.Where(tool =>
+        {
+            var decision = tool.Kind == AiToolCallKind.Mcp || tool.TargetType == AiToolTargetType.McpServer
+                ? AiToolSafetyPolicy.EvaluateConfiguredMcp(tool)
+                : AiToolSafetyPolicy.EvaluateConfigured(
+                    tool.ReadOnlyDeclared,
+                    tool.McpReadOnlyHint,
+                    tool.McpDestructiveHint,
+                    tool.McpIdempotentHint,
+                    tool.CapabilityKind,
+                    tool.ExternalSystemType,
+                    tool.RiskLevel,
+                    tool.ToolName ?? tool.Name,
+                    tool.Description,
+                    tool.JsonSchema,
+                    tool.ReturnJsonSchema);
+            if (!decision.IsAllowed)
+            {
+                logger.LogWarning(
+                    "Agent workflow excluded unsafe tool {ToolName}. Reasons={Reasons}",
+                    tool.Name,
+                    string.Join("; ", decision.BlockReasons));
+            }
+
+            return decision.IsAllowed;
+        }).ToArray();
+
+        return BranchResult.FromTools(safeTools);
     }
 
 }

@@ -168,16 +168,6 @@ public static class StandardBusinessDataSourceProfiles
         var profiles = CloudCapabilityTables.ToDictionary(
             pair => pair.Key,
             pair => CreateCloudCapabilityQueryProfile(pair.Value));
-        profiles[BusinessDataCapability.ClientRelease] =
-            new BusinessDataCapabilityQueryProfile(
-                SupportsTextToSqlFallback: false,
-                new BusinessQuerySecurityProfile(
-                    CloudReadOnlyGovernedSchema.AllowedTables,
-                    CloudReadOnlyGovernedSchema.AllowedColumns,
-                    CloudReadOnlyGovernedSchema.BlockedFieldFragments.ToHashSet(
-                        StringComparer.OrdinalIgnoreCase),
-                    new HashSet<string>(["public"], StringComparer.OrdinalIgnoreCase)),
-                TextToSql: null);
         return profiles;
     }
 

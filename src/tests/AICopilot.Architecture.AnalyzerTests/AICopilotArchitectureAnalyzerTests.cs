@@ -2866,6 +2866,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
             }
             namespace AICopilot.IdentityService.Commands
             {
+                public sealed record ConfirmExistingCloudOidcAccountCommand : QueryOfString;
                 public sealed record FinalizeCloudOidcLoginCommand : QueryOfString;
                 public sealed record LoginUserCommand : QueryOfString;
             }

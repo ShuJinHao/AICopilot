@@ -1,6 +1,6 @@
 # AICopilot 安全部署契约
 
-本文档是 AICopilot 部署安全的专题契约。项目规则见 `AGENTS.md` 和 `资料/AICopilot业务规则.md`；`docs/AI架构治理清单.md` 只在命中具体 Rule ID 或追溯历史风险时定向读取，不是部署任务的默认前置材料。
+本文档是 AICopilot 部署安全的专题契约。项目规则见 `AGENTS.md` 和 `docs/AICopilot业务规则.md`；架构阶段与剩余退出条件见 `docs/AI架构路线图.md`，它不是生产验收记录。
 
 ## 1. 部署红线
 
@@ -59,7 +59,7 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 
 ## 6. secret 和默认值
 
-- `.env.example`、compose、workflow 默认值、脚本默认值、migration seed、fresh DB seed、滚动复盘和历史诊断记录不得携带真实内网 IP、弱 secret、`CHANGE_ME`、`dummy-key`、默认 `root@` 发布目标或可直接使用的模型 API key。
+- `.env.example`、compose、workflow 默认值、脚本默认值、migration seed、fresh DB seed、权威文档、部署回执和 Git 可见内容不得携带真实内网 IP、弱 secret、`CHANGE_ME`、`dummy-key`、默认 `root@` 发布目标或可直接使用的模型 API key。
 - JWT 配置必须由 `JwtSettings.EnsureValid()` 在 HttpApi 启动时统一校验：Issuer、Audience 非空，SecretKey 至少 64 字符，AccessTokenExpirationMinutes 大于 0；绕过部署脚本直接启动也必须 fail-fast，错误不得回显 secret。默认 access token 有效期保持 30 分钟。
 - 日常发布前 Doctor 必须校验 `.env` 私有权限、Compose 可解析、Docker/non-root、稳定 Runner 和 `releases/routine-*` / backup 目录可写性；模板占位、弱 secret、HTTP-only URL、Cloud OIDC、direct Cloud readonly 和 support 目标深度校验保留在 CI/独立基础设施维护门禁，不能每次重复同步 support。
 - `deploy-release.sh --validate-only` 是不发布的配置校验入口；该模式不得拉镜像、不得执行 Docker Compose、不得改写 release tag，但必须提前暴露 root-owned release state 这类标准 non-root 路径问题。

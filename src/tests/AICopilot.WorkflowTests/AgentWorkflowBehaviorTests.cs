@@ -58,6 +58,17 @@ public sealed class AgentWorkflowBehaviorTests
     }
 
     [Fact]
+    public async Task RunPlanDraftWorkflowAsync_ShouldNotEnterDataAnalysisOrCloudQuery()
+    {
+        var pipeline = AgentWorkflowPipelineFixture.CreatePlanDraftPipeline([]);
+
+        var result = await pipeline.RunPlanDraftWorkflowAsync(
+            new ChatStreamRequest(Guid.NewGuid(), "只生成计划草案"));
+
+        result.Intents.Should().NotBeEmpty();
+    }
+
+    [Fact]
     public void AgentWorkflowTopology_ShouldDeclareParallelFanOutBranches()
     {
         AgentWorkflowTopology.Stages
@@ -74,6 +85,7 @@ public sealed class AgentWorkflowBehaviorTests
             .Select(branch => branch.BranchType)
             .Should()
             .Equal(
+                BranchType.Tools,
                 BranchType.Knowledge,
                 BranchType.DataAnalysis,
                 BranchType.BusinessPolicy);

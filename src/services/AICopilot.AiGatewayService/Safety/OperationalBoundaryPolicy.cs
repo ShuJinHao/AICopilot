@@ -29,6 +29,14 @@ public sealed class ManufacturingOperationalBoundaryPolicy : IOperationalBoundar
         "write to plc",
         "download recipe",
         "push recipe",
+        "create cloud recipe",
+        "update cloud recipe",
+        "modify cloud recipe",
+        "delete cloud recipe",
+        "write to cloud",
+        "update cloud device",
+        "disable cloud device",
+        "enable cloud device",
         "set parameter",
         "change parameter",
         "write parameter",
@@ -119,7 +127,19 @@ public sealed class ManufacturingOperationalBoundaryPolicy : IOperationalBoundar
             "解释",
             "分析",
             "查看",
-            "查询"
+            "查询",
+            "can i",
+            "can you",
+            "how do",
+            "how to",
+            "what",
+            "why",
+            "explain",
+            "analyze",
+            "check",
+            "query",
+            "rule",
+            "permission"
         };
 
         return questionCues.Any(cue => message.Contains(cue, StringComparison.OrdinalIgnoreCase));
@@ -145,7 +165,18 @@ public sealed class ManufacturingOperationalBoundaryPolicy : IOperationalBoundar
             "直接执行",
             "执行一下",
             "让它生效",
-            "让它立即生效"
+            "让它立即生效",
+            "please create",
+            "please update",
+            "please modify",
+            "please delete",
+            "please write",
+            "please disable",
+            "please enable",
+            "go ahead",
+            "do it",
+            "execute",
+            "apply now"
         };
 
         return executionCues.Any(cue => message.Contains(cue, StringComparison.OrdinalIgnoreCase));

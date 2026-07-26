@@ -42,6 +42,17 @@ export const identityService = {
     return await apiClient.postWithCredentials<LoginResponse>('/identity/cloud-oidc/finalize', {})
   },
 
+  async confirmExistingCloudOidcAccount(password: string) {
+    return await apiClient.postWithCredentials<LoginResponse>(
+      '/identity/cloud-oidc/confirm-existing',
+      { password },
+    )
+  },
+
+  async cancelCloudOidcAccountConfirmation() {
+    return await apiClient.postWithCredentials<void>('/identity/cloud-oidc/cancel', {})
+  },
+
   async getCurrentUserProfile() {
     return await apiClient.get<CurrentUserProfile>('/identity/me', undefined, {
       timeoutMs: ROUTE_GUARD_REQUEST_TIMEOUT_MS,

@@ -55,9 +55,12 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/identity/login", "post");
         AssertPath(document, "/api/identity/cloud-oidc/status", "get");
         AssertPath(document, "/api/identity/cloud-oidc/finalize", "post");
+        AssertPath(document, "/api/identity/cloud-oidc/confirm-existing", "post");
+        AssertPath(document, "/api/identity/cloud-oidc/cancel", "post");
         AssertPath(document, "/api/identity/me", "get");
         AssertPath(document, "/api/identity/role/list", "get");
         AssertPath(document, "/api/identity/user/list", "get");
+        AssertPath(document, "/api/system/build-identity", "get");
         AssertPath(document, "/api/data-analysis/business-database/list", "get");
         AssertPath(document, "/api/data-analysis/business-database/authorized", "get");
         AssertPath(document, "/api/data-analysis/business-database/query-readonly", "post");
@@ -90,6 +93,33 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
     }
 
     [Fact]
+    public async Task BuildIdentity_ShouldExposeTheInjectedSourceWithoutAuthentication()
+    {
+        fixture.HttpClient.DefaultRequestHeaders.Authorization = null;
+
+        using var response = await fixture.HttpClient.GetAsync("/api/system/build-identity");
+        response.EnsureSuccessStatusCode();
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        root.GetProperty("schemaVersion").GetString()
+            .Should().Be("aicopilot-build-identity-v1");
+        root.GetProperty("serviceName").GetString()
+            .Should().Be("AICopilot.HttpApi");
+        root.GetProperty("releaseTag").GetString()
+            .Should().Be($"sha-{OpenApiContractFixture.SourceCommit}");
+        root.GetProperty("sourceCommit").GetString()
+            .Should().Be(OpenApiContractFixture.SourceCommit);
+        root.GetProperty("available").GetBoolean().Should().BeTrue();
+        root.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+            "schemaVersion",
+            "serviceName",
+            "releaseTag",
+            "sourceCommit",
+            "available");
+    }
+
+    [Fact]
     public async Task OpenApi_ShouldLockCriticalRequestSchemasAndProblemDetailsResponses()
     {
         using var response = await fixture.HttpClient.GetAsync("/openapi/v1.json");
@@ -103,6 +133,11 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
             "/api/identity/login",
             "post",
             "username",
+            "password");
+        AssertRequestSchemaProperties(
+            document,
+            "/api/identity/cloud-oidc/confirm-existing",
+            "post",
             "password");
         AssertRequestSchemaProperties(
             document,
@@ -410,7 +445,15 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
 
 public sealed class OpenApiContractFixture : AICopilotAppFixture
 {
+    public const string SourceCommit = "0123456789abcdef0123456789abcdef01234567";
+
     protected override bool EnableRagWorker => false;
 
     protected override bool EnableDataWorker => false;
+
+    protected override void ConfigureAdditionalEnvironment()
+    {
+        SetEnvironmentVariable("AICOPILOT_SOURCE_SHA", SourceCommit);
+        SetEnvironmentVariable("AICOPILOT_RELEASE_TAG", $"sha-{SourceCommit}");
+    }
 }

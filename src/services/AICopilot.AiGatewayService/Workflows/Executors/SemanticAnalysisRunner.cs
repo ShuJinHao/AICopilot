@@ -23,6 +23,17 @@ public sealed class SemanticAnalysisRunner(
         "[系统提示]: " + RecipeDataReadBoundaryMarker + "。可以回答配方版本规则问题，但不能查询具体配方、设备配方清单或版本记录。";
     private const double MinimumConfirmedSemanticConfidence = 0.65;
 
+    internal bool TryConfirmPending(
+        Guid taskId,
+        string userMessage,
+        out BusinessQueryContext confirmed)
+    {
+        return businessQueryContextStore.TryConfirmPending(
+            taskId,
+            userMessage,
+            out confirmed);
+    }
+
     internal async Task<AgentAnalysisNodeResult> RunAsync(
         IntentResult intent,
         AgentWorkflowSink? sink,

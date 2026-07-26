@@ -12,6 +12,7 @@ public static class AuthProblemCodes
     public const string CloudOidcInvalidPrincipal = "cloud_oidc_invalid_principal";
     public const string CloudIdentityInactive = "cloud_identity_inactive";
     public const string CloudIdentityUnverified = "cloud_identity_unverified";
+    public const string ExternalIdentityConfirmationRequired = "external_identity_confirmation_required";
     public const string ExternalIdentityConflict = "external_identity_conflict";
     public const string LastEnabledAdminRequired = "last_enabled_admin_required";
 }

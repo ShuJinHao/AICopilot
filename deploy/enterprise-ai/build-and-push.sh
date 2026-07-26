@@ -82,6 +82,12 @@ fi
 if [ "$REQUESTED_ALL" != true ] && [ -z "$REQUESTED_SERVICES" ]; then
   fail "AICopilot local image build requires explicit --services or --all."
 fi
+if [[ ! "$SOURCE_GIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  fail "AICopilot source SHA must be a full lowercase 40-character git commit."
+fi
+if [ "$TAG" != "sha-$SOURCE_GIT_SHA" ]; then
+  fail "AICopilot release tag must match the fixed source SHA: expected sha-$SOURCE_GIT_SHA."
+fi
 
 normalize_services() {
   local services_input="${1:-}"
@@ -318,6 +324,8 @@ publish_dotnet_image() {
       --platform "$PLATFORM" \
       --build-arg RUNTIME_BASE_IMAGE="$DOTNET_RUNTIME_BASE_IMAGE" \
       --build-arg APP_DLL="$app_dll" \
+      --build-arg AICOPILOT_SOURCE_SHA="$SOURCE_GIT_SHA" \
+      --build-arg AICOPILOT_RELEASE_TAG="$TAG" \
       --tag "$IMAGE_PREFIX/$image_name:$TAG" \
       --push \
       --file "$SCRIPT_DIR/Dockerfile.backend-runtime" \
@@ -337,6 +345,8 @@ publish_web_image() {
     docker buildx build \
       --platform "$PLATFORM" \
       --build-arg VITE_CLOUD_PLATFORM_URL="$CLOUD_PLATFORM_URL" \
+      --build-arg VITE_AICOPILOT_SOURCE_SHA="$SOURCE_GIT_SHA" \
+      --build-arg VITE_AICOPILOT_RELEASE_TAG="$TAG" \
       --build-arg NODE_BASE_IMAGE="$NODE_BASE_IMAGE" \
       --build-arg NGINX_BASE_IMAGE="$NGINX_BASE_IMAGE" \
       --tag "$IMAGE_PREFIX/$image_name:$TAG" \

@@ -230,6 +230,11 @@ jobs:
           set -euo pipefail
           image_prefix="${{ steps.registry.outputs.image_prefix }}"
           release_tag="${{ steps.registry.outputs.release_tag }}"
+          source_sha="${GITHUB_SHA}"
+          [ "$release_tag" = "sha-$source_sha" ] || {
+            echo "Release tag does not match the workflow source SHA." >&2
+            exit 64
+          }
 
           publish_dotnet_image() {
             local project_path="$1"
@@ -251,6 +256,8 @@ jobs:
               --platform linux/amd64 \
               --build-arg RUNTIME_BASE_IMAGE="${DOTNET_RUNTIME_BASE_IMAGE:-$image_prefix/base-dotnet-aspnet:10.0-noble}" \
               --build-arg APP_DLL="$app_dll" \
+              --build-arg AICOPILOT_SOURCE_SHA="$source_sha" \
+              --build-arg AICOPILOT_RELEASE_TAG="$release_tag" \
               --tag "$image_prefix/$image_name:$release_tag" \
               --push \
               --file deploy/enterprise-ai/Dockerfile.backend-runtime \
@@ -285,8 +292,13 @@ jobs:
           set -euo pipefail
           image_prefix="${{ steps.registry.outputs.image_prefix }}"
           release_tag="${{ steps.registry.outputs.release_tag }}"
+          source_sha="${GITHUB_SHA}"
           cache_ref="$image_prefix/aicopilot-webui:buildcache"
           cloud_platform_url="${VITE_CLOUD_PLATFORM_URL:-}"
+          [ "$release_tag" = "sha-$source_sha" ] || {
+            echo "Release tag does not match the workflow source SHA." >&2
+            exit 64
+          }
           if [ -z "$cloud_platform_url" ]; then
             echo "VITE_CLOUD_PLATFORM_URL is required for the AICopilot web image build." >&2
             exit 64
@@ -296,6 +308,8 @@ jobs:
             --platform linux/amd64 \
             --push \
             --build-arg "VITE_CLOUD_PLATFORM_URL=$cloud_platform_url" \
+            --build-arg "VITE_AICOPILOT_SOURCE_SHA=$source_sha" \
+            --build-arg "VITE_AICOPILOT_RELEASE_TAG=$release_tag" \
             --build-arg "NODE_BASE_IMAGE=$image_prefix/base-node:22-alpine" \
             --build-arg "NGINX_BASE_IMAGE=$image_prefix/base-nginx:1.27-alpine" \
             --cache-from "type=registry,ref=$cache_ref" \

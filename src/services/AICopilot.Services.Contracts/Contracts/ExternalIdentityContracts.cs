@@ -118,3 +118,13 @@ public interface IExternalIdentityBindingStore
         UpdateExternalIdentityBindingSnapshotRequest request,
         CancellationToken cancellationToken = default);
 }
+
+public interface IExternalIdentityBindingInvariantGuard
+{
+    Task AcquireAsync(
+        string provider,
+        string tenantId,
+        string externalUserId,
+        Guid userId,
+        CancellationToken cancellationToken = default);
+}

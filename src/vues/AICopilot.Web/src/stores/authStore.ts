@@ -28,6 +28,8 @@ export const useAuthStore = defineStore('auth', () => {
   const isSubmitting = ref(false)
   const isCloudOidcStatusLoading = ref(false)
   const isCloudLoginSubmitting = ref(false)
+  const isCloudAccountConfirmationRequired = ref(false)
+  const isCloudAccountConfirming = ref(false)
   const isProfileLoading = ref(false)
   const isProfileLoaded = ref(false)
   const errorMessage = ref('')
@@ -101,7 +103,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   function resolveCloudLoginErrorMessage(error: unknown) {
     const apiError = error as ApiError | undefined
-    const code = getProblemCode(apiError?.details)
+    const problem = getProblemDetails(apiError?.details)
+    const code = problem?.code
 
     switch (code) {
       case 'cloud_oidc_not_configured':
@@ -110,12 +113,16 @@ export const useAuthStore = defineStore('auth', () => {
         return 'Cloud 登录态无效或已过期，请重新登录。'
       case 'cloud_identity_inactive':
         return 'Cloud 账号或员工状态无效，无法登录 AICopilot。'
+      case 'external_identity_confirmation_required':
+        return problem?.detail || '检测到同名的本地 AI 账号，请输入本地密码完成绑定。'
       case 'external_identity_conflict':
-        return 'Cloud 身份与现有 AI 账号存在冲突，请联系 AI 管理员处理。'
+        return problem?.detail || 'Cloud 身份与现有 AI 账号存在冲突，请联系 AI 管理员处理。'
+      case 'invalid_credentials':
+        return problem?.detail || '本地 AI 账号密码无效，请重新输入。'
       case 'account_disabled':
         return 'AICopilot 本地账号已禁用，请联系 AI 管理员。'
       default:
-        return 'Cloud 登录失败，请重新从 Cloud 登录。'
+        return problem?.detail || 'Cloud 登录失败，请重新从 Cloud 登录。'
     }
   }
 
@@ -220,6 +227,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function startCloudOidcLogin() {
     isCloudLoginSubmitting.value = true
+    isCloudAccountConfirmationRequired.value = false
     errorMessage.value = ''
 
     try {
@@ -239,6 +247,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function finalizeCloudOidcLogin() {
     isCloudLoginSubmitting.value = true
+    isCloudAccountConfirmationRequired.value = false
     errorMessage.value = ''
 
     try {
@@ -248,10 +257,49 @@ export const useAuthStore = defineStore('auth', () => {
       await ensureCurrentUser(true)
       return response
     } catch (error) {
+      isCloudAccountConfirmationRequired.value =
+        getProblemCode((error as ApiError | undefined)?.details) ===
+        'external_identity_confirmation_required'
       errorMessage.value = resolveCloudLoginErrorMessage(error)
       throw error
     } finally {
       isCloudLoginSubmitting.value = false
+    }
+  }
+
+  async function confirmExistingCloudOidcAccount(password: string) {
+    isCloudAccountConfirming.value = true
+    errorMessage.value = ''
+
+    try {
+      const response = await identityService.confirmExistingCloudOidcAccount(password)
+      token.value = response.token
+      isCloudAccountConfirmationRequired.value = false
+      persistAuth()
+      await ensureCurrentUser(true)
+      return response
+    } catch (error) {
+      const problemCode = getProblemCode((error as ApiError | undefined)?.details)
+      isCloudAccountConfirmationRequired.value = problemCode === 'invalid_credentials'
+      errorMessage.value = resolveCloudLoginErrorMessage(error)
+      throw error
+    } finally {
+      isCloudAccountConfirming.value = false
+    }
+  }
+
+  async function cancelCloudOidcAccountConfirmation() {
+    isCloudAccountConfirming.value = true
+    errorMessage.value = ''
+
+    try {
+      await identityService.cancelCloudOidcAccountConfirmation()
+      isCloudAccountConfirmationRequired.value = false
+    } catch (error) {
+      errorMessage.value = resolveCloudLoginErrorMessage(error)
+      throw error
+    } finally {
+      isCloudAccountConfirming.value = false
     }
   }
 
@@ -263,6 +311,7 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = ''
     currentUser.value = null
     isProfileLoaded.value = false
+    isCloudAccountConfirmationRequired.value = false
     errorMessage.value = message ?? ''
     persistAuth()
     sessionStorage.removeItem('aicopilot.chat.currentSessionId')
@@ -280,6 +329,8 @@ export const useAuthStore = defineStore('auth', () => {
     isSubmitting,
     isCloudOidcStatusLoading,
     isCloudLoginSubmitting,
+    isCloudAccountConfirmationRequired,
+    isCloudAccountConfirming,
     isProfileLoading,
     isProfileLoaded,
     errorMessage,
@@ -306,6 +357,8 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     startCloudOidcLogin,
     finalizeCloudOidcLogin,
+    confirmExistingCloudOidcAccount,
+    cancelCloudOidcAccountConfirmation,
     resolveUnauthorizedMessage,
     clearAuth
   }

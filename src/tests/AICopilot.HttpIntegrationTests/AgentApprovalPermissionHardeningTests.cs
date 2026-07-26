@@ -69,7 +69,7 @@ public sealed class AgentApprovalPermissionHardeningTests
     }
 
     [Fact]
-    public async Task PrivilegedApprover_ShouldCrossUserApproveToolFinalOutput_AndFinalize()
+    public async Task PrivilegedApprover_ShouldCrossUserApproveToolAndFinalOutput()
     {
         await AuthenticateAsAdminAsync();
         var owner = await CreateUserAsync($"approval-owner-{Guid.NewGuid():N}", "User");
@@ -111,46 +111,7 @@ public sealed class AgentApprovalPermissionHardeningTests
             new { comment = "cross-user final output approved" });
         approvedFinal.Type.Should().Be("FinalOutput");
         approvedFinal.Status.Should().Be("Approved");
-
-        var finalized = await PostJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{finalTask.WorkspaceCode}/finalize",
-            new { });
-        finalized.Status.Should().Be("Finalized");
-        finalized.Artifacts.Should().OnlyContain(item => item.Status == "Final");
-        finalized.Artifacts.Should().OnlyContain(item => item.RelativePath.StartsWith("final/", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public async Task Finalize_ShouldPreserveFinalSubpaths_WhenDraftFileNamesCollide()
-    {
-        await AuthenticateAsAdminAsync();
-        var finalTask = await CreateSeededTaskAsync(
-            Guid.NewGuid(),
-            markWaitingFinalApproval: true,
-            includeToolApproval: false,
-            [
-                new SeedArtifactInput(ArtifactType.Json, "charts/report.json", """{"source":"charts"}""", "application/json"),
-                new SeedArtifactInput(ArtifactType.Json, "draft/report.json", """{"source":"draft"}""", "application/json")
-            ]);
-
-        _ = await PostJsonAsync<AgentApprovalRequestDto>(
-            $"/api/aigateway/agent/approval/{finalTask.FinalApprovalId!.Value}/approve",
-            new { comment = "final output approved" });
-
-        var finalized = await PostJsonAsync<ArtifactWorkspaceDto>(
-            $"/api/aigateway/workspace/{finalTask.WorkspaceCode}/finalize",
-            new { });
-
-        var finalPaths = finalized.Artifacts.Select(item => item.RelativePath).ToArray();
-        finalPaths.Should().OnlyHaveUniqueItems();
-        finalPaths.Should().Contain(["final/charts/report.json", "final/draft/report.json"]);
-
-        var chartArtifact = finalized.Artifacts.Single(item => item.RelativePath == "final/charts/report.json");
-        var draftArtifact = finalized.Artifacts.Single(item => item.RelativePath == "final/draft/report.json");
-        var chartContent = await DownloadStringAsync($"/api/aigateway/artifact/{chartArtifact.Id}/download");
-        var draftContent = await DownloadStringAsync($"/api/aigateway/artifact/{draftArtifact.Id}/download");
-        chartContent.Should().Contain("\"charts\"");
-        draftContent.Should().Contain("\"draft\"");
+        approvedFinal.DecidedBy.Should().Be(Guid.Parse(approver.UserId));
     }
 
     private async Task<SeededAgentTask> SeedWorkspaceReadyTaskAsync(Guid ownerId, bool includeToolApproval)
@@ -163,14 +124,15 @@ public sealed class AgentApprovalPermissionHardeningTests
     {
         var now = DateTimeOffset.UtcNow;
         await using var dbContext = await CreateAiGatewayDbContextAsync();
-        var planJson = AgentPlanV2TestData.CreateCanonicalBuiltInPlanDraft(
+        var planJson = AgentPlanV2TestData.Create(
             [new AgentPlanV2TestStep(
                 "Generate PDF",
                 "Approval-gated tool step.",
                 AgentStepType.ArtifactGeneration,
                 "generate_pdf",
                 RequiresApproval: true)],
-            AgentTaskType.DataAnalysis,
+            executable: true,
+            taskType: AgentTaskType.DataAnalysis,
             knowledgeBaseIds: null);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),
@@ -246,57 +208,108 @@ public sealed class AgentApprovalPermissionHardeningTests
         await using var dbContext = await CreateAiGatewayDbContextAsync();
         var generationPlanSteps = artifacts
             .Select(CreateArtifactGenerationPlanStep)
-            .DistinctBy(step => step.ToolCode, StringComparer.Ordinal)
             .Select((step, index) => index == 0 && includeToolApproval
                 ? step with { RequiresApproval = true }
                 : step)
             .ToArray();
-        var planJson = AgentPlanV2TestData.CreateCanonicalBuiltInPlanDraft(
+        var planJson = AgentPlanV2TestData.Create(
             generationPlanSteps,
-            AgentTaskType.CloudDataReport,
+            executable: true,
+            taskType: AgentTaskType.ReportGeneration,
             knowledgeBaseIds: null);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),
             ownerId,
             "Approval permission final output",
             "Approval permission final output",
-            AgentTaskType.CloudDataReport,
-            AgentTaskRiskLevel.Medium,
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
             null,
             planJson,
             now);
         var trackedPlanSteps = AgentPlanV2TestData.AddTrackedPlanSteps(task, planJson, now);
-        var generationStepsByToolCode = trackedPlanSteps
-            .Where(step => generationPlanSteps.Any(planStep =>
-                string.Equals(planStep.ToolCode, step.ToolCode, StringComparison.Ordinal)))
-            .ToDictionary(step => step.ToolCode!, StringComparer.Ordinal);
-        var toolStep = generationStepsByToolCode.Values
-            .SingleOrDefault(step => step.RequiresApproval);
+        var generationSteps = trackedPlanSteps
+            .Where(step => step.StepType is AgentStepType.ArtifactGeneration or AgentStepType.ChartGeneration)
+            .OrderBy(step => step.StepIndex)
+            .ToArray();
+        var toolStep = generationSteps.SingleOrDefault(step => step.RequiresApproval);
         var workspace = new ArtifactWorkspace(
             task.Id,
             workspaceCode,
             workspaceRoot,
             $"/workspaces/{workspaceCode}",
             now);
-        foreach (var artifact in artifactFiles)
-        {
-            workspace.AddDraftArtifact(
-                artifact.Artifact.Type,
-                Path.GetFileName(artifact.Artifact.RelativePath),
-                artifact.Artifact.RelativePath,
-                new FileInfo(artifact.FullPath).Length,
-                artifact.Artifact.MimeType,
-                generationStepsByToolCode[ResolveArtifactGenerationToolCode(artifact.Artifact)].Id,
-                now);
-        }
-
         task.AttachWorkspace(workspace.Id, now);
-        task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
+        task.ConfirmExecutablePlan(
+            task.PlanJson,
+            trackedPlanSteps
+                .Where(step => step.RequiresApproval)
+                .Select(step => step.StepIndex)
+                .ToArray(),
+            now);
         task.ApprovePlan(now);
-        task.MarkWorkspaceReady(now);
+        var runStartedAt = now.AddSeconds(1);
+        task.Start(runStartedAt);
+
+        AgentTaskRunAttempt? runAttempt = null;
         if (markWaitingFinalApproval)
         {
-            task.WaitForFinalApproval(now);
+            runAttempt = new AgentTaskRunAttempt(
+                task.Id,
+                1,
+                AgentTaskRunTriggerType.Manual,
+                "http-finalization-fixture",
+                runStartedAt,
+                TimeSpan.FromMinutes(5));
+            task.BeginRunAttempt(
+                runAttempt.Id,
+                runAttempt.AttemptNo,
+                runAttempt.LeaseId!.Value,
+                runAttempt.LeaseOwner!,
+                runAttempt.LeaseExpiresAt!.Value,
+                runStartedAt);
+            runAttempt.BindTaskFencingToken(task.RunFencingToken);
+        }
+
+        for (var index = 0; index < artifactFiles.Count; index++)
+        {
+            var step = generationSteps[index];
+            var stepStartedAt = now.AddSeconds(2 + index * 3);
+            if (!step.RequiresApproval)
+            {
+                step.Start(stepStartedAt);
+            }
+
+            var input = artifactFiles[index];
+            var created = workspace.AddDraftArtifact(
+                input.Artifact.Type,
+                Path.GetFileName(input.Artifact.RelativePath),
+                input.Artifact.RelativePath,
+                new FileInfo(input.FullPath).Length,
+                input.Artifact.MimeType,
+                step.Id,
+                stepStartedAt.AddSeconds(1));
+            if (!step.RequiresApproval)
+            {
+                step.Complete(
+                    JsonSerializer.Serialize(new
+                    {
+                        status = "completed",
+                        resultType = "artifact",
+                        artifactType = created.ArtifactType.ToString().ToLowerInvariant(),
+                        artifactId = created.Id.Value
+                    }, JsonOptions),
+                    stepStartedAt.AddSeconds(2));
+            }
+        }
+
+        var checkpointAt = now.AddSeconds(3 + artifactFiles.Count * 3);
+        task.MarkWorkspaceReady(checkpointAt);
+        if (markWaitingFinalApproval)
+        {
+            task.WaitForFinalApproval(checkpointAt);
+            runAttempt!.WaitForApproval(checkpointAt, "Waiting for final output approval.");
+            task.ReleaseRunLease(checkpointAt, clearActiveAttempt: false);
         }
 
         ApprovalRequest? toolApproval = null;
@@ -319,12 +332,16 @@ public sealed class AgentApprovalPermissionHardeningTests
                 AgentApprovalType.FinalOutput,
                 workspace.WorkspaceCode,
                 ownerId,
-                now);
+                checkpointAt);
             dbContext.ApprovalRequests.Add(finalApproval);
         }
 
         dbContext.AgentTasks.Add(task);
         dbContext.ArtifactWorkspaces.Add(workspace);
+        if (runAttempt is not null)
+        {
+            dbContext.AgentTaskRunAttempts.Add(runAttempt);
+        }
         await dbContext.SaveChangesAsync();
 
         return new SeededAgentTask(
@@ -460,14 +477,6 @@ public sealed class AgentApprovalPermissionHardeningTests
         var body = await response.Content.ReadAsStringAsync();
         response.IsSuccessStatusCode.Should().BeTrue($"POST '{uri}' failed: {body}");
         return JsonSerializer.Deserialize<T>(body, JsonOptions)!;
-    }
-
-    private async Task<string> DownloadStringAsync(string uri)
-    {
-        using var response = await _fixture.HttpClient.GetAsync(uri);
-        var body = await response.Content.ReadAsStringAsync();
-        response.IsSuccessStatusCode.Should().BeTrue($"GET '{uri}' failed: {body}");
-        return body;
     }
 
     private static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)

@@ -70,7 +70,9 @@ public sealed class DataSourceAuthorizationTests
             new BusinessDataSourceProfileRegistry(
                 [new SimulationBusinessDataSourceProfileProvider()]));
 
-        var candidates = await readService.ListEnabledAsync(CancellationToken.None);
+        var candidates = await readService.ListSelectableAsync(
+            DataSourceSelectionMode.TextToSql,
+            CancellationToken.None);
 
         candidates.Should().ContainSingle();
         candidates.Single().Name.Should().Be("sim-authorized");

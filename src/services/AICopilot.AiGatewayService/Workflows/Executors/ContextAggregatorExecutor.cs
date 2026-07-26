@@ -56,6 +56,10 @@ public class ContextAggregatorExecutor(ILogger<ContextAggregatorExecutor> logger
 
             switch (result.Type)
             {
+                case BranchType.Tools when result.Tools is not null:
+                    generationContext.Tools = result.Tools;
+                    break;
+
                 case BranchType.Knowledge:
                     generationContext.KnowledgeContext = JoinEvidenceContext(result.Evidence);
                     break;

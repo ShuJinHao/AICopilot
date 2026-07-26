@@ -15,6 +15,7 @@ import {
   UserRound
 } from 'lucide-vue-next'
 import AiTooltip from '@/components/ai/AiTooltip.vue'
+import BuildIdentityFacts from '@/components/layout/BuildIdentityFacts.vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useTheme } from '@/composables/useTheme'
@@ -156,6 +157,7 @@ async function logout() {
         <div class="topbar-copy">
           <span class="topbar-kicker">工业智能工作台</span>
           <strong>{{ t('brand.subtitle') }}</strong>
+          <BuildIdentityFacts />
         </div>
         <div class="topbar-status">
           <span class="status-pill">

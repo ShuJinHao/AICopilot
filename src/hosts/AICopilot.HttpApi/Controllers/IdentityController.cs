@@ -75,9 +75,45 @@ public class IdentityController(
                 new FinalizeCloudOidcLoginCommand(profile),
                 cancellationToken),
             _ => HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme),
-            HttpContext.RequestAborted);
+            HttpContext.RequestAborted,
+            result => HasProblemCode(
+                result,
+                AuthProblemCodes.ExternalIdentityConfirmationRequired));
 
         return ReturnResult(result);
+    }
+
+    [HttpPost("cloud-oidc/confirm-existing")]
+    [AllowAnonymous]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> ConfirmExistingCloudOidcAccount(
+        ConfirmExistingCloudOidcAccountRequest request)
+    {
+        var result = await CloudOidcFinalizationWorkflow.ExecuteAsync(
+            async _ =>
+            {
+                var authentication = await HttpContext.AuthenticateAsync(
+                    CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+                return authentication.Succeeded ? authentication.Principal : null;
+            },
+            cloudOidcOptions.Value.Issuer,
+            (profile, cancellationToken) => Sender.Send(
+                new ConfirmExistingCloudOidcAccountCommand(profile, request.Password),
+                cancellationToken),
+            _ => HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme),
+            HttpContext.RequestAborted,
+            result => HasProblemCode(result, AuthProblemCodes.InvalidCredentials));
+
+        return ReturnResult(result);
+    }
+
+    [HttpPost("cloud-oidc/cancel")]
+    [AllowAnonymous]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> CancelCloudOidcAccountConfirmation()
+    {
+        await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+        return NoContent();
     }
 
     [Authorize]
@@ -192,5 +228,12 @@ public class IdentityController(
     {
         return cloudOidcOptions.Value.IsConfigured()
             && await authenticationSchemeProvider.GetSchemeAsync(CloudOidcAuthenticationDefaults.AuthenticationScheme) is not null;
+    }
+
+    private static bool HasProblemCode<T>(Result<T> result, string problemCode)
+    {
+        return result.Errors?
+            .OfType<ApiProblemDescriptor>()
+            .Any(problem => string.Equals(problem.Code, problemCode, StringComparison.Ordinal)) == true;
     }
 }

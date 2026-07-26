@@ -51,7 +51,7 @@ public sealed class CloudOidcLoginTests
     }
 
     [Fact]
-    public async Task FinalizeCloudOidcLogin_ShouldReject_WhenEmployeeNoConflictsWithExistingLocalUser()
+    public async Task FinalizeCloudOidcLogin_ShouldRequirePasswordConfirmation_WhenEnabledSameNameLocalUserExists()
     {
         var existingUser = new ApplicationUser
         {
@@ -60,6 +60,7 @@ public sealed class CloudOidcLoginTests
             SecurityStamp = Guid.NewGuid().ToString("N")
         };
         var userManager = new InMemoryUserManager(existingUser);
+        userManager.SetPassword(existingUser, "Local-Password-1!");
         var handler = CreateHandler(
             userManager,
             new InMemoryRoleManager(IdentityRoleNames.User),
@@ -70,8 +71,118 @@ public sealed class CloudOidcLoginTests
         var result = await handler.Handle(new FinalizeCloudOidcLoginCommand(CreateProfile()), CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Unauthorized);
-        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should().Be(AuthProblemCodes.ExternalIdentityConflict);
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should()
+            .Be(AuthProblemCodes.ExternalIdentityConfirmationRequired);
         userManager.StoredUsers.Should().ContainSingle(user => user.Id == existingUser.Id);
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldBindWithLocalPassword_AndPreserveLocalRoles()
+    {
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "E0001",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingUser);
+        userManager.SetPassword(existingUser, "Local-Password-1!");
+        await userManager.AddToRoleAsync(existingUser, IdentityRoleNames.Admin);
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var tokenGenerator = new RecordingJwtTokenGenerator();
+        var handler = CreateConfirmHandler(
+            userManager,
+            bindingStore,
+            auditWriter,
+            tokenGenerator);
+
+        var result = await handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(CreateProfile(), "Local-Password-1!"),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        result.Value!.UserName.Should().Be("E0001");
+        bindingStore.Bindings.Should().ContainSingle(binding =>
+            binding.UserId == existingUser.Id &&
+            binding.ExternalUserId == "cloud-user-1");
+        tokenGenerator.LastUser!.Roles.Should().BeEquivalentTo(IdentityRoleNames.Admin);
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudOidcExistingAccountConfirmed" &&
+            request.Result == AuditResults.Succeeded);
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldRetainNoBinding_WhenPasswordIsInvalid()
+    {
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "E0001",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingUser);
+        userManager.SetPassword(existingUser, "Local-Password-1!");
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var handler = CreateConfirmHandler(
+            userManager,
+            bindingStore,
+            auditWriter,
+            new RecordingJwtTokenGenerator());
+
+        var result = await handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(CreateProfile(), "wrong-password"),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should()
+            .Be(AuthProblemCodes.InvalidCredentials);
+        bindingStore.Bindings.Should().BeEmpty();
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudOidcExistingAccountPasswordRejected" &&
+            request.Result == AuditResults.Rejected);
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldReuseExactBindingIdempotently()
+    {
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "E0001",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingUser);
+        userManager.SetPassword(existingUser, "Local-Password-1!");
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        await bindingStore.CreateAsync(new CreateExternalIdentityBindingRequest(
+            existingUser.Id,
+            ExternalIdentityProviders.Cloud,
+            CloudOidcIdentityProfile.DefaultTenantId,
+            "cloud-user-1",
+            "employee-1",
+            "E0001",
+            "张三",
+            "D001",
+            "制造一部",
+            "old-version",
+            AccountEnabledSnapshot: true,
+            EmployeeActiveSnapshot: true,
+            DateTime.UtcNow));
+        var handler = CreateConfirmHandler(
+            userManager,
+            bindingStore,
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator());
+
+        var result = await handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(CreateProfile(), "Local-Password-1!"),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        bindingStore.Bindings.Should().ContainSingle();
+        bindingStore.Bindings.Single().StatusVersion.Should().Be("v1");
     }
 
     [Fact]
@@ -491,6 +602,22 @@ public sealed class CloudOidcLoginTests
             transactionService ?? new InlineTransactionalExecutionService());
     }
 
+    private static ConfirmExistingCloudOidcAccountCommandHandler CreateConfirmHandler(
+        InMemoryUserManager userManager,
+        InMemoryExternalIdentityBindingStore bindingStore,
+        InMemoryIdentityAuditLogWriter auditWriter,
+        RecordingJwtTokenGenerator tokenGenerator,
+        InlineTransactionalExecutionService? transactionService = null)
+    {
+        return new ConfirmExistingCloudOidcAccountCommandHandler(
+            userManager,
+            bindingStore,
+            new NoOpExternalIdentityBindingInvariantGuard(),
+            auditWriter,
+            tokenGenerator,
+            transactionService ?? new InlineTransactionalExecutionService());
+    }
+
     private static CloudIdentityStatusValidator CreateStatusValidator(
         InMemoryUserManager userManager,
         InMemoryExternalIdentityBindingStore bindingStore,
@@ -781,6 +908,20 @@ public sealed class CloudOidcLoginTests
         }
     }
 
+    private sealed class NoOpExternalIdentityBindingInvariantGuard
+        : IExternalIdentityBindingInvariantGuard
+    {
+        public Task AcquireAsync(
+            string provider,
+            string tenantId,
+            string externalUserId,
+            Guid userId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class InMemoryUserManager : UserManager<ApplicationUser>
     {
         private readonly Dictionary<Guid, ApplicationUser> _users = [];
@@ -805,6 +946,11 @@ public sealed class CloudOidcLoginTests
         }
 
         public IReadOnlyCollection<ApplicationUser> StoredUsers => _users.Values;
+
+        public void SetPassword(ApplicationUser user, string password)
+        {
+            user.PasswordHash = PasswordHasher.HashPassword(user, password);
+        }
 
         public IReadOnlyCollection<string> GetAssignedRoles(string userName)
         {
@@ -864,6 +1010,22 @@ public sealed class CloudOidcLoginTests
         {
             user.SecurityStamp = Guid.NewGuid().ToString("N");
             return Task.FromResult(IdentityResult.Success);
+        }
+
+        public override Task<bool> HasPasswordAsync(ApplicationUser user)
+        {
+            return Task.FromResult(!string.IsNullOrWhiteSpace(user.PasswordHash));
+        }
+
+        public override Task<bool> CheckPasswordAsync(ApplicationUser user, string password)
+        {
+            if (string.IsNullOrWhiteSpace(user.PasswordHash))
+            {
+                return Task.FromResult(false);
+            }
+
+            var verification = PasswordHasher.VerifyHashedPassword(user, user.PasswordHash, password);
+            return Task.FromResult(verification != PasswordVerificationResult.Failed);
         }
     }
 

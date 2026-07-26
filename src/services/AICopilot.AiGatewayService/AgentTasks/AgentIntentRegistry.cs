@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AICopilot.AiGatewayService.Models;
+using AICopilot.AiGatewayService.Safety;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
@@ -487,6 +488,14 @@ internal sealed class AgentIntentRegistryProjector
     private static readonly IReadOnlySet<string> TimeRangeProperties =
         new HashSet<string>(["start", "end", "fromUtc", "toUtc", "timeZone"], StringComparer.OrdinalIgnoreCase);
 
+    private readonly IOperationalBoundaryPolicy operationalBoundaryPolicy;
+
+    public AgentIntentRegistryProjector(IOperationalBoundaryPolicy? operationalBoundaryPolicy = null)
+    {
+        this.operationalBoundaryPolicy =
+            operationalBoundaryPolicy ?? new ManufacturingOperationalBoundaryPolicy();
+    }
+
     internal static bool IsAllowedPredicateField(string intentCode, string fieldCode)
     {
         return CloudAiReadSemanticSchemaRegistry.IsAllowedField(intentCode, fieldCode);
@@ -560,7 +569,7 @@ internal sealed class AgentIntentRegistryProjector
         return Result.Success<IReadOnlyCollection<AgentIntentCandidateDocument>>(merged);
     }
 
-    private static Result<AgentIntentCandidateDocument> ProjectOne(
+    private Result<AgentIntentCandidateDocument> ProjectOne(
         IntentResult result,
         AgentIntentRegistryContext context)
     {
@@ -580,6 +589,15 @@ internal sealed class AgentIntentRegistryProjector
             return Result.Failure(new ApiProblemDescriptor(
                 AppProblemCodes.ControlActionBlocked,
                 "Intent routing requested a Cloud mutation or PLC/control action; Plan v2 compilation is blocked."));
+        }
+
+        if (result.Query is { } naturalLanguageQuery &&
+            IsNaturalLanguageQuery(naturalLanguageQuery) &&
+            operationalBoundaryPolicy.TryBlockControlRequest(naturalLanguageQuery, out var boundaryDecision))
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                boundaryDecision.Code,
+                boundaryDecision.Detail));
         }
 
         if (CloudReadonlyAgentTextGuard.ContainsUnsafePersistedPayload(result.Query))
@@ -716,6 +734,10 @@ internal sealed class AgentIntentRegistryProjector
                normalized.Contains("device.disable", StringComparison.Ordinal) ||
                normalized.Contains("control", StringComparison.Ordinal);
     }
+
+    private static bool IsNaturalLanguageQuery(string? query) =>
+        !string.IsNullOrWhiteSpace(query) &&
+        !query.TrimStart().StartsWith('{');
 
     private static AgentCapabilityGapDocument? ResolveCapabilityGap(
         AgentIntentRegistryDescriptor descriptor,

@@ -9,6 +9,8 @@ const identityServiceMock = vi.hoisted(() => ({
   getCloudOidcStatus: vi.fn(),
   getCloudOidcChallengeUrl: vi.fn(),
   finalizeCloudOidcLogin: vi.fn(),
+  confirmExistingCloudOidcAccount: vi.fn(),
+  cancelCloudOidcAccountConfirmation: vi.fn(),
   getCurrentUserProfile: vi.fn()
 }))
 
@@ -102,5 +104,50 @@ describe('authStore', () => {
 
     expect(store.errorMessage).toBe('无法获取 Cloud 登录状态，请稍后重试或使用本地 AI 账号登录。')
     expect(identityServiceMock.getCloudOidcChallengeUrl).not.toHaveBeenCalled()
+  })
+
+  it('exposes the existing-account confirmation state from the backend problem contract', async () => {
+    const error = new ApiError('API Error: 401', 401, {
+      code: 'external_identity_confirmation_required',
+      detail: '请输入本地 AI 账号密码完成绑定。'
+    })
+    identityServiceMock.finalizeCloudOidcLogin.mockRejectedValue(error)
+    const store = useAuthStore()
+
+    await expect(store.finalizeCloudOidcLogin()).rejects.toBe(error)
+
+    expect(store.isCloudAccountConfirmationRequired).toBe(true)
+    expect(store.errorMessage).toBe('请输入本地 AI 账号密码完成绑定。')
+  })
+
+  it('keeps confirmation available after a rejected password without persisting the password', async () => {
+    const error = new ApiError('API Error: 401', 401, {
+      code: 'invalid_credentials',
+      detail: '本地 AI 账号密码无效，请重新输入。'
+    })
+    identityServiceMock.confirmExistingCloudOidcAccount.mockRejectedValue(error)
+    const store = useAuthStore()
+
+    await expect(store.confirmExistingCloudOidcAccount('Local-Password-1!')).rejects.toBe(error)
+
+    expect(identityServiceMock.confirmExistingCloudOidcAccount).toHaveBeenCalledWith('Local-Password-1!')
+    expect(store.isCloudAccountConfirmationRequired).toBe(true)
+    expect(store.errorMessage).toBe('本地 AI 账号密码无效，请重新输入。')
+    expect(Object.values(sessionStorage)).not.toContain('Local-Password-1!')
+    expect(JSON.stringify(store.$state)).not.toContain('Local-Password-1!')
+  })
+
+  it('cancels the pending Cloud account confirmation and clears its state', async () => {
+    identityServiceMock.finalizeCloudOidcLogin.mockRejectedValue(new ApiError('API Error: 401', 401, {
+      code: 'external_identity_confirmation_required'
+    }))
+    identityServiceMock.cancelCloudOidcAccountConfirmation.mockResolvedValue(undefined)
+    const store = useAuthStore()
+    await expect(store.finalizeCloudOidcLogin()).rejects.toBeInstanceOf(ApiError)
+
+    await store.cancelCloudOidcAccountConfirmation()
+
+    expect(identityServiceMock.cancelCloudOidcAccountConfirmation).toHaveBeenCalledOnce()
+    expect(store.isCloudAccountConfirmationRequired).toBe(false)
   })
 })

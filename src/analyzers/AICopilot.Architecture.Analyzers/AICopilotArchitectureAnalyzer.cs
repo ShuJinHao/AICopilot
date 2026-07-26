@@ -58,6 +58,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     private static readonly ImmutableHashSet<string> ExplicitPublicRequestNames =
         ImmutableHashSet.Create(
             StringComparer.Ordinal,
+            "AICopilot.IdentityService.Commands.ConfirmExistingCloudOidcAccountCommand",
             "AICopilot.IdentityService.Commands.FinalizeCloudOidcLoginCommand",
             "AICopilot.IdentityService.Commands.LoginUserCommand",
             "AICopilot.IdentityService.Queries.GetCurrentUserProfileQuery",

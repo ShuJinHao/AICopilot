@@ -8,11 +8,16 @@ WORKDIR /app
 COPY --chown=app:app . .
 
 ARG APP_DLL
+ARG AICOPILOT_SOURCE_SHA
+ARG AICOPILOT_RELEASE_TAG
 RUN test -n "${APP_DLL}" \
     && test -f "${APP_DLL}" \
+    && test "${AICOPILOT_RELEASE_TAG}" = "sha-${AICOPILOT_SOURCE_SHA}" \
     && ln -sf "${APP_DLL}" AICopilot.App.dll
 
-ENV DOTNET_RUNNING_IN_CONTAINER=true \
+ENV AICOPILOT_SOURCE_SHA=${AICOPILOT_SOURCE_SHA} \
+    AICOPILOT_RELEASE_TAG=${AICOPILOT_RELEASE_TAG} \
+    DOTNET_RUNNING_IN_CONTAINER=true \
     TZ=Asia/Shanghai
 
 ENTRYPOINT ["dotnet", "AICopilot.App.dll"]

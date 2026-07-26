@@ -1157,6 +1157,40 @@ public sealed class AgentPlanContractV2Tests
     }
 
     [Fact]
+    public void IntentRegistryProjector_ShouldAllowReadonlyCloudMutationQuestion()
+    {
+        var result = new AgentIntentRegistryProjector().Project(
+            [
+                new IntentResult
+                {
+                    Intent = "General.Chat",
+                    Confidence = 0.9,
+                    Query = "Can I update cloud recipe, and which permission is required?"
+                }
+            ],
+            CreateRegistryContext());
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IntentRegistryProjector_ShouldNotScanTypedFilterValuesAsControlRequests()
+    {
+        var result = new AgentIntentRegistryProjector().Project(
+            [
+                new IntentResult
+                {
+                    Intent = "Analysis.Device.List",
+                    Confidence = 0.9,
+                    Query = """{"queryText":"please update cloud recipe","filters":[]}"""
+                }
+            ],
+            CreateRegistryContext());
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
     public void IntentRegistry_ShouldHaveVersionedDigest()
     {
         AgentIntentRegistryV1.RegistryVersion.Should().Be("intent-registry:v1");

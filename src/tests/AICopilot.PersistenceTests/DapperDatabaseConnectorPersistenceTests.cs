@@ -20,7 +20,13 @@ public sealed class DapperDatabaseConnectorPersistenceTests(PostgresPersistenceF
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "CREATE TABLE samples(id integer PRIMARY KEY); INSERT INTO samples VALUES (1), (2), (3), (4);";
+            command.CommandText =
+                """
+                CREATE TABLE samples(id integer PRIMARY KEY);
+                INSERT INTO samples VALUES (1), (2), (3), (4);
+                CREATE VIEW readonly_transaction_state AS
+                    SELECT current_setting('transaction_read_only') AS read_only;
+                """;
             await command.ExecuteNonQueryAsync();
         }
 
@@ -41,8 +47,8 @@ public sealed class DapperDatabaseConnectorPersistenceTests(PostgresPersistenceF
 
         var transactionMode = await connector.ExecuteQueryWithMetadataAsync(
             source,
-            "SELECT current_setting('transaction_read_only') AS read_only FROM public.samples LIMIT 1",
-            securityProfile,
+            "SELECT read_only FROM public.readonly_transaction_state LIMIT 1",
+            CreateProfile("readonly_transaction_state", "read_only"),
             options: new DatabaseQueryOptions(MaxRows: 1));
         var bounded = await connector.ExecuteQueryWithMetadataAsync(
             source,

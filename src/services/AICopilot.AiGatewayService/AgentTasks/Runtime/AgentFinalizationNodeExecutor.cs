@@ -110,10 +110,12 @@ internal sealed class AgentFinalizationNodeExecutor(
             staged.Add((
                 artifact,
                 sourcePath,
-                new ArtifactFileSetWriteRequest(
-                    $"{artifact.Id.Value:N}/{Path.GetFileName(sourcePath)}",
-                    content,
-                    artifact.MimeType)));
+                CreateFinalStageWriteRequest(sourcePath, content, artifact.MimeType)));
+        }
+
+        if (HasCaseInsensitivePathCollision(staged.Select(item => item.Write.RelativePath)))
+        {
+            return Conflict("Final artifact paths conflict after canonical path normalization.");
         }
 
         if (staged.Count > nodeClaim.NodeRun.ReservedArtifactCount ||
@@ -168,7 +170,7 @@ internal sealed class AgentFinalizationNodeExecutor(
         });
         var bindings = staged.Select(item =>
         {
-            var finalPath = $"{stage.PublishedReference}/{item.Artifact.Id.Value:N}/{Path.GetFileName(item.SourcePath)}";
+            var finalPath = $"{stage.PublishedReference}/{item.Write.RelativePath}";
             var published = stage.Files.Single(file => string.Equals(
                 file.RelativePath,
                 finalPath,
@@ -269,6 +271,23 @@ internal sealed class AgentFinalizationNodeExecutor(
             finalStep,
             cancellationToken);
         return Result.Success(new AgentFinalizationNodeExecutionResult(stage, durableOutputJson));
+    }
+
+    internal static ArtifactFileSetWriteRequest CreateFinalStageWriteRequest(
+        string sourcePath,
+        byte[] content,
+        string mimeType)
+    {
+        return new ArtifactFileSetWriteRequest(
+            ArtifactPathGuard.NormalizeRelativePath(sourcePath),
+            content,
+            mimeType);
+    }
+
+    internal static bool HasCaseInsensitivePathCollision(IEnumerable<string> relativePaths)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return relativePaths.Any(path => !seen.Add(ArtifactPathGuard.NormalizeRelativePath(path)));
     }
 
     private async Task StageProjectionsBestEffortAsync(

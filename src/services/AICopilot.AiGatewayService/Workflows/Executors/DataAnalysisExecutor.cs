@@ -2,6 +2,7 @@ using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.AgentTasks;
 using System.Text;
 using AICopilot.AiGatewayService.Models;
+using AICopilot.AiGatewayService.Safety;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.SharedKernel.Result;
@@ -24,6 +25,38 @@ public class DataAnalysisExecutor(
         AgentWorkflowIntentSelector.Any(
             intents, registry, 0.6, null,
             AgentIntentClass.CloudOnly, AgentIntentClass.GovernedExploration, AgentIntentClass.KnownButUnavailable);
+
+    internal bool TryCreateServerConfirmedRouting(
+        ChatStreamRequest request,
+        out IntentRoutingStepResult routing)
+    {
+        if (!semanticRunner.TryConfirmPending(
+                request.SessionId,
+                request.Message,
+                out var confirmedBusinessQuery))
+        {
+            routing = null!;
+            return false;
+        }
+
+        routing = new IntentRoutingStepResult(
+            [
+                new IntentResult
+                {
+                    Intent = confirmedBusinessQuery.SemanticPlan!.Intent,
+                    Query = confirmedBusinessQuery.Question,
+                    Confidence = 1,
+                    RoutingNote = "server-confirmed-business-query",
+                    BusinessDataSourceExplicitlySelected = true,
+                    ConfirmedBusinessQueryContext = BusinessQueryConfirmation.Complete,
+                    ConfirmedBusinessQuery = confirmedBusinessQuery
+                }
+            ],
+            ManufacturingSceneType.FallbackToExistingRouting,
+            ResponseText: null,
+            new ChatExecutionMetadataSnapshot());
+        return true;
+    }
 
     internal async Task<BranchResult> ExecuteAsync(
         List<IntentResult> intentResults,

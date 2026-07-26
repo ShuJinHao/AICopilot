@@ -196,34 +196,86 @@ public sealed class SemanticAnalysisRunnerTests
             @"确认查询 (?<token>[0-9a-f]{32})",
             RegexOptions.CultureInvariant).Groups["token"].Value;
         token.Should().HaveLength(32);
-        contextStore.TryConfirmPending(
-                session.Id,
-                $"确认查询 {token}",
-                out var confirmed)
+        var dataAnalysis = new DataAnalysisExecutor(
+            null!,
+            runner,
+            NullLogger<DataAnalysisExecutor>.Instance);
+
+        dataAnalysis.TryCreateServerConfirmedRouting(
+                new ChatStreamRequest(session.Id, $"确认 {token}"),
+                out _)
+            .Should().BeFalse("only the exact governed confirmation phrase may consume the challenge");
+        dataAnalysis.TryCreateServerConfirmedRouting(
+                new ChatStreamRequest(session.Id, $"确认查询 {token}"),
+                out var confirmedRouting)
             .Should().BeTrue();
+        var confirmedIntent = confirmedRouting.Intents.Should().ContainSingle().Subject;
+        confirmedIntent.Intent.Should().Be(intent);
+        confirmedIntent.Query.Should().Be("查看全部设备");
+        confirmedIntent.RoutingNote.Should().Be("server-confirmed-business-query");
+        confirmedIntent.BusinessDataSourceExplicitlySelected.Should().BeTrue();
+        confirmedIntent.ConfirmedBusinessQueryContext.Should().Be(BusinessQueryConfirmation.Complete);
+        confirmedIntent.ConfirmedBusinessQuery.Should().NotBeNull();
+        confirmedIntent.ConfirmedBusinessQuery!.TaskId.Should().Be(session.Id);
+        confirmedIntent.ConfirmedBusinessQuery.SemanticPlan.Should().BeSameAs(plan);
+        confirmedRouting.ResponseText.Should().BeNull();
 
         var confirmedResult = await runner.RunAsync(
-            new IntentResult
-            {
-                Intent = intent,
-                Query = confirmed.Question,
-                Confidence = 1,
-                RoutingNote = "server-confirmed-business-query",
-                BusinessDataSourceExplicitlySelected = true,
-                ConfirmedBusinessQueryContext = BusinessQueryConfirmation.Complete,
-                ConfirmedBusinessQuery = confirmed
-            },
+            confirmedIntent,
             sink: null,
             session,
             CancellationToken.None);
 
         confirmedResult.Status.Should().Be(BranchExecutionStatus.Empty);
         cloudClient.RequestedPlans.Should().ContainSingle();
-        contextStore.TryConfirmPending(
-                session.Id,
-                $"确认查询 {token}",
+        dataAnalysis.TryCreateServerConfirmedRouting(
+                new ChatStreamRequest(session.Id, $"确认查询 {token}"),
                 out _)
             .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TryCreateServerConfirmedRouting_ExpiredChallenge_ShouldReturnToNormalRoutingWithoutCloudRead()
+    {
+        const string intent = "Analysis.Device.List";
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 7, 24, 8, 0, 0, TimeSpan.Zero));
+        var planner = new RecordingSemanticQueryPlanner(
+            SemanticPlanningResult.Success(CreatePlan(intent, SemanticQueryTarget.Device)));
+        var cloudClient = new RecordingCloudAiReadClient(
+            isEnabled: true,
+            resultFactory: targetPlan => CreateCloudResult(targetPlan.Target, []));
+        var contextStore = new BusinessQueryContextStore(clock, TimeSpan.FromMinutes(5));
+        var runner = CreateRunner(cloudClient, planner, contextStore);
+        var dataAnalysis = new DataAnalysisExecutor(
+            null!,
+            runner,
+            NullLogger<DataAnalysisExecutor>.Instance);
+        var session = CreateSession();
+
+        var challengeResult = await runner.RunAsync(
+            new IntentResult
+            {
+                Intent = intent,
+                Query = "查看全部设备",
+                Confidence = 0.99
+            },
+            sink: null,
+            session,
+            CancellationToken.None);
+        var token = Regex.Match(
+            GetSafeOutput(challengeResult),
+            @"确认查询 (?<token>[0-9a-f]{32})",
+            RegexOptions.CultureInvariant).Groups["token"].Value;
+        token.Should().HaveLength(32);
+
+        clock.UtcNow = clock.UtcNow.AddMinutes(6);
+
+        dataAnalysis.TryCreateServerConfirmedRouting(
+                new ChatStreamRequest(session.Id, $"确认查询 {token}"),
+                out _)
+            .Should().BeFalse();
+        cloudClient.RequestedPlans.Should().BeEmpty();
     }
 
     [Fact]
@@ -798,5 +850,12 @@ public sealed class SemanticAnalysisRunnerTests
                 RepairAttempts: [],
                 SafeMessage: "ok"));
         }
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 }
