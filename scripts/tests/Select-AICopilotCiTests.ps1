@@ -475,7 +475,7 @@ if ($Mode -eq 'Quality') {
             }
             continue
         }
-        if ($file -match '^(?:docs/|AGENTS\.md$|README(?:\.[^/]+)?$|LICENSE(?:\.[^/]+)?$)') {
+        if ($file -match '^(?:docs/|资料/|[^/]+\.md$|AGENTS\.md$|README(?:\.[^/]+)?$|LICENSE(?:\.[^/]+)?$)') {
             continue
         }
         if ($file -match '^(?:\.github/workflows/|scripts/tests/)') {
@@ -555,6 +555,44 @@ if ($Mode -eq 'Quality') {
             if (-not $solutionSafelyAttributed) {
                 $unclassified.Add($file)
                 [void]$requiredExplicitMode.Add('Full')
+            }
+            continue
+        }
+        if ($file -ceq 'Directory.Build.targets') {
+            $deploymentAffected = $true
+            foreach ($testProject in $testProjects) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$testProject.SecurityFilter)) {
+                    Add-SelectedProject -Selected $selected -Project $testProject `
+                        -Category Security `
+                        -TestFilter $testProject.SecurityFilter `
+                        -Reason "affected-global-build-input:$file"
+                }
+                switch ([string]$testProject.Category) {
+                    'Architecture' {
+                        Add-SelectedProject -Selected $selected -Project $testProject `
+                            -Category Architecture -Reason "affected-global-build-input:$file"
+                    }
+                    'Business' {
+                        if ($Mode -eq 'Deployment') {
+                            $deferredFiles.Add("Business:$file")
+                        } else {
+                            Add-SelectedProject -Selected $selected -Project $testProject `
+                                -Category Business -Reason "affected-global-build-input:$file"
+                        }
+                    }
+                    'DeploymentContract' {
+                        Add-SelectedProject -Selected $selected -Project $testProject `
+                            -Category DeploymentContract -Reason "affected-global-build-input:$file"
+                    }
+                    'Quality' {
+                        $deferredFiles.Add("Quality:$file")
+                        [void]$requiredExplicitMode.Add('Quality')
+                    }
+                    'CrossProject' {
+                        $deferredFiles.Add("CrossProject:$file")
+                        [void]$requiredExplicitMode.Add('CrossProject')
+                    }
+                }
             }
             continue
         }

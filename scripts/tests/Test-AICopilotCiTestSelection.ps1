@@ -192,12 +192,17 @@ try {
     $docsOutput = Join-Path $temporaryRoot 'docs.json'
     & $selector `
         -RepositoryRoot $root `
-        -ChangedFiles @('docs/example.md') `
+        -ChangedFiles @(
+            'docs/example.md',
+            '资料/历史说明.md',
+            'CLAUDE.md',
+            'AICopilot 项目部署与维护指南.md') `
         -OutputPath $docsOutput `
         -GitHubOutputPath ''
     $docs = Get-Content $docsOutput -Raw | ConvertFrom-Json
     Assert-ValidCategories $docs
-    if (@($docs.selectedDotNetProjects.categories | Where-Object {
+    if (@($docs.unclassifiedFiles).Count -ne 0 -or
+        @($docs.selectedDotNetProjects.categories | Where-Object {
                 $_ -notin @('Architecture', 'Security')
             }).Count -ne 0 -or
         @($docs.selectedDotNetProjects | Where-Object {
@@ -205,6 +210,26 @@ try {
                 [string]::IsNullOrWhiteSpace([string]$_.testFilter)
             }).Count -ne 0) {
         throw 'Documentation-only changes selected a non-red-line or unfiltered mixed runner.'
+    }
+
+    $globalBuildOutput = Join-Path $temporaryRoot 'global-build.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles @('Directory.Build.targets') `
+        -OutputPath $globalBuildOutput `
+        -GitHubOutputPath ''
+    $globalBuild = Get-Content $globalBuildOutput -Raw | ConvertFrom-Json
+    Assert-ValidCategories $globalBuild
+    $globalBuildCategories = @($globalBuild.selectedDotNetProjects.categories |
+        Sort-Object -Unique)
+    if (@($globalBuild.unclassifiedFiles).Count -ne 0 -or
+        -not [bool]$globalBuild.deploymentAffected -or
+        $globalBuildCategories -notcontains 'Business' -or
+        $globalBuildCategories -notcontains 'DeploymentContract' -or
+        @($globalBuildCategories | Where-Object {
+                $_ -notin @('Architecture', 'Security', 'Business', 'DeploymentContract')
+            }).Count -ne 0) {
+        throw 'Directory.Build.targets did not select all automatic release lanes while deferring explicit-only lanes.'
     }
 
     $manualOutput = Join-Path $temporaryRoot 'manual.json'
