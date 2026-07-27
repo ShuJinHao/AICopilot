@@ -458,5 +458,11 @@ if ($workflowText -match "\`$env:CI_MODE\s+-ne\s+'default'" -or
 if ($workflowText -notmatch 'if\s*\(\[string\]::IsNullOrWhiteSpace\(\$baseRef\)\)\s*\{\s*\$baseRef\s*=\s*''HEAD\^''') {
     throw 'AICopilot manual CI modes do not have a deterministic base ref.'
 }
+if ($workflowText -notmatch '\$actual\.Major\s+-ne\s+\$requested\.Major' -or
+    $workflowText -notmatch '\$actual\.Minor\s+-ne\s+\$requested\.Minor' -or
+    $workflowText -notmatch '\$actual\s+-lt\s+\$requested' -or
+    $workflowText -match 'test\s+"\$\(dotnet --version\)"\s+=\s+"10\.0\.301"') {
+    throw 'AICopilot CI SDK verification does not honor the global.json latestFeature roll-forward contract.'
+}
 
-Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1'
+Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1'

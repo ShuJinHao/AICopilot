@@ -48,8 +48,17 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Verify .NET SDK
-        run: test "$(dotnet --version)" = "10.0.301"
+      - name: Verify .NET SDK contract
+        shell: pwsh
+        run: |
+          $requested = [version]((Get-Content global.json -Raw | ConvertFrom-Json).sdk.version)
+          $actual = [version](& dotnet --version)
+          if ($actual.Major -ne $requested.Major -or
+              $actual.Minor -ne $requested.Minor -or
+              $actual -lt $requested) {
+            throw "Installed .NET SDK $actual does not satisfy global.json minimum $requested with latestFeature roll-forward."
+          }
+          Write-Host "Validated .NET SDK: requested=$requested actual=$actual rollForward=latestFeature"
 
       - name: Select current scope and validate selector only when affected
         id: select
