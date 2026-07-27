@@ -47,6 +47,10 @@ public class AICopilotAppEnvironment : IAsyncDisposable
     public async Task InitializeAsync()
     {
         await RunStageAsync("Fake AI startup", () => _fakeAiProvider.StartAsync(), TimeSpan.FromSeconds(30));
+        await RunStageAsync(
+            "Additional test hosts startup",
+            () => StartAdditionalTestHostsAsync(),
+            TimeSpan.FromSeconds(30));
         RunStage("Configure test environment", ConfigureEnvironment);
 
         try
@@ -104,6 +108,7 @@ public class AICopilotAppEnvironment : IAsyncDisposable
         }
 
         await _fakeAiProvider.DisposeAsync();
+        await DisposeAdditionalTestHostsAsync();
 
         foreach (var entry in _originalEnvironment)
         {
@@ -232,6 +237,16 @@ public class AICopilotAppEnvironment : IAsyncDisposable
 
     protected virtual void ConfigureAdditionalEnvironment()
     {
+    }
+
+    protected virtual Task StartAdditionalTestHostsAsync()
+    {
+        return Task.CompletedTask;
+    }
+
+    protected virtual ValueTask DisposeAdditionalTestHostsAsync()
+    {
+        return ValueTask.CompletedTask;
     }
 
     protected void ConfigureCloudReadonlySimulationEnvironment()
