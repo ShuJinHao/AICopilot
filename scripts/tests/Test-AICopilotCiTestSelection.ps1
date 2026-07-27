@@ -448,6 +448,7 @@ try {
 }
 
 $workflowText = Get-Content (Join-Path $root '.github/workflows/aicopilot-ci.yml') -Raw
+$runnerText = Get-Content (Join-Path $root 'scripts/tests/Invoke-AICopilotCiSelectedTests.ps1') -Raw
 if ($workflowText -notmatch '\$selectorInputs\.Count\s+-gt\s+0[\s\S]*?Test-AICopilotCiTestSelection\.ps1') {
     throw 'AICopilot default CI does not gate selector behavior tests on affected selector inputs.'
 }
@@ -464,5 +465,9 @@ if ($workflowText -notmatch '\$actual\.Major\s+-ne\s+\$requested\.Major' -or
     $workflowText -match 'test\s+"\$\(dotnet --version\)"\s+=\s+"10\.0\.301"') {
     throw 'AICopilot CI SDK verification does not honor the global.json latestFeature roll-forward contract.'
 }
+if ($runnerText -notmatch "ForEach-Object\s*\{\s*\[int\]\`$_\['discovered'\]\s*\}" -or
+    $runnerText -match 'Measure-Object\s+discovered\s+-Sum') {
+    throw 'AICopilot CI discovery aggregation does not safely read ordered result dictionaries.'
+}
 
-Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1'
+Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1 discoveryAggregation=1'
