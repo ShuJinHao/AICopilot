@@ -701,6 +701,7 @@ public sealed record CloudAiReadCapacityHourlyDto(
     int OkCount,
     int NgCount,
     decimal OkRate,
+    string? PlcName,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
 public sealed record CloudAiReadDeviceLogDto(

@@ -84,15 +84,18 @@ public sealed class SemanticSummaryBuilderTests
         var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
         var rows = new List<Dictionary<string, object?>>
         {
-            CreateRow(("outputQty", 118), ("qualifiedQty", 116), ("occurredAt", "2026-04-20T08:00:00Z")),
-            CreateRow(("outputQty", 126), ("qualifiedQty", 123), ("occurredAt", "2026-04-21T08:00:00Z"))
+            CreateRow(("outputQty", 118), ("qualifiedQty", 116), ("plcName", "正极模切05"), ("occurredAt", "2026-04-20T08:00:00Z")),
+            CreateRow(("outputQty", 126), ("qualifiedQty", 123), ("plcName", "正极模切05"), ("occurredAt", "2026-04-21T08:00:00Z"))
         };
 
         var summary = SemanticSummaryBuilder.Build(plan, rows);
 
-        summary.Metrics.Should().Contain(item => item.Name == "totalOutputQty" && item.Value == "244");
-        summary.Metrics.Should().Contain(item => item.Name == "totalQualifiedQty" && item.Value == "239");
+        summary.Metrics.Should().Contain(item => item.Name == "totalOutputQty" && item.Label == "完工弹夹数" && item.Value == "244 个");
+        summary.Metrics.Should().Contain(item => item.Name == "totalQualifiedQty" && item.Label == "合格完工弹夹数" && item.Value == "239 个");
         summary.Metrics.Should().Contain(item => item.Name == "qualifiedRate" && item.Value == "97.95%");
+        summary.Metrics.Should().Contain(item => item.Name == "groupBreakdown" && item.Value.Contains("正极模切05 2条"));
+        summary.Conclusion.Should().Contain("完工弹夹数 244 个");
+        summary.Highlights[0].Should().Contain("PLC 正极模切05");
     }
 
     [Fact]
@@ -128,6 +131,7 @@ public sealed class SemanticSummaryBuilderTests
                 ("fields", new Dictionary<string, object?>
                 {
                     ["plcName"] = "正极模切05",
+                    ["clipSlot"] = "MG1",
                     ["startTime"] = "2026-07-24T08:55:00Z",
                     ["punchingQuantity"] = 123L,
                     ["punchingSpeed"] = 1.25m
@@ -143,6 +147,7 @@ public sealed class SemanticSummaryBuilderTests
                 ("fields", new Dictionary<string, object?>
                 {
                     ["plcName"] = "正极模切05",
+                    ["clipSlot"] = "MG2",
                     ["startTime"] = "2026-07-24T09:25:00Z",
                     ["punchingQuantity"] = 120L,
                     ["punchingSpeed"] = 1.20m
@@ -157,6 +162,7 @@ public sealed class SemanticSummaryBuilderTests
         summary.Metrics.Should().Contain(item => item.Name == "groupBreakdown" && item.Value.Contains("正极模切 2条"));
         summary.Highlights[0].Should().Contain("客户端 正极模切客户端");
         summary.Highlights[0].Should().Contain("PLC 正极模切05");
+        summary.Highlights[0].Should().Contain("弹夹位 MG1");
         summary.Highlights[0].Should().Contain("弹夹号 CP-CLIP-0001");
         summary.Highlights[0].Should().Contain("冲切数量 123");
         summary.Highlights[0].Should().Contain("冲切速度 1.25");

@@ -65,9 +65,10 @@ Cloud AiRead 设备契约：
 - `Analysis.ClientRelease.List` 的 Cloud business plugin 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐。当前没有 `ClientRelease` 的 governed Text-to-SQL capability profile，因此该能力保持 typed plugin-only；任何结果都不得转入 Text-to-SQL、切换来源或进入 Simulation。
 - AICopilot 的 Cloud AiRead 客户端和 endpoint allowlist 必须逐项覆盖 Cloud `AI只读接口契约.md` 已批准的正式 `GET /api/v1/ai/read/*` 表面；高频 DeviceLog/Capacity/ProductionData 接通不等于全量接口对齐。
 - Cloud AiRead 客户端只保留八个正式 typed GET，不得暴露任意 method/path 传输、可配置 POST allowlist、legacy adapter 或双轨接口；非 GET 必须在发送 HTTP 请求前拒绝。
-- `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName`、弹夹/结果/时间公共字段及 schema 化 `fields`；CP/AP 业务字段为 `plcCode`、`plcName`、`startTime`、`punchingQuantity`、`punchingSpeed`。它不提供 `processName/stationName/deviceCode/ClientCode`，缺失字段保持不存在或空，不得用其他显示字段代填或推断。
+- `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName`、弹夹/结果/时间公共字段及 schema 化 `fields`；CP/AP 业务字段为 `plcCode`、`plcName`、`clipSlot`、`startTime`、`punchingQuantity`、`punchingSpeed`。`clipSlot` 只接受 Cloud 返回的 `MG1/MG2` 事实，不得由弹夹号或 PLC 名推断。它不提供 `processName/stationName/deviceCode/ClientCode`，缺失字段保持不存在或空，不得用其他显示字段代填或推断。
 - 生产语义固定映射：“正极模切”→`typeKey=cp`，“负极模切”→`typeKey=ap`；“正极模切05”“负极模切12”等带编号表达必须同时形成对应 typeKey 与中文 `plcName` 精确过滤。Cloud AiRead 客户端必须透传 `plcCode` / `plcName`，不得在模型回答阶段再做无证据筛选。
-- CP/AP 回答优先展示中文客户端名、中文 PLC 名、弹夹号、冲切数量、冲切速度、开始/完成时间；不得向普通用户展示 Cloud ClientCode，也不得把 MES `P2-CPUC` / `P1-APUC` 当作 Cloud 身份。
+- CP/AP 回答优先展示中文客户端名、中文 PLC 名、弹夹位、弹夹号、冲切数量、冲切速度、开始/完成时间；不得向普通用户展示 Cloud ClientCode，也不得把 MES `P2-CPUC` / `P1-APUC` 当作 Cloud 身份。
+- Cloud 小时产能的 `plcName` 必须保留到 AI typed DTO、结构化行和摘要；小时产能 `totalCount` 在 AI 面向人员的语义固定为“完工弹夹数”，不得笼统表述为“总产出”或推断为冲切数量。
 - 需要从自然语言里的设备编码定位设备时，必须先走显式设备查询/解析；无法唯一命中时要求用户补充，不做隐式兼容。
 - AICopilot 的 Pilot 场景参数不得直接透传给 Cloud；只有 Cloud 端点真实声明的参数可以进入请求。
 

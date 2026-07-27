@@ -10,9 +10,10 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
     {
         ["shiftDate"] = "时间",
         ["occurredAt"] = "时间",
-        ["outputQty"] = "总产出",
-        ["qualifiedQty"] = "合格数",
-        ["ngCount"] = "不合格数"
+        ["plcName"] = "PLC 名称",
+        ["outputQty"] = "完工弹夹数",
+        ["qualifiedQty"] = "合格完工弹夹数",
+        ["ngCount"] = "不合格完工弹夹数"
     };
 
     public override SemanticQueryTarget Target => SemanticQueryTarget.Capacity;
@@ -35,12 +36,16 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
         var qualifiedRate = totalOutputQty <= 0
             ? 0m
             : Math.Round(totalQualifiedQty / totalOutputQty * 100m, 2, MidpointRounding.AwayFromZero);
-        var groupBreakdown = SemanticSummaryFormatting.BuildBreakdown(rows, "shiftDate", "条");
+        var breakdownField = rows.Any(row =>
+            SemanticSummaryFormatting.GetString(row, "plcName") != "-")
+            ? "plcName"
+            : "shiftDate";
+        var groupBreakdown = SemanticSummaryFormatting.BuildBreakdown(rows, breakdownField, "条");
 
         var metrics = new List<SemanticMetricItemDto>
         {
-            Metric("totalOutputQty", "总产出", SemanticSummaryFormatting.FormatNumber(totalOutputQty)),
-            Metric("totalQualifiedQty", "合格数", SemanticSummaryFormatting.FormatNumber(totalQualifiedQty)),
+            Metric("totalOutputQty", "完工弹夹数", $"{SemanticSummaryFormatting.FormatNumber(totalOutputQty)} 个"),
+            Metric("totalQualifiedQty", "合格完工弹夹数", $"{SemanticSummaryFormatting.FormatNumber(totalQualifiedQty)} 个"),
             Metric("qualifiedRate", "合格率", $"{qualifiedRate:F2}%")
         };
 
@@ -49,13 +54,13 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
             metrics.Add(Metric("groupBreakdown", "分组摘要", groupBreakdown));
         }
 
-        var conclusion = $"当前命中 {rows.Count} 条产能记录，总产出 {SemanticSummaryFormatting.FormatNumber(totalOutputQty)}，合格数 {SemanticSummaryFormatting.FormatNumber(totalQualifiedQty)}，合格率 {qualifiedRate:F2}%。";
+        var conclusion = $"当前命中 {rows.Count} 条产能记录，完工弹夹数 {SemanticSummaryFormatting.FormatNumber(totalOutputQty)} 个，合格完工弹夹数 {SemanticSummaryFormatting.FormatNumber(totalQualifiedQty)} 个，合格率 {qualifiedRate:F2}%。";
         var highlights = rows.Take(3).Select(Describe).ToArray();
         return new SemanticSummaryDto(plan.Target.ToString(), conclusion, metrics, highlights, scope);
     }
 
     private static string Describe(Dictionary<string, object?> row)
     {
-        return $"时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "occurredAt"))}，总产出 {SemanticSummaryFormatting.FormatNumber(SemanticSummaryFormatting.GetDecimal(row, "outputQty"))}，合格数 {SemanticSummaryFormatting.FormatNumber(SemanticSummaryFormatting.GetDecimal(row, "qualifiedQty"))}";
+        return $"时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "occurredAt"))}，PLC {SemanticSummaryFormatting.GetString(row, "plcName")}，完工弹夹数 {SemanticSummaryFormatting.FormatNumber(SemanticSummaryFormatting.GetDecimal(row, "outputQty"))} 个，合格完工弹夹数 {SemanticSummaryFormatting.FormatNumber(SemanticSummaryFormatting.GetDecimal(row, "qualifiedQty"))} 个";
     }
 }

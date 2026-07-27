@@ -71,7 +71,8 @@ internal static class CloudAiReadProviderItemContractValidator
                 Required("totalCount", ProviderItemValueKind.Integer),
                 Required("okCount", ProviderItemValueKind.Integer),
                 Required("ngCount", ProviderItemValueKind.Integer),
-                Required("okRate", ProviderItemValueKind.Number)),
+                Required("okRate", ProviderItemValueKind.Number),
+                RequiredNullable("plcName", ProviderItemValueKind.String)),
             [CloudAiReadOperation.DeviceLog] = new(
                 Required("id", ProviderItemValueKind.Guid),
                 Required("deviceId", ProviderItemValueKind.Guid),

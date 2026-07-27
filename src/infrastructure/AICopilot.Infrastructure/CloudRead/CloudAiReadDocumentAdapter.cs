@@ -193,6 +193,7 @@ internal static class CloudAiReadDocumentAdapter
             CloudAiReadJsonValueReader.GetRequiredInt(record, "okCount"),
             CloudAiReadJsonValueReader.GetRequiredInt(record, "ngCount"),
             CloudAiReadJsonValueReader.GetRequiredDecimal(record, "okRate"),
+            CloudAiReadJsonValueReader.GetString(record, "plcName"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
 
         var rows = items.Select(item => new Dictionary<string, object?>
@@ -208,6 +209,7 @@ internal static class CloudAiReadDocumentAdapter
             ["okCount"] = item.OkCount,
             ["ngCount"] = item.NgCount,
             ["okRate"] = item.OkRate,
+            ["plcName"] = item.PlcName,
             ["outputQty"] = item.TotalCount,
             ["qualifiedQty"] = item.OkCount
         }).ToArray();

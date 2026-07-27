@@ -255,7 +255,8 @@ internal sealed class CloudAiReadBusinessQueryProvider(
                 blocked,
                 "deviceId", "date", "time", "hour", "minute", "timeLabel",
                 "shiftDate", "shiftCode", "totalCount", "okCount", "ngCount",
-                "outputQty", "qualifiedQty", "dayShiftTotal", "nightShiftTotal", "okRate"),
+                "outputQty", "qualifiedQty", "dayShiftTotal", "nightShiftTotal", "okRate",
+                "plcName"),
             [BusinessDataCapability.ProductionRecord] = Contract(
                 blocked,
                 "recordId", "typeKey", "typeName", "deviceId", "deviceName",

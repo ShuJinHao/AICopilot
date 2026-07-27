@@ -86,11 +86,11 @@ Cloud AiRead transport 只允许以上八个固定 GET。AICopilot 不提供任�
 | `/client-releases` | `id: Guid`、`componentKind: string`、`componentKey: string`、`displayName: string`、`channel: string`、`targetRuntime: string`、`version: string`、`status: string`、`releaseNotes: string?`、`createdAtUtc: DateTime`、`publishedAtUtc: DateTime?`、`deletedAtUtc: DateTime?` |
 | `/device-client-states` | `deviceId: Guid`、`deviceName: string`、`clientCode: string`、`primaryIp: string?`、`channel: string?`、`hostVersion: string?`、`hostApiVersion: string?`、`versionReportedAtUtc: DateTime?`、`versionReceivedAtUtc: DateTime?`、`softwareStatus: string`、`runtimeStatus: string?`、`runtimeStartedAtUtc: DateTime?`、`lastRuntimeHeartbeatAtUtc: DateTime?`、`updatedAtUtc: DateTime?` |
 | `/capacity/summary` | `date: DateOnly(yyyy-MM-dd)`、`totalCount: int32`、`okCount: int32`、`ngCount: int32`、`dayShiftTotal: int32`、`nightShiftTotal: int32` |
-| `/capacity/hourly` | `time: DateTime`、`date: DateOnly(yyyy-MM-dd)`、`hour: int32`、`minute: int32`、`timeLabel: string`、`shiftCode: string`、`totalCount: int32`、`okCount: int32`、`ngCount: int32`、`okRate: decimal` |
+| `/capacity/hourly` | `time: DateTime`、`date: DateOnly(yyyy-MM-dd)`、`hour: int32`、`minute: int32`、`timeLabel: string`、`shiftCode: string`、`totalCount: int32`、`okCount: int32`、`ngCount: int32`、`okRate: decimal`、`plcName: string?` |
 | `/device-logs` | `id: Guid`、`deviceId: Guid`、`deviceName: string`、`level: string`、`message: string`、`logTime: DateTime`、`receivedAt: DateTime` |
 | `/production-records` | `recordId: Guid`、`typeKey: string`、`typeName: string`、`deviceId: Guid`、`deviceName: string`、`barcode: string?`、`result: string?`、`completedAt: DateTime?`、`receivedAt: DateTime?`、`fields: scalar object`、`fieldSchema: exact object[]` |
 
-表中的 `?` 表示“key 必须存在、value 可以为 JSON null”，不表示可省略 key。该 required-present nullable 规则覆盖 client release 的 `releaseNotes/publishedAtUtc/deletedAtUtc`、device state 的全部 nullable 字段、production record 的 `barcode/result/completedAt/receivedAt`，以及每个 `fieldSchema` entry 的 `unit/precision`。固定 item 的 `DateTime/DateTime?` 与 Cloud DTO 对齐；只有 envelope `asOfUtc` 使用 `DateTimeOffset`。
+表中的 `?` 表示“key 必须存在、value 可以为 JSON null”，不表示可省略 key。该 required-present nullable 规则覆盖 client release 的 `releaseNotes/publishedAtUtc/deletedAtUtc`、device state 的全部 nullable 字段、capacity hourly 的 `plcName`、production record 的 `barcode/result/completedAt/receivedAt`，以及每个 `fieldSchema` entry 的 `unit/precision`。固定 item 的 `DateTime/DateTime?` 与 Cloud DTO 对齐；只有 envelope `asOfUtc` 使用 `DateTimeOffset`。
 
 ### 3.3 Envelope 与全量验证顺序
 

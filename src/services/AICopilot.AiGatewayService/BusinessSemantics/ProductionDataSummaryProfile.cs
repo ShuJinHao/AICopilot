@@ -14,6 +14,7 @@ internal sealed class ProductionDataSummaryProfile : SemanticSummaryProfileBase
         ["typeName"] = "生产数据类型名称",
         ["plcCode"] = "PLC 编码",
         ["plcName"] = "PLC 名称",
+        ["clipSlot"] = "弹夹位",
         ["barcode"] = "弹夹号",
         ["result"] = "生产结果",
         ["startTime"] = "开始时间",
@@ -75,7 +76,7 @@ internal sealed class ProductionDataSummaryProfile : SemanticSummaryProfileBase
 
     private static string Describe(Dictionary<string, object?> row)
     {
-        return $"客户端 {SemanticSummaryFormatting.GetString(row, "deviceName")}，PLC {GetProductionField(row, "plcName")}，弹夹号 {SemanticSummaryFormatting.GetString(row, "barcode")}，冲切数量 {GetProductionField(row, "punchingQuantity")}，冲切速度 {GetProductionField(row, "punchingSpeed")}，结果 {SemanticSummaryFormatting.GetString(row, "result")}，开始时间 {FormatProductionTimestamp(row, "startTime")}，完成时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "completedAt"))}";
+        return $"客户端 {SemanticSummaryFormatting.GetString(row, "deviceName")}，PLC {GetProductionField(row, "plcName")}，弹夹位 {GetProductionField(row, "clipSlot")}，弹夹号 {SemanticSummaryFormatting.GetString(row, "barcode")}，冲切数量 {GetProductionField(row, "punchingQuantity")}，冲切速度 {GetProductionField(row, "punchingSpeed")}，结果 {SemanticSummaryFormatting.GetString(row, "result")}，开始时间 {FormatProductionTimestamp(row, "startTime")}，完成时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "completedAt"))}";
     }
 
     private static bool IsResult(Dictionary<string, object?> row, params string[] acceptedValues)

@@ -104,6 +104,8 @@ public sealed class CloudAiReadClientContractTests
             nameof(CloudAiReadCapacityHourlyDto.TimeLabel),
             nameof(CloudAiReadCapacityHourlyDto.ShiftCode),
             nameof(CloudAiReadCapacityHourlyDto.AdditionalFields));
+        AssertOptionalReferenceProperties<CloudAiReadCapacityHourlyDto>(
+            nameof(CloudAiReadCapacityHourlyDto.PlcName));
         AssertRequiredValueProperties<CloudAiReadCapacityHourlyDto>(
             nameof(CloudAiReadCapacityHourlyDto.Time),
             nameof(CloudAiReadCapacityHourlyDto.Date),
@@ -1050,6 +1052,50 @@ public sealed class CloudAiReadClientContractTests
     }
 
     [Fact]
+    public async Task Client_ShouldPreserveCapacityHourlyPlcName()
+    {
+        using var httpClient = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(CreateEnvelope(
+                new[]
+                {
+                    new
+                    {
+                        time = "2026-07-24T08:00:00Z",
+                        date = "2026-07-24",
+                        hour = 8,
+                        minute = 0,
+                        timeLabel = "08:00",
+                        shiftCode = "day",
+                        totalCount = 12,
+                        okCount = 11,
+                        ngCount = 1,
+                        okRate = 91.67m,
+                        plcName = "正极模切05"
+                    }
+                },
+                rowCount: 1,
+                source: "capacity.hourly"))
+        }));
+        var client = CreateClient(httpClient);
+
+        var result = await client.GetCapacityHourlyAsync(new CloudAiReadQuery(
+            null,
+            [
+                new CloudAiReadFilter("deviceId", "eq", DeviceId),
+                new CloudAiReadFilter("preset", "eq", "today")
+            ],
+            null,
+            "occurredAt",
+            true,
+            20));
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].PlcName.Should().Be("正极模切05");
+        result.Rows[0]["plcName"].Should().Be("正极模切05");
+    }
+
+    [Fact]
     public async Task Client_ShouldSendProductionRecordQueryWithCloudAiReadParametersOnly()
     {
         HttpRequestMessage? capturedRequest = null;
@@ -1116,6 +1162,7 @@ public sealed class CloudAiReadClientContractTests
                         {
                             plcCode = "P2-CP05",
                             plcName = "正极模切05",
+                            clipSlot = "MG1",
                             startTime = "2026-04-20T00:58:03Z",
                             punchingQuantity = 123,
                             punchingSpeed = 1.25m
@@ -1124,6 +1171,7 @@ public sealed class CloudAiReadClientContractTests
                         {
                             new { key = "plcCode", label = "PLC 编码", type = "string", unit = (string?)null, precision = (int?)null, required = true },
                             new { key = "plcName", label = "PLC 名称", type = "string", unit = (string?)null, precision = (int?)null, required = true },
+                            new { key = "clipSlot", label = "弹夹位", type = "enum", unit = (string?)null, precision = (int?)null, required = true },
                             new { key = "startTime", label = "开始时间", type = "datetime", unit = (string?)null, precision = (int?)null, required = true },
                             new { key = "punchingQuantity", label = "冲切数量", type = "integer", unit = (string?)null, precision = (int?)null, required = true },
                             new { key = "punchingSpeed", label = "冲切速度", type = "number", unit = (string?)null, precision = (int?)2, required = true }
@@ -1151,9 +1199,10 @@ public sealed class CloudAiReadClientContractTests
         result.Items[0].DeviceName.Should().Be("正极模切客户端");
         result.Items[0].Fields["plcCode"].Should().Be("P2-CP05");
         result.Items[0].Fields["plcName"].Should().Be("正极模切05");
+        result.Items[0].Fields["clipSlot"].Should().Be("MG1");
         result.Items[0].Fields["punchingQuantity"].Should().Be(123L);
         result.Items[0].Fields["punchingSpeed"].Should().Be(1.25m);
-        result.Items[0].FieldSchema.Should().HaveCount(5);
+        result.Items[0].FieldSchema.Should().HaveCount(6);
         result.Items[0].FieldSchema[0].Key.Should().Be("plcCode");
         result.Rows[0].Should().NotContainKey("processName");
         result.Rows[0].Should().NotContainKey("stationName");
@@ -1546,7 +1595,7 @@ public sealed class CloudAiReadClientContractTests
                 }),
             new MalformedEndpointCase(
                 "capacity-hourly",
-                """{"time":"2026-07-10T01:00:00Z","date":"2026-07-10","hour":1,"minute":0,"timeLabel":"01:00","shiftCode":"DAY","totalCount":10,"okCount":9,"ngCount":1,"okRate":0.9}""",
+                """{"time":"2026-07-10T01:00:00Z","date":"2026-07-10","hour":1,"minute":0,"timeLabel":"01:00","shiftCode":"DAY","totalCount":10,"okCount":9,"ngCount":1,"okRate":0.9,"plcName":null}""",
                 "shiftCode",
                 "hour",
                 "\"opaque-provider-item-secret-integer\"",
@@ -1635,6 +1684,12 @@ public sealed class CloudAiReadClientContractTests
         await AssertInvalidProviderItemAsync(
             capacityHourly.Invoke,
             ReplaceProperty(capacityHourly.ValidItemJson, "okRate", "1e1000"));
+        await AssertInvalidProviderItemAsync(
+            capacityHourly.Invoke,
+            RemoveProperty(capacityHourly.ValidItemJson, "plcName"));
+        await AssertInvalidProviderItemAsync(
+            capacityHourly.Invoke,
+            ReplaceProperty(capacityHourly.ValidItemJson, "plcName", "{}"));
 
         var production = cases.Single(endpoint => endpoint.Name == "production-records");
         var deviceClientStates = cases.Single(endpoint => endpoint.Name == "device-client-states");
