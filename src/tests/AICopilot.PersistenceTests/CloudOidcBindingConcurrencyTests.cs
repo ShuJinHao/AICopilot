@@ -105,6 +105,96 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             entry.Result == AuditResults.Rejected)).Should().Be(1);
     }
 
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldSerializeRealPostgresUserProviderConflict()
+    {
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
+        var userId = Guid.NewGuid();
+        const string userName = "E1001";
+        const string password = "ValidPassword123!";
+        const string firstExternalUserId = "cloud-subject-1";
+        const string secondExternalUserId = "cloud-subject-2";
+
+        await using (var seedContext = new IdentityStoreDbContext(
+                         CreateIdentityOptions(database.ConnectionString)))
+        {
+            using var seedManagers = IdentityManagerTestScope.Create(seedContext);
+            (await seedManagers.UserManager.CreateAsync(
+                new ApplicationUser { Id = userId, UserName = userName },
+                password)).Succeeded.Should().BeTrue();
+        }
+
+        await using var firstContext = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        await using var secondContext = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        using var firstManagers = IdentityManagerTestScope.Create(firstContext);
+        using var secondManagers = IdentityManagerTestScope.Create(secondContext);
+
+        var firstLockAcquired = NewSignal();
+        var releaseFirstLock = NewSignal();
+        var secondLockAttempted = NewSignal();
+        var firstHandler = CreateHandler(
+            database.ConnectionString,
+            firstContext,
+            firstManagers,
+            new HoldingInvariantGuard(
+                new PostgresExternalIdentityBindingInvariantGuard(firstContext),
+                firstLockAcquired,
+                releaseFirstLock));
+        var secondHandler = CreateHandler(
+            database.ConnectionString,
+            secondContext,
+            secondManagers,
+            new SignalingInvariantGuard(
+                new PostgresExternalIdentityBindingInvariantGuard(secondContext),
+                secondLockAttempted));
+
+        var firstTask = firstHandler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(userName, firstExternalUserId),
+                password),
+            CancellationToken.None);
+        await firstLockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var secondTask = secondHandler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(userName, secondExternalUserId),
+                password),
+            CancellationToken.None);
+
+        try
+        {
+            await secondLockAttempted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            (await Task.WhenAny(secondTask, Task.Delay(TimeSpan.FromMilliseconds(250))))
+                .Should().NotBeSameAs(secondTask);
+        }
+        finally
+        {
+            releaseFirstLock.TrySetResult(true);
+        }
+
+        var results = await Task.WhenAll(firstTask, secondTask);
+
+        results.Should().ContainSingle(result => result.Status == ResultStatus.Ok);
+        results.Should().ContainSingle(result =>
+            result.Status == ResultStatus.Unauthorized &&
+            result.Errors!.OfType<ApiProblemDescriptor>().Single().Code ==
+            AuthProblemCodes.ExternalIdentityConflict);
+
+        await using var verification = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        var binding = await verification.ExternalIdentityBindings.SingleAsync();
+        binding.UserId.Should().Be(userId);
+        binding.ExternalUserId.Should().Be(firstExternalUserId);
+        (await verification.AuditLogs.CountAsync(entry =>
+            entry.ActionCode == "Identity.CloudOidcExistingAccountConfirmed" &&
+            entry.Result == AuditResults.Succeeded)).Should().Be(1);
+        (await verification.AuditLogs.CountAsync(entry =>
+            entry.ActionCode == "Identity.CloudOidcExistingAccountBindingConflict" &&
+            entry.Result == AuditResults.Rejected)).Should().Be(1);
+    }
+
     private static ConfirmExistingCloudOidcAccountCommandHandler CreateHandler(
         string connectionString,
         IdentityStoreDbContext dbContext,
@@ -120,11 +210,13 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             CreateService(connectionString, dbContext));
     }
 
-    private static CloudOidcIdentityProfile CreateProfile(string employeeNo)
+    private static CloudOidcIdentityProfile CreateProfile(
+        string employeeNo,
+        string externalUserId = "shared-cloud-subject")
     {
         return new CloudOidcIdentityProfile(
             "https://cloud.example.com",
-            "shared-cloud-subject",
+            externalUserId,
             CloudOidcIdentityProfile.DefaultTenantId,
             employeeNo,
             employeeNo,

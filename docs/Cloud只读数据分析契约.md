@@ -64,7 +64,7 @@ Cloud AiRead transport 只允许以上八个固定 GET。AICopilot 不提供任�
 
 生产记录字段必须保持来源真实性：当前 Cloud 正式记录提供 `typeKey/typeName/deviceId/deviceName`、公共记录字段和 schema 化 `fields`，不提供 `processName/stationName/deviceCode/ClientCode`。缺失字段必须保持不存在或空；不得用 `typeName`、`typeKey` 或其他显示字段代填、推断工序、工位或设备编码。
 
-当前生产仅支持 `cp / 正极模切` 与 `ap / 负极模切`。`production-records` 查询除现有参数外允许可选 `plcCode`、`plcName` 精确过滤；AICopilot typed client 必须原样透传。CP/AP 的 `fields` 为 `plcCode`、`plcName`、`startTime`、`punchingQuantity`、`punchingSpeed`，回答优先展示中文 `deviceName`、中文 `plcName`、弹夹号、数量、速度和时间，不展示 Cloud ClientCode。
+当前生产仅支持 `cp / 正极模切` 与 `ap / 负极模切`。`production-records` 查询除现有参数外允许可选 `plcCode`、`plcName` 精确过滤；AICopilot typed client 必须原样透传。CP/AP 的 `fields` 为 `plcCode`、`plcName`、`clipSlot`、`startTime`、`punchingQuantity`、`punchingSpeed`，回答优先展示中文 `deviceName`、中文 `plcName`、弹夹号、弹夹位 `MG1/MG2`、数量、速度和时间，不展示 Cloud ClientCode。
 
 自然语言固定映射：“正极模切”→`typeKey=cp`，“负极模切”→`typeKey=ap`；紧随其后的设备编号（如“正极模切05”）必须规范化为对应中文 `plcName` 精确过滤。映射不确定或编号不完整时返回 `NeedClarification`，不得猜测设备。
 
