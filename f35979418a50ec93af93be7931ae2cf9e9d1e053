@@ -1,0 +1,101 @@
+AI-BATCH-01 WORKTREE RECOVERY MANIFEST
+snapshot_ref  refs/codex/ai-batch-01/worktrees/ai-architecture-p1-parked-20260720-4e098709
+snapshot_commit  f35979418a50ec93af93be7931ae2cf9e9d1e053
+snapshot_tree  4d010680f4f53733ee34ddcd6230b54195f4a781
+base_head  4e098709fc1e8bbb7523bc8f9a0010ab8cc34f2d
+branch  agent/ai-architecture-p1-parked-20260720-4e098709
+worktree  /Users/shushu/Developer/产线系统架构升级/1/.codex-worktrees/ai-architecture-p0
+
+DIRTY_STATUS
+ M docs/AI架构治理清单.md
+ M docs/Agent工作流与异常契约.md
+ M docs/frontend-integration-contract-package-2026-05-17.md
+ M docs/改动复盘与规则沉淀.md
+ M scripts/tests/Test-AICopilotTestDeclarationTransition.ps1
+ M scripts/tests/baselines/aicopilot-test-cases.json
+ M scripts/tests/baselines/aicopilot-test-declaration-transition.json
+ M src/hosts/AICopilot.HttpApi/Program.cs
+ M src/hosts/AICopilot.HttpApi/Properties/AssemblyInfo.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentApprovalDecisionCoordinator.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtoComposer.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskLifecycleCommandHandlers.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskRunQueue.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskRuntime.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/Runtime/AgentRuntimeEventRecorder.cs
+ M src/services/AICopilot.AiGatewayService/DependencyInjection.cs
+ M src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceLifecycleCoordinator.cs
+ M src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Coordinator.cs
+ M src/shared/AICopilot.SharedKernel/Result/ApiProblemDescriptor.cs
+ M src/testing/AICopilot.AgentWorkflowTestKit/AICopilot.AgentWorkflowTestKit.csproj
+ M src/testing/AICopilot.AgentWorkflowTestKit/ToolRegistryGovernanceTestBase.cs
+ M src/testing/AICopilot.AspireIntegrationTestKit/AICopilotAppEnvironment.cs
+ M src/tests/AICopilot.AggregateTests/AgentArtifactDomainTests.cs
+ M src/tests/AICopilot.ApplicationTests/ToolRegistryApplicationTests.cs
+ M src/tests/AICopilot.ContractTests/FrontendContractSnapshotTests.cs
+ M src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj
+ M src/tests/AICopilot.HttpIntegrationTests/AgentApprovalPermissionHardeningTests.cs
+ M src/tests/AICopilot.HttpIntegrationTests/AgentArtifactVersioningTests.cs
+ M src/tests/AICopilot.HttpIntegrationTests/AspireTestFixtures.cs
+ M src/tests/AICopilot.UnitTests/ToolRegistryUnitTests.cs
+ M src/tests/AICopilot.WorkflowTests/ToolRegistryWorkflowTests.cs
+ M src/vues/AICopilot.Web/src/components/chat/AgentRunThread.vue
+ M src/vues/AICopilot.Web/src/components/chat/ArtifactWorkspacePanel.vue
+ M src/vues/AICopilot.Web/src/composables/useAgentWorkbench.ts
+ M src/vues/AICopilot.Web/src/stores/chatErrorStore.ts
+ M src/vues/AICopilot.Web/src/types/protocols.ts
+ M src/vues/AICopilot.Web/tests/smoke/acceptance.spec.ts
+ M src/vues/AICopilot.Web/tests/unit/agentRunNotice.spec.ts
+ M src/vues/AICopilot.Web/tests/unit/chatErrorStore.spec.ts
+ M src/vues/AICopilot.Web/tests/unit/chatStoreSkills.spec.ts
+ M src/vues/AICopilot.Web/tests/unit/chunkReducer.spec.ts
+?? src/services/AICopilot.AiGatewayService/AgentTasks/AgentArtifactOutputBindingGate.cs
+?? src/services/AICopilot.AiGatewayService/AgentTasks/AgentFinalizationCheckpointStateValidator.cs
+?? src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanRuntimeSnapshotVerifier.cs
+
+SHA256_DIRTY_TRACKED_AND_UNTRACKED
+19d3e711910913343635ea0dba9640fc09898a62399c684082aaad06420d6ee1  docs/AI架构治理清单.md
+c19e9310a8f651b79c8600d0fb12299a3af809c9664d4f52caee601b4cc67a88  docs/Agent工作流与异常契约.md
+c4a4f9a1440019160ee8d53f7ac0da04abc7e08e8e364a980312b28861eb4f30  docs/frontend-integration-contract-package-2026-05-17.md
+dcefe1f9e3fbae861c0aba4ccc6b399944eaafee20a811a619b1f78de548e20b  docs/改动复盘与规则沉淀.md
+40bb65d76b0368201c8cf1f9758e229d0c5668969748eeab2e9004ad2152cf91  scripts/tests/Test-AICopilotTestDeclarationTransition.ps1
+56502366bc9a551e1b002689576d4a807a76dab8b000274401882a832baf8dec  scripts/tests/baselines/aicopilot-test-cases.json
+36a646a63916a2a8db4a652c27a2987f35395e5bb0eafcae3a92c8d99e1354b1  scripts/tests/baselines/aicopilot-test-declaration-transition.json
+27cf00f0383489d641be50d6545e6b80ecd1ec2bedbe56cc36f2d08e789e40f4  src/hosts/AICopilot.HttpApi/Program.cs
+78f74c64e77a0f2405b3784ca9bd6378d21855000978d445e5ea1c8ee0978cce  src/hosts/AICopilot.HttpApi/Properties/AssemblyInfo.cs
+606fd54d8d35bb455b903d47277b00e93fb8d239a22c7507f23dbc2caf3dee7e  src/services/AICopilot.AiGatewayService/AgentTasks/AgentApprovalDecisionCoordinator.cs
+d95b8e2b8f2bec81317cad777068f3f6c99cb6abe8e1170a0b4995d0c44a7498  src/services/AICopilot.AiGatewayService/AgentTasks/AgentArtifactOutputBindingGate.cs
+4c013a70fb918867ed22807042fec085fcd216e353df2dfdc6f560f778b760be  src/services/AICopilot.AiGatewayService/AgentTasks/AgentFinalizationCheckpointStateValidator.cs
+576410e76de215b34fc1728e4ca0e6583258caec93c38e2811bad48218caacfc  src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanRuntimeSnapshotVerifier.cs
+a3ef0e5475d30f2acc8bfd8aadd71c7aeabe7afb3cc85458ea6132a7a0eff357  src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtoComposer.cs
+f3a6cdf7a8762385a08a347d41438afcdfa60fbd492b7a8869132f9b888d02b9  src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs
+f96bb96d329562207a4a76a287ecb95dfb717cf14f0d8f7913d63999c682879f  src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskLifecycleCommandHandlers.cs
+2e58f2f88f419f472e897381be3af6017ae2c7a58d443e4c4f751b59d90349ae  src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskRunQueue.cs
+521d1e61184d60105be7b10416bfcef0315170b231cc17db941c803176f11535  src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskRuntime.cs
+b8a6ff44a0f8ad34653a7d01c173beb9382cd6d13165d34282df6d158d177634  src/services/AICopilot.AiGatewayService/AgentTasks/Runtime/AgentRuntimeEventRecorder.cs
+73c1e0f74bb6b9825814699b745b58b2812c85aa9a2bb426134f8eb9ad39cd45  src/services/AICopilot.AiGatewayService/DependencyInjection.cs
+18a6647ca6ad69313fb48b5743e990e5a8d2b5bf5d11ba075dd0216dd0549ef4  src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceLifecycleCoordinator.cs
+475051cf0ca2e7e971150fd55501ef6850dfc266424e612bfcfdd346b2e631df  src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Coordinator.cs
+40f7f78c155401f341667ac59847367bdfe8bf3ec1c9812b90c4cb5bf283f4b9  src/shared/AICopilot.SharedKernel/Result/ApiProblemDescriptor.cs
+17c62893ae05cabb30942fc234c8b5869432eaf35163e48fad93e1fe19b42898  src/testing/AICopilot.AgentWorkflowTestKit/AICopilot.AgentWorkflowTestKit.csproj
+56860464651369857765a93b4328446b264ddaa478e83c3c46ebf362c4aae9b7  src/testing/AICopilot.AgentWorkflowTestKit/ToolRegistryGovernanceTestBase.cs
+3a03ae316b89734264f70bf863d40ca077c20bc8b0177cb512029432e56c3a5c  src/testing/AICopilot.AspireIntegrationTestKit/AICopilotAppEnvironment.cs
+f5b587c77491949ff7e89983b49b5b897cfadf50fc21052aea87ae8848f46a9f  src/tests/AICopilot.AggregateTests/AgentArtifactDomainTests.cs
+c3822ad0bd617935a94d50a0d793ce423aabc1de4a0438fca0958ecc6498b3ef  src/tests/AICopilot.ApplicationTests/ToolRegistryApplicationTests.cs
+18726db091953caa36e11562c719ec398248e56169d8d8e4713b31b6f700575c  src/tests/AICopilot.ContractTests/FrontendContractSnapshotTests.cs
+c290c1d71b43e2600589914c13f491c7ca0bde8eb7979d1cd0696683e77b887a  src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj
+3adfcd8e6d467f66c387fbcc82c1d8f55ede64e43700f4fde71d30910ee1f8b0  src/tests/AICopilot.HttpIntegrationTests/AgentApprovalPermissionHardeningTests.cs
+4a40a65ab4cdf76edf4be2cd2b2c436d088b05b0d4e1aa32cecd2af5261e4300  src/tests/AICopilot.HttpIntegrationTests/AgentArtifactVersioningTests.cs
+3c6a663706fabd58eea0b35fd9d5f9b4edbe6482c1c8a8aee85f2370094824c5  src/tests/AICopilot.HttpIntegrationTests/AspireTestFixtures.cs
+d161ab2177bb1af172749fafc87f2b82074929a9be9be62cf4293890d8783df2  src/tests/AICopilot.UnitTests/ToolRegistryUnitTests.cs
+6500172f17f7a5f8f82ce11ab161a36c8e4ea9378858d92c8f57cbbec00f479e  src/tests/AICopilot.WorkflowTests/ToolRegistryWorkflowTests.cs
+9261f6f9ab2bd07a3273e34370d9176de0a0e8c0e43a8a7dd0dbc995ecbaa775  src/vues/AICopilot.Web/src/components/chat/AgentRunThread.vue
+54d16b7b68e429b6f5e664c948e5e9251ae063a8d82078734dfc36ff36974181  src/vues/AICopilot.Web/src/components/chat/ArtifactWorkspacePanel.vue
+65b3c66cfcfe9b47653b36a1654fd73f9897371d985d7c0ff196db22be277fd5  src/vues/AICopilot.Web/src/composables/useAgentWorkbench.ts
+afc55cda1a2a9e8ad07308c4c2deb440aecd38e90291779238a9a27b979c0311  src/vues/AICopilot.Web/src/stores/chatErrorStore.ts
+f7d8087ba87fc58dc320089da83a4132d7930cb31c37bdb75d0b0a330ba7e665  src/vues/AICopilot.Web/src/types/protocols.ts
+69bc53977306bff2c0398fb6214705b5a4e341b5c1d358d707701edf09edde0b  src/vues/AICopilot.Web/tests/smoke/acceptance.spec.ts
+0cd03d36a8f5dae9230a25b11d72b042f8ccaebd99f7db522a4acc105d12c48a  src/vues/AICopilot.Web/tests/unit/agentRunNotice.spec.ts
+3e03e6b8d1c0b89a2697916f9b16f5b1b906bfce6ff7af0dcffd99d5ac5dbefc  src/vues/AICopilot.Web/tests/unit/chatErrorStore.spec.ts
+145a83b582e4dc8d326c2467e0ba0e82ef0039f84ad9955626472a83196ffc00  src/vues/AICopilot.Web/tests/unit/chatStoreSkills.spec.ts
+d315a97aeae7ff088fe989ada95b9c3214669ddea9f0ca8ca1230065918033b7  src/vues/AICopilot.Web/tests/unit/chunkReducer.spec.ts
