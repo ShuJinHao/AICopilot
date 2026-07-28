@@ -43,6 +43,9 @@ For `agent_plan_invalid`, `agent_plan_schema_invalid`, and `plan_payload_too_lar
 | `approval_stream_failed` | Approval stream failed. |
 | `approval_already_processed` | Approval was already processed. |
 | `approval_pending` | Approval is pending. |
+| `agent_approval_state_conflict` | Approval, target, pending set, task, step, or run-attempt state is inconsistent; refresh and do not retry automatically. |
+| `agent_finalization_state_conflict` | Artifact finalization checkpoint, provenance, approval, task, workspace, step, or run-attempt state is inconsistent; refresh and do not finalize. |
+| `agent_approval_rejected` | Final-output approval was rejected and the waiting task/attempt reached a rejected terminal state. |
 | `capability_not_allowed` | Requested capability is not allowed. |
 | `control_action_blocked` | Control or write action was blocked. |
 | `token_budget_exceeded` | Token budget was exceeded. |
@@ -67,7 +70,7 @@ For `agent_plan_invalid`, `agent_plan_schema_invalid`, and `plan_payload_too_lar
 | `evidence_payload_too_large` | Inline canonical Evidence payload exceeds the fixed 65,536-byte UTF-8 limit and was not accepted. |
 | `agent_plan_tool_denied` | Agent plan requested a denied tool. |
 | `agent_plan_schema_invalid` | Agent plan schema is invalid. |
-| `tool_output_schema_invalid` | Tool output failed its closed schema or durable-output contract; the execution was not recorded as successful and provider raw output was not persisted. |
+| `tool_output_schema_invalid` | Tool output failed its closed schema or exact durable artifact binding; the execution was not recorded as successful and cannot authorize later approval or completion. |
 | `tool_execution_not_found` | Tool execution record was not found. |
 | `artifact_finalized` | Artifact is finalized and cannot be modified. |
 | `artifact_generation_failed` | Artifact generation failed. |

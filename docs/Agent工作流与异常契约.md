@@ -61,11 +61,15 @@ Cloud 只读 Agent 当前正式能力限定为：
 - preview 只承载最多 3 个可识别 dictionary row 的扁平标量。值只走唯一 `SanitizeValue` 入口；JSON null/bool/number/string 可映射为同等标量，CLR 只显式允许 string、bool/数值、date、Guid 和 enum。JSON object/array 及其余任意 CLR object/collection 一律输出既有脱敏占位，不调用自定义 `ToString()` 透出内容，不递归展开第二层 key。
 - Semantic/FreeForm Widget 在 formatter 之前由各自真实 plan/summary/rows 生成，不消费最终 prompt label map；不得因最终上下文治理复制第二套 Widget 标签或值清洗器。
 
-### 2.3 P0 产物检查点与 Tool 输出边界
+### 2.3 产物输出与终审检查点
 
 - 声明产物目标的 Plan 必须且只能有一个最后步骤 `finalize_artifacts`，其 `StepType=Finalize`、`RequiresApproval=true`；该步骤是生命周期检查点，不是 provider tool，不能交给 built-in、MCP 或 mock executor 伪造执行成功。
+- Artifact provider 的 schema-valid 输出仍必须通过 aggregate 绑定门：输出只能是无额外字段的 `{status:"completed",resultType:"artifact",artifactType,artifactId}`，其中 D-format `artifactId`、小写 `artifactType`、task、workspace、`CreatedByStepId` 和唯一 Draft artifact 必须精确一致。非 Artifact provider 不得自报 artifact，Artifact provider 也不得返回非 artifact 结果。
+- 进入终审或重复 Finalize 前，持久化 provenance 必须再次从 aggregate 闭合验证：每个已完成产物步骤恰好拥有一个 artifact，每个 artifact 恰好来自一个已完成产物步骤，且 producer `OutputJson` 仍与 artifact id/type 精确绑定；仅有 `CreatedByStepId` 或 Completed 状态不足以授权终审。
+- FinalOutput approval 的 identity、唯一性、pending set 和 decision proof 属于同一个授权元组。Pending 必须没有 operator/time/comment；Approved/Rejected 必须有非空 operator 且 decision time 不早于 created time；Cancelled/Expired 必须没有 operator/comment 且有合法 decision time。任何 stale、缺失或竞争状态都返回 `agent_finalization_state_conflict`，不能降级成 `approval_pending` 或复用历史审批。
 - P0 runtime 只允许 `BuiltInOnly`，没有可信 PlanCompiler 时生产 `ExecutablePlan` 必须 fail-closed；Draft 只披露 `plan_compiler_unavailable`，不得把测试用 fresh-read/downstream harness 带入生产注册。
-- Tool output 必须先通过注册表的 closed strict schema，才可记录 execution、step 或 run 成功。持久化 durable output 只保留规范化、版本化的安全 payload，不得保存 provider raw output；ArtifactWorkspace 文件/aggregate 的原子 staging、补偿、provenance 与 reconciliation 仍属于 P1，本 P0 契约不得宣称已经闭合。
+- P0 的 artifact executor 可能在 output binding gate 前已经创建 draft aggregate 或文件；binding 失败只保证该执行不记为 step/tool/run 成功、不得创建终审审批、不得完成任务。draft/file 的原子 staging、补偿与 reconciliation 属于 P1，不得在 P0 文档中宣称“失败前零写入”。
+- 多文件从 draft 复制到 final 与数据库终态提交当前不是一个原子事务。部分 copy 的 staging、幂等恢复和 reconciliation 属于 P1；P0 必须 fail-closed 并禁止把残留文件当成已 Finalized 证据。
 
 ## 3. Cloud 写入禁止
 

@@ -2,7 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using AICopilot.AgentWorkflowTestKit;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.EntityFrameworkCore;
@@ -111,7 +113,8 @@ public sealed class AgentArtifactVersioningTests
             ArtifactType.Markdown,
             "draft/report.md",
             "# Final review lock\n",
-            "text/markdown");
+            "text/markdown",
+            markWaitingFinalApproval: true);
 
         await AuthenticateAsync(owner.UserName, "Password123!");
         await PostJsonAsync<ArtifactWorkspaceDto>(
@@ -249,7 +252,8 @@ public sealed class AgentArtifactVersioningTests
         ArtifactType artifactType,
         string relativePath,
         string content,
-        string mimeType)
+        string mimeType,
+        bool markWaitingFinalApproval = false)
     {
         var now = DateTimeOffset.UtcNow;
         var workspaceCode = $"ws_artifact_{Guid.NewGuid():N}"[..38];
@@ -259,22 +263,62 @@ public sealed class AgentArtifactVersioningTests
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
 
         await using var dbContext = await CreateAiGatewayDbContextAsync();
+        var toolCode = artifactType switch
+        {
+            ArtifactType.Chart => "generate_chart_data",
+            ArtifactType.Markdown => "generate_markdown_report",
+            ArtifactType.Html => "generate_html_report",
+            ArtifactType.Pdf => "generate_pdf",
+            ArtifactType.Pptx => "generate_pptx",
+            ArtifactType.Xlsx => "generate_xlsx",
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(artifactType),
+                artifactType,
+                "The Plan v2 HTTP fixture only supports canonical artifact generator types.")
+        };
+        var requiresApproval = artifactType is ArtifactType.Pdf or ArtifactType.Pptx or ArtifactType.Xlsx;
+        var planStep = new AgentPlanV2TestStep(
+            "Generate draft artifact",
+            "Generate draft artifact for versioning tests.",
+            artifactType == ArtifactType.Chart
+                ? AgentStepType.ChartGeneration
+                : AgentStepType.ArtifactGeneration,
+            toolCode,
+            requiresApproval);
+        const AgentTaskType taskType = AgentTaskType.ReportGeneration;
+        var planJson = AgentPlanV2TestData.CreateCanonicalBuiltInPlanDraft(
+            [planStep],
+            taskType,
+            skillCode: null,
+            knowledgeBaseIds: null);
+        AgentPlanV2TestData.AssertCanonicalBuiltInPlanIdentity(
+            planJson,
+            taskType,
+            AgentTaskRiskLevel.Low,
+            [planStep]);
         var task = new AgentTask(
             new SessionId(Guid.NewGuid()),
             ownerId,
             "Artifact versioning workflow",
             "Artifact versioning workflow",
-            AgentTaskType.CloudDataReport,
-            AgentTaskRiskLevel.Medium,
+            taskType,
+            AgentTaskRiskLevel.Low,
             null,
-            """{"version":1}""",
+            planJson,
             now);
         var step = task.AddStep(
-            "Generate draft artifact",
-            "Generate draft artifact for versioning tests.",
-            AgentStepType.ArtifactGeneration,
-            "generate_report",
-            requiresApproval: false,
+            planStep.Title,
+            planStep.Description,
+            planStep.StepType,
+            planStep.ToolCode,
+            planStep.RequiresApproval,
+            now);
+        task.AddStep(
+            "Finalize artifacts",
+            "Wait for final output approval before publishing workspace artifacts.",
+            AgentStepType.Finalize,
+            "finalize_artifacts",
+            requiresApproval: true,
             now);
         var workspace = new ArtifactWorkspace(
             task.Id,
@@ -290,11 +334,52 @@ public sealed class AgentArtifactVersioningTests
             mimeType,
             step.Id,
             now);
+        if (step.RequiresApproval)
+        {
+            step.Approve();
+        }
+
+        step.Start(now);
+        step.Complete(JsonSerializer.Serialize(new
+        {
+            status = "completed",
+            resultType = "artifact",
+            artifactType = artifactType.ToString().ToLowerInvariant(),
+            artifactId = artifact.Id.Value
+        }, JsonOptions), now);
 
         task.AttachWorkspace(workspace.Id, now);
         task.ConfirmExecutablePlan(task.PlanJson, Array.Empty<int>(), now);
         task.ApprovePlan(now);
         task.MarkWorkspaceReady(now);
+        if (markWaitingFinalApproval)
+        {
+            task.WaitForFinalApproval(now);
+            var approval = new ApprovalRequest(
+                task.Id,
+                AgentApprovalType.FinalOutput,
+                workspace.WorkspaceCode,
+                ownerId,
+                now);
+            var attempt = new AgentTaskRunAttempt(
+                task.Id,
+                attemptNo: 1,
+                AgentTaskRunTriggerType.Manual,
+                "artifact-version-final-review-fixture",
+                now,
+                TimeSpan.FromMinutes(5));
+            task.BeginRunAttempt(
+                attempt.Id,
+                attempt.AttemptNo,
+                attempt.LeaseId!.Value,
+                attempt.LeaseOwner!,
+                attempt.LeaseExpiresAt!.Value,
+                now);
+            attempt.WaitForApproval(now, "Waiting for final output approval.");
+            task.ReleaseRunLease(now, clearActiveAttempt: false);
+            dbContext.ApprovalRequests.Add(approval);
+            dbContext.AgentTaskRunAttempts.Add(attempt);
+        }
 
         dbContext.AgentTasks.Add(task);
         dbContext.ArtifactWorkspaces.Add(workspace);

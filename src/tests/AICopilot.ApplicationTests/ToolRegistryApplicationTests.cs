@@ -118,21 +118,30 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         plan.RootElement.GetProperty("isExecutable").GetBoolean().Should().BeFalse();
 
         var approvalAudit = new CapturingAuditLogWriter();
+        var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>();
+        var queueRepository = new InMemoryAgentTaskRunQueueStore();
         var confirmationService = new AgentPlanDraftConfirmationService(
             CreatePlanToolGuard(disabledToolGuard),
             AgentPlanV2TestData.CreateMatchingFreshReadGate(),
             AgentPlanV2TestData.CreateMatchingRoutingSnapshotReader(),
             new FixedCloudReadonlyAgentPlanService());
         var approveHandler = new ApproveAgentTaskPlanCommandHandler(
-            taskRepository,
-            approvalRepository,
             CreateAgentTaskDtoQueryService(
-                new InMemoryRepository<ArtifactWorkspace>(),
+                workspaceRepository,
                 approvalRepository,
-                new InMemoryAgentTaskRunQueueStore()),
-            new AgentAuditRecorder(approvalAudit),
-            new TestCurrentUser(UserId),
-            confirmationService);
+                queueRepository),
+            new AgentApprovalDecisionCoordinator(
+                approvalRepository,
+                taskRepository,
+                workspaceRepository,
+                new InMemoryAgentTaskRunAttemptStore(),
+                new AgentAuditRecorder(approvalAudit),
+                new AgentTaskRunQueue(
+                    queueRepository,
+                    AgentPlanV2TestData.CreateMatchingFreshReadGate()),
+                new TestCurrentUser(UserId),
+                new StubIdentityAccessService([AgentApprovalPermissions.ApproveAgentTaskPlan]),
+                confirmationService));
 
         var confirmation = await approveHandler.Handle(
             new ApproveAgentTaskPlanCommand(task.Id.Value),

@@ -63,3 +63,7 @@ app.MapControllers();
 app.MapDefaultEndpoints();
 
 app.Run();
+
+internal partial class Program
+{
+}

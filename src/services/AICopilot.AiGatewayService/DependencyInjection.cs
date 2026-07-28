@@ -54,6 +54,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentRuntimeSettingsProvider, AgentRuntimeSettingsProvider>();
         builder.Services.AddScoped<IAgentArtifactWorkspaceService, AgentArtifactWorkspaceService>();
         builder.Services.AddScoped<IAgentTaskRuntime, AgentTaskRuntime>();
+        builder.Services.AddScoped<IAgentPlanRuntimeSnapshotVerifier, AgentPlanRuntimeSnapshotVerifier>();
         builder.Services.AddScoped<IAgentPlanAuthorizationFreshVerifier, AgentPlanAuthorizationFreshVerifier>();
         builder.Services.AddScoped<IAgentTaskRunQueue, AgentTaskRunQueue>();
         builder.Services.AddScoped<AgentTaskDtoQueryService>();

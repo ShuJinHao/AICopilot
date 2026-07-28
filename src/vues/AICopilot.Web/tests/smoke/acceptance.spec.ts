@@ -243,6 +243,7 @@ test('inline agent run restores task, workspace, approvals, and artifacts', { ta
           canRetry: false,
           canSubmitFinalReview: false,
           canApproveFinal: false,
+          canFinalizeWorkspace: false,
           failureSummary: null,
           activeRunAttemptId: null,
           runAttemptCount: 0,

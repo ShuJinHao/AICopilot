@@ -13,14 +13,7 @@ const {
   workspaceFileCount,
   artifactGroups,
   chartBars,
-  canSubmitFinalReview,
 } = useAgentWorkbench()
-
-async function submitFinalReview() {
-  const code = store.currentWorkspace?.workspaceCode
-  if (!code || !canSubmitFinalReview.value) return
-  await store.submitFinalReview(code)
-}
 
 async function downloadArtifact(artifactId: string) {
   if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
@@ -156,14 +149,6 @@ async function previewArtifact(artifactId: string) {
           </div>
         </div>
       </div>
-      <button
-        class="inline-secondary-action"
-        type="button"
-        :disabled="!canSubmitFinalReview || store.isAgentBusy"
-        @click="submitFinalReview"
-      >
-        提交最终审批
-      </button>
     </details>
   </section>
 </template>

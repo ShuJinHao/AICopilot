@@ -6,6 +6,13 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 
 public interface IAgentTaskRunQueue
 {
+    Task<Result<AgentTaskRunQueueItem>> StageEnqueueAsync(
+        AgentTask task,
+        AgentTaskRunTriggerType triggerType,
+        Guid requestedBy,
+        CancellationToken cancellationToken,
+        DateTimeOffset? availableAt = null);
+
     Task<Result<AgentTaskRunQueueItem>> EnqueueAsync(
         AgentTask task,
         AgentTaskRunTriggerType triggerType,
@@ -31,6 +38,28 @@ internal sealed class AgentTaskRunQueue(
     : IAgentTaskRunQueue
 {
     public async Task<Result<AgentTaskRunQueueItem>> EnqueueAsync(
+        AgentTask task,
+        AgentTaskRunTriggerType triggerType,
+        Guid requestedBy,
+        CancellationToken cancellationToken,
+        DateTimeOffset? availableAt = null)
+    {
+        var staged = await StageEnqueueAsync(
+            task,
+            triggerType,
+            requestedBy,
+            cancellationToken,
+            availableAt);
+        if (!staged.IsSuccess)
+        {
+            return Result.From(staged);
+        }
+
+        await queueStore.SaveChangesAsync(cancellationToken);
+        return staged;
+    }
+
+    public async Task<Result<AgentTaskRunQueueItem>> StageEnqueueAsync(
         AgentTask task,
         AgentTaskRunTriggerType triggerType,
         Guid requestedBy,
@@ -69,7 +98,6 @@ internal sealed class AgentTaskRunQueue(
             now,
             availableAt);
         queueStore.Add(item);
-        await queueStore.SaveChangesAsync(cancellationToken);
         return Result.Success(item);
     }
 

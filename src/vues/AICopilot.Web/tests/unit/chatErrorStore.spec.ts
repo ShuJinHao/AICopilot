@@ -61,6 +61,15 @@ describe('chatErrorStore', () => {
       }),
     ).toBe('工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。')
 
+    expect(resolveChatErrorMessage({ code: 'agent_approval_state_conflict' })).toBe(
+      '审批状态与当前任务不一致，请刷新任务后重试。',
+    )
+    expect(resolveChatErrorMessage({ code: 'agent_finalization_state_conflict' })).toBe(
+      '产物终审状态不完整或不一致，请刷新任务并检查产物生成记录。',
+    )
+    expect(resolveChatErrorMessage({ code: 'agent_approval_rejected' })).toBe(
+      '本次产物终审已被拒绝，任务已结束。',
+    )
   })
 
   it('scopes active errors to the current session', () => {

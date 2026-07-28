@@ -27,6 +27,7 @@ function createTask(overrides: Partial<AgentTask> = {}): AgentTask {
     canRetry: false,
     canSubmitFinalReview: false,
     canApproveFinal: false,
+    canFinalizeWorkspace: false,
     failureSummary: null,
     activeRunAttemptId: null,
     runAttemptCount: 0,

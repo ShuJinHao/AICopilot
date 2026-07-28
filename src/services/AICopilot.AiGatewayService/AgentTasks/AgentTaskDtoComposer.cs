@@ -12,7 +12,8 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 public sealed class AgentTaskDtoQueryService(
     IReadRepository<ArtifactWorkspace> workspaceRepository,
     IReadRepository<ApprovalRequest> approvalRepository,
-    IAgentTaskRunQueueStore queueStore)
+    IAgentTaskRunQueueStore queueStore,
+    IAgentTaskRunAttemptStore? runAttemptStore = null)
 {
     public Task<AgentTaskDto> MapAsync(
         AgentTask task,
@@ -23,6 +24,8 @@ public sealed class AgentTaskDtoQueryService(
             workspaceRepository,
             approvalRepository,
             queueStore,
+            runAttemptStore,
+            null,
             cancellationToken);
     }
 
@@ -36,6 +39,7 @@ public sealed class AgentTaskDtoQueryService(
             workspaceRepository,
             approvalRepository,
             queueStore,
+            runAttemptStore,
             currentUserAccess,
             cancellationToken);
     }
@@ -62,31 +66,46 @@ internal static class AgentTaskDtoComposer
         IReadRepository<ArtifactWorkspace> workspaceRepository,
         IReadRepository<ApprovalRequest> approvalRepository,
         IAgentTaskRunQueueStore? queueStore,
+        IAgentTaskRunAttemptStore? runAttemptStore,
         CurrentUserAccess? currentUserAccess,
         CancellationToken cancellationToken)
     {
-        var workspaceCode = await LoadWorkspaceCodeAsync(workspaceRepository, task, cancellationToken);
-        var pendingApprovals = await approvalRepository.ListAsync(
-            new ApprovalRequestsByTaskSpec(task.Id, pendingOnly: true),
+        var workspace = await LoadWorkspaceAsync(workspaceRepository, task, cancellationToken);
+        var approvals = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(task.Id),
             cancellationToken);
         var activeQueueItem = queueStore is null
             ? null
             : await queueStore.FirstActiveByTaskAsync(task.Id, cancellationToken);
-        var canApproveFinal = AgentApprovalPermissions.HasPermission(
-            currentUserAccess,
-            AgentApprovalPermissions.ApproveFinalOutput);
-        bool? canSubmitFinalReview = currentUserAccess is null
+        var attempts = runAttemptStore is null
+            ? Array.Empty<AgentTaskRunAttempt>()
+            : (await runAttemptStore.ListByTaskAsync(task.Id, cancellationToken)).ToArray();
+        var finalCheckpointState = runAttemptStore is null
             ? null
-            : AgentApprovalPermissions.HasPermission(
+            : AgentFinalizationCheckpointStateValidator.ValidatePaused(
+                task,
+                workspace,
+                approvals,
+                attempts);
+        var canApproveFinal =
+            finalCheckpointState is { IsSuccess: true } &&
+            finalCheckpointState.Value!.Phase == AgentFinalizationCheckpointPhase.PendingApproval &&
+            AgentApprovalPermissions.HasPermission(
                 currentUserAccess,
-                AgentApprovalPermissions.SubmitFinalReview);
+                AgentApprovalPermissions.ApproveFinalOutput);
+        var canFinalizeWorkspace =
+            finalCheckpointState is { IsSuccess: true } &&
+            finalCheckpointState.Value!.Phase == AgentFinalizationCheckpointPhase.Approved &&
+            AgentApprovalPermissions.HasPermission(
+                currentUserAccess,
+                AgentApprovalPermissions.FinalizeWorkspace);
         return AgentTaskDtoMapper.Map(
             task,
-            workspaceCode,
-            pendingApprovals.Count,
+            workspace?.WorkspaceCode,
+            approvals.Count(approval => approval.Status == AgentApprovalStatus.Pending),
             activeQueueItem,
             canApproveFinal,
-            canSubmitFinalReview);
+            canFinalizeWorkspace);
     }
 
     public static Task<AgentTaskDto> MapAsync(
@@ -96,7 +115,7 @@ internal static class AgentTaskDtoComposer
         IAgentTaskRunQueueStore? queueStore,
         CancellationToken cancellationToken)
     {
-        return MapAsync(task, workspaceRepository, approvalRepository, queueStore, null, cancellationToken);
+        return MapAsync(task, workspaceRepository, approvalRepository, queueStore, null, null, cancellationToken);
     }
 
     public static Task<AgentTaskDto> MapAsync(
@@ -105,7 +124,7 @@ internal static class AgentTaskDtoComposer
         IReadRepository<ApprovalRequest> approvalRepository,
         CancellationToken cancellationToken)
     {
-        return MapAsync(task, workspaceRepository, approvalRepository, null, null, cancellationToken);
+        return MapAsync(task, workspaceRepository, approvalRepository, null, null, null, cancellationToken);
     }
 
     public static async Task<string?> LoadWorkspaceCodeAsync(
@@ -123,4 +142,20 @@ internal static class AgentTaskDtoComposer
             cancellationToken);
         return workspace?.WorkspaceCode;
     }
+
+    private static async Task<ArtifactWorkspace?> LoadWorkspaceAsync(
+        IReadRepository<ArtifactWorkspace> workspaceRepository,
+        AgentTask task,
+        CancellationToken cancellationToken)
+    {
+        if (task.WorkspaceId is null)
+        {
+            return null;
+        }
+
+        return await workspaceRepository.FirstOrDefaultAsync(
+            new ArtifactWorkspaceByIdSpec(task.WorkspaceId.Value, includeArtifacts: true),
+            cancellationToken);
+    }
+
 }

@@ -227,6 +227,7 @@ const plannedTask = {
   canRetry: false,
   canSubmitFinalReview: false,
   canApproveFinal: false,
+  canFinalizeWorkspace: false,
   failureSummary: null,
   activeRunAttemptId: null,
   runAttemptCount: 0,
@@ -658,6 +659,7 @@ describe('chatStore skills', () => {
         workspaceCode: 'WS-A',
         canSubmitFinalReview: true,
         canApproveFinal: true,
+        canFinalizeWorkspace: true,
       }),
     ]
     const workbench = useAgentWorkbench()
@@ -675,7 +677,7 @@ describe('chatStore skills', () => {
       ...createWorkspace('task-1', 'WS-A'),
       artifacts: [{ id: 'artifact-1' }],
     } as never
-    expect(workbench.canSubmitFinalReview.value).toBe(true)
+    expect(workbench.canSubmitFinalReview.value).toBe(false)
     expect(workbench.canFinalizeWorkspace.value).toBe(true)
   })
 

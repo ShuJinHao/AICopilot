@@ -24,7 +24,6 @@ type PrimaryTaskActionKind =
   | 'approve-and-run'
   | 'run'
   | 'retry'
-  | 'submit-final-review'
   | 'finalize'
   | 'queued'
   | 'running'
@@ -42,7 +41,6 @@ const {
   agentRunNotice,
   canRunTask,
   canContinueTask,
-  canSubmitFinalReview,
   canFinalizeWorkspace,
 } = useAgentWorkbench()
 const {
@@ -188,12 +186,7 @@ const primaryTaskAction = computed(() => {
         disabled: !canContinueTask.value,
       }
     case 'WorkspaceReady':
-      return {
-        kind: 'submit-final-review' as PrimaryTaskActionKind,
-        label: '提交最终审核',
-        icon: FolderOpen,
-        disabled: !canSubmitFinalReview.value,
-      }
+      return null
     case 'WaitingFinalApproval':
       return {
         kind: 'finalize' as PrimaryTaskActionKind,
@@ -227,12 +220,6 @@ function startRuntimePolling(taskId: string) {
   }, 3500)
 }
 
-async function submitFinalReview() {
-  const code = store.currentWorkspace?.workspaceCode
-  if (!code || !canSubmitFinalReview.value) return
-  await store.submitFinalReview(code)
-}
-
 async function finalizeCurrentWorkspace() {
   const code = store.currentWorkspace?.workspaceCode
   if (!code || !canFinalizeWorkspace.value) return
@@ -254,9 +241,6 @@ async function runPrimaryTaskAction() {
       return
     case 'retry':
       await store.retryAgentTask(task.id)
-      return
-    case 'submit-final-review':
-      await submitFinalReview()
       return
     case 'finalize':
       await finalizeCurrentWorkspace()

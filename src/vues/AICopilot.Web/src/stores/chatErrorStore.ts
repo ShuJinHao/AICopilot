@@ -122,6 +122,12 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? '当前任务状态不允许重试。'
     case 'approval_pending':
       return userFacingMessage ?? '当前会话已有待处理审批，请先处理审批请求。'
+    case 'agent_approval_state_conflict':
+      return userFacingMessage ?? '审批状态与当前任务不一致，请刷新任务后重试。'
+    case 'agent_finalization_state_conflict':
+      return userFacingMessage ?? '产物终审状态不完整或不一致，请刷新任务并检查产物生成记录。'
+    case 'agent_approval_rejected':
+      return userFacingMessage ?? '本次产物终审已被拒绝，任务已结束。'
     case 'chat_context_expired':
     case 'approval_already_processed':
       return userFacingMessage ?? '审批上下文已失效，请重新发起请求。'

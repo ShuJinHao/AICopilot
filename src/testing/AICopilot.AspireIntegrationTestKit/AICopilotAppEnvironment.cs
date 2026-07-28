@@ -13,6 +13,9 @@ public class AICopilotAppEnvironment : IAsyncDisposable
     private const string TestPostgresPassword = "TestPg123!";
     private const string BootstrapUserName = "admin";
     private const string BootstrapPassword = "Password123!";
+    private const string TestApiKeyEncryptionKey = "test-aicopilot-api-key-encryption-key";
+    private const string TestJwtSecretKey =
+        "test-aicopilot-jwt-secret-key-at-least-64-characters-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     private static readonly TimeSpan StageTimeout = TimeSpan.FromMinutes(2);
     private static readonly string[] ProxyEnvironmentVariables =
     [
@@ -40,11 +43,18 @@ public class AICopilotAppEnvironment : IAsyncDisposable
 
     public string BootstrapAdminPassword => BootstrapPassword;
 
+    public string ApiKeyEncryptionKey => TestApiKeyEncryptionKey;
+
+    public string JwtSecretKey => TestJwtSecretKey;
+
+    public string ArtifactWorkspaceRootPath =>
+        Path.Combine(Path.GetTempPath(), "AICopilotIntegrationTests", "artifact-workspaces");
+
     protected virtual bool EnableRagWorker => true;
 
     protected virtual bool EnableDataWorker => true;
 
-    public async Task InitializeAsync()
+    public virtual async Task InitializeAsync()
     {
         await RunStageAsync("Fake AI startup", () => _fakeAiProvider.StartAsync(), TimeSpan.FromSeconds(30));
         RunStage("Configure test environment", ConfigureEnvironment);
@@ -94,7 +104,7 @@ public class AICopilotAppEnvironment : IAsyncDisposable
         }
     }
 
-    public async Task DisposeAsync()
+    public virtual async Task DisposeAsync()
     {
         HttpClient?.Dispose();
 
@@ -201,17 +211,15 @@ public class AICopilotAppEnvironment : IAsyncDisposable
         SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
         SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
         SetEnvironmentVariable("Parameters__pg-password", TestPostgresPassword);
-        SetEnvironmentVariable("Parameters__aicopilot-api-key-encryption-key", "test-aicopilot-api-key-encryption-key");
-        SetEnvironmentVariable("Parameters__jwt-secret-key", "test-aicopilot-jwt-secret-key-at-least-64-characters-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        SetEnvironmentVariable("Parameters__aicopilot-api-key-encryption-key", TestApiKeyEncryptionKey);
+        SetEnvironmentVariable("Parameters__jwt-secret-key", TestJwtSecretKey);
         SetEnvironmentVariable("Parameters__bootstrap-admin-username", BootstrapUserName);
         SetEnvironmentVariable("Parameters__bootstrap-admin-password", BootstrapPassword);
-        SetEnvironmentVariable("JwtSettings__SecretKey", "test-aicopilot-jwt-secret-key-at-least-64-characters-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        SetEnvironmentVariable("JwtSettings__SecretKey", TestJwtSecretKey);
         SetEnvironmentVariable("BootstrapAdmin__UserName", BootstrapUserName);
         SetEnvironmentVariable("BootstrapAdmin__Password", BootstrapPassword);
-        SetEnvironmentVariable("AICopilotSecurity__ApiKeyEncryptionKey", "test-aicopilot-api-key-encryption-key");
-        SetEnvironmentVariable(
-            "ArtifactWorkspace__RootPath",
-            Path.Combine(Path.GetTempPath(), "AICopilotIntegrationTests", "artifact-workspaces"));
+        SetEnvironmentVariable("AICopilotSecurity__ApiKeyEncryptionKey", TestApiKeyEncryptionKey);
+        SetEnvironmentVariable("ArtifactWorkspace__RootPath", ArtifactWorkspaceRootPath);
         SetEnvironmentVariable("AppHost__EnableDockerComposeEnvironment", "false");
         SetEnvironmentVariable("AppHost__EnableWebUi", "false");
         SetEnvironmentVariable("AppHost__EnablePgWeb", "false");

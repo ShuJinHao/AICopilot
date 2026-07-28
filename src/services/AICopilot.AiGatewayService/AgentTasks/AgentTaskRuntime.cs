@@ -52,6 +52,7 @@ internal sealed class AgentTaskRuntime(
     ICloudReadonlyAgentToolExecutor cloudReadonlyToolExecutor,
     IIdentityAccessService identityAccessService,
     ToolRegistryGuard toolRegistryGuard,
+    IAgentPlanRuntimeSnapshotVerifier runtimeSnapshotVerifier,
     AgentRuntimeEventRecorder runtimeEventRecorder,
     IEnumerable<IAgentToolExecutor> toolExecutors,
     AgentTaskPlanFreshReadGate freshReadGate,
@@ -100,6 +101,24 @@ internal sealed class AgentTaskRuntime(
         }
 
         var plan = DeserializePlan(task.PlanJson);
+        var snapshot = await runtimeSnapshotVerifier.VerifyAsync(plan, task.UserId, cancellationToken);
+        if (!snapshot.IsSuccess)
+        {
+            return Result.From(snapshot);
+        }
+
+        // Final output is a workspace approval checkpoint, not an executable
+        // provider call. Once runtime has paused here, approval/finalization are
+        // owned by their dedicated coordinators; retries must be idempotent and
+        // must not create another approval or dispatch finalize_artifacts.
+        if (task.Status == AgentTaskStatus.WaitingFinalApproval)
+        {
+            var pausedState = await ValidatePausedFinalizationCheckpointAsync(task, cancellationToken);
+            return pausedState.IsSuccess
+                ? Result.Success(task)
+                : Result.From(pausedState);
+        }
+
         var attemptResult = await runAttemptCoordinator.BeginOrResumeAttemptAsync(task, triggerType, cancellationToken);
         if (!attemptResult.IsSuccess)
         {
@@ -162,18 +181,52 @@ internal sealed class AgentTaskRuntime(
 
             if (step.Status == AgentStepStatus.WaitingApproval)
             {
-                if (string.Equals(step.ToolCode, "finalize_artifacts", StringComparison.OrdinalIgnoreCase))
+                if (BuiltInToolRegistrations.IsLifecycleCheckpoint(step.ToolCode))
                 {
-                    var approval = await EnsureApprovalRequestAsync(
+                    if (workspace.Artifacts.Count == 0)
+                    {
+                        return await RejectStepAsync(
+                            task,
+                            workspace,
+                            step,
+                            attempt,
+                            new ApiProblemDescriptor(
+                                AppProblemCodes.AgentFinalizationStateConflict,
+                                "Final-output checkpoint requires at least one persisted workspace artifact."),
+                            cancellationToken);
+                    }
+
+                    var finalApprovalResolution = await ResolveFinalOutputApprovalAsync(
                         task,
-                        AgentApprovalType.FinalOutput,
                         workspace.WorkspaceCode,
                         cancellationToken);
+                    if (!finalApprovalResolution.IsSuccess)
+                    {
+                        return await RejectStepAsync(
+                            task,
+                            workspace,
+                            step,
+                            attempt,
+                            finalApprovalResolution.Errors!
+                                .OfType<ApiProblemDescriptor>()
+                                .Single(),
+                            cancellationToken);
+                    }
+
+                    var approvalResolution = finalApprovalResolution.Value!;
+                    var approval = approvalResolution.Approval;
                     task.MarkWorkspaceReady(now);
                     task.WaitForFinalApproval(now);
                     attempt.WaitForApproval(now, "Waiting for final output approval.");
                     task.ReleaseRunLease(now, clearActiveAttempt: false);
-                    await runtimeEventRecorder.StageApprovalRequestedAsync(task, approval, cancellationToken);
+                    if (approvalResolution.IsCreated)
+                    {
+                        await runtimeEventRecorder.StageFinalReviewSubmittedAsync(
+                            task,
+                            workspace,
+                            approval,
+                            cancellationToken);
+                    }
 
                     await SaveAsync(task, workspace, attempt, cancellationToken);
                     return Result.Success(task);
@@ -187,15 +240,36 @@ internal sealed class AgentTaskRuntime(
                     }
                     else
                     {
-                        var approval = await EnsureApprovalRequestAsync(
+                        if (await HasCompetingPendingApprovalAsync(
+                                task,
+                                AgentApprovalType.ToolCall,
+                                stepTargetId,
+                                cancellationToken))
+                        {
+                            return await RejectStepAsync(
+                                task,
+                                workspace,
+                                step,
+                                attempt,
+                                new ApiProblemDescriptor(
+                                    AppProblemCodes.AgentApprovalStateConflict,
+                                    "Tool-call checkpoint has another pending task approval."),
+                                cancellationToken);
+                        }
+
+                        var approvalResolution = await EnsureApprovalRequestAsync(
                             task,
                             AgentApprovalType.ToolCall,
                             stepTargetId,
                             cancellationToken);
+                        var approval = approvalResolution.Approval;
                         task.WaitForToolApproval(now);
                         attempt.WaitForApproval(now, "Waiting for tool approval.");
                         task.ReleaseRunLease(now, clearActiveAttempt: false);
-                        await runtimeEventRecorder.StageApprovalRequestedAsync(task, approval, cancellationToken);
+                        if (approvalResolution.IsCreated)
+                        {
+                            await runtimeEventRecorder.StageApprovalRequestedAsync(task, approval, cancellationToken);
+                        }
 
                         await SaveAsync(task, workspace, attempt, cancellationToken);
                         return Result.Success(task);
@@ -206,6 +280,19 @@ internal sealed class AgentTaskRuntime(
             if (step.Status is not AgentStepStatus.Pending and not AgentStepStatus.Approved)
             {
                 continue;
+            }
+
+            if (BuiltInToolRegistrations.IsLifecycleCheckpoint(step.ToolCode))
+            {
+                return await RejectStepAsync(
+                    task,
+                    workspace,
+                    step,
+                    attempt,
+                    new ApiProblemDescriptor(
+                        AppProblemCodes.AgentPlanToolDenied,
+                        "Final output is a lifecycle checkpoint and cannot be dispatched as a provider tool."),
+                    cancellationToken);
             }
 
             AgentToolExecutionAuditScope? executionScope = null;
@@ -259,6 +346,19 @@ internal sealed class AgentTaskRuntime(
                         outputValidation.Error ?? "Tool output does not match the registry schema.");
                 }
 
+                var artifactBinding = AgentArtifactOutputBindingGate.Validate(
+                    task,
+                    workspace,
+                    step,
+                    toolRegistration,
+                    executionResult.ContractOutput);
+                if (!artifactBinding.IsValid)
+                {
+                    throw new AgentToolExecutionException(
+                        AppProblemCodes.ToolOutputSchemaInvalid,
+                        artifactBinding.Error ?? "Artifact tool output is not bound to the workspace aggregate.");
+                }
+
                 step.Complete(executionResult.DurableOutput.CanonicalJson, DateTimeOffset.UtcNow);
                 var artifactId = runtimeEventRecorder.MarkToolExecutionSucceeded(
                     executionScope,
@@ -301,19 +401,39 @@ internal sealed class AgentTaskRuntime(
             }
         }
 
-        task.MarkWorkspaceReady(DateTimeOffset.UtcNow);
-        task.WaitForFinalApproval(DateTimeOffset.UtcNow);
-        attempt.WaitForApproval(DateTimeOffset.UtcNow, "Waiting for final output approval.");
-        task.ReleaseRunLease(DateTimeOffset.UtcNow, clearActiveAttempt: false);
-        var finalApproval = await EnsureApprovalRequestAsync(
-            task,
-            AgentApprovalType.FinalOutput,
-            workspace.WorkspaceCode,
-            cancellationToken);
-        await runtimeEventRecorder.StageApprovalRequestedAsync(task, finalApproval, cancellationToken);
-
+        var failedAt = DateTimeOffset.UtcNow;
+        const string message =
+            "Agent plan did not pause at the canonical final-output checkpoint; no final approval was created.";
+        task.Fail(message, failedAt);
+        attempt.MarkFailed(AppProblemCodes.AgentFinalizationStateConflict, message, failedAt);
+        task.ReleaseRunLease(failedAt, clearActiveAttempt: true);
         await SaveAsync(task, workspace, attempt, cancellationToken);
         return Result.Success(task);
+    }
+
+    private async Task<Result<AgentFinalizationCheckpointState>> ValidatePausedFinalizationCheckpointAsync(
+        AgentTask task,
+        CancellationToken cancellationToken)
+    {
+        if (task.WorkspaceId is null)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentFinalizationStateConflict,
+                "Final-output checkpoint workspace is missing."));
+        }
+
+        var workspace = await workspaceRepository.FirstOrDefaultAsync(
+            new ArtifactWorkspaceByIdSpec(task.WorkspaceId.Value, includeArtifacts: true),
+            cancellationToken);
+        var approvals = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(task.Id),
+            cancellationToken);
+        var attempts = await runAttemptStore.ListByTaskAsync(task.Id, cancellationToken);
+        return AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            task,
+            workspace,
+            approvals,
+            attempts);
     }
 
     private AgentToolExecutorResolver CreateExecutorResolver()
@@ -361,7 +481,7 @@ internal sealed class AgentTaskRuntime(
         return workspace;
     }
 
-    private async Task<ApprovalRequest> EnsureApprovalRequestAsync(
+    private async Task<ApprovalRequestResolution> EnsureApprovalRequestAsync(
         AgentTask task,
         AgentApprovalType approvalType,
         string targetId,
@@ -372,7 +492,7 @@ internal sealed class AgentTaskRuntime(
             cancellationToken);
         if (existing is not null)
         {
-            return existing;
+            return new ApprovalRequestResolution(existing, IsCreated: false);
         }
 
         var approval = new ApprovalRequest(
@@ -382,8 +502,62 @@ internal sealed class AgentTaskRuntime(
             task.UserId,
             DateTimeOffset.UtcNow);
         approvalRepository.Add(approval);
-        return approval;
+        return new ApprovalRequestResolution(approval, IsCreated: true);
     }
+
+    private async Task<Result<ApprovalRequestResolution>> ResolveFinalOutputApprovalAsync(
+        AgentTask task,
+        string workspaceCode,
+        CancellationToken cancellationToken)
+    {
+        var approvals = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(task.Id),
+            cancellationToken);
+        var finalApprovals = approvals
+            .Where(approval => approval.ApprovalType == AgentApprovalType.FinalOutput)
+            .ToArray();
+        var pendingApprovals = approvals
+            .Where(approval => approval.Status == AgentApprovalStatus.Pending)
+            .ToArray();
+        if (finalApprovals.Length == 0 && pendingApprovals.Length == 0)
+        {
+            var approval = new ApprovalRequest(
+                task.Id,
+                AgentApprovalType.FinalOutput,
+                workspaceCode,
+                task.UserId,
+                DateTimeOffset.UtcNow);
+            approvalRepository.Add(approval);
+            return Result.Success(new ApprovalRequestResolution(approval, IsCreated: true));
+        }
+
+        if (finalApprovals.Length == 1 &&
+            finalApprovals[0].Status == AgentApprovalStatus.Pending &&
+            string.Equals(finalApprovals[0].TargetId, workspaceCode, StringComparison.Ordinal) &&
+            finalApprovals[0].RequestedBy == task.UserId &&
+            pendingApprovals.Length == 1 &&
+            pendingApprovals[0].Id == finalApprovals[0].Id)
+        {
+            var decisionProof = AgentFinalizationCheckpointStateValidator
+                .ValidateApprovalDecisionProof(finalApprovals[0]);
+            if (!decisionProof.IsSuccess)
+            {
+                return Result.From(decisionProof);
+            }
+
+            return Result.Success(new ApprovalRequestResolution(
+                finalApprovals[0],
+                IsCreated: false));
+        }
+
+        return Result.Failure(new ApiProblemDescriptor(
+            AppProblemCodes.AgentApprovalStateConflict,
+            "Final-output checkpoint requires no historical approval and no competing pending approval."));
+    }
+
+    private sealed record ApprovalRequestResolution(
+        ApprovalRequest Approval,
+        bool IsCreated);
 
     private async Task<bool> HasApprovedApprovalAsync(
         AgentTask task,
@@ -398,6 +572,21 @@ internal sealed class AgentTaskRuntime(
             approval.ApprovalType == approvalType &&
             approval.TargetId == targetId &&
             approval.Status == AgentApprovalStatus.Approved);
+    }
+
+    private async Task<bool> HasCompetingPendingApprovalAsync(
+        AgentTask task,
+        AgentApprovalType approvalType,
+        string targetId,
+        CancellationToken cancellationToken)
+    {
+        var pending = await approvalRepository.ListAsync(
+            new ApprovalRequestsByTaskSpec(task.Id, pendingOnly: true),
+            cancellationToken);
+        return pending.Count > 1 ||
+               pending.Count == 1 &&
+               (pending[0].ApprovalType != approvalType ||
+                !string.Equals(pending[0].TargetId, targetId, StringComparison.Ordinal));
     }
 
     private async Task<Result<AgentTask>> RejectStepAsync(

@@ -152,6 +152,7 @@ describe('chunkReducer', () => {
           canRun: false,
           canSubmitFinalReview: false,
           canApproveFinal: false,
+          canFinalizeWorkspace: false,
           isRunInProgress: false,
           isRunQueued: false
         })
@@ -199,6 +200,7 @@ describe('chunkReducer', () => {
           canRun: false,
           canSubmitFinalReview: false,
           canApproveFinal: false,
+          canFinalizeWorkspace: false,
           isRunInProgress: false,
           isRunQueued: false,
           planSchemaVersion: '2.0',

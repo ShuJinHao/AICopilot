@@ -287,19 +287,13 @@ export function useAgentWorkbench() {
       store.currentWorkspace.workspaceCode === latestTask.value.workspaceCode,
     ),
   )
-  const canSubmitFinalReview = computed(() =>
-    Boolean(
-      store.resolvedSessionId &&
-      latestTask.value?.canSubmitFinalReview &&
-      hasCurrentTaskWorkspaceProjection.value &&
-      !store.isAgentApprovalAuthorityUnknown &&
-      !store.isSessionTransitionBlocked,
-    ),
-  )
+  // P0 runtime owns final-review submission atomically with its checkpoint.
+  // Keep the legacy wire field, but never expose a duplicate submit action.
+  const canSubmitFinalReview = computed(() => false)
   const canFinalizeWorkspace = computed(() =>
     Boolean(
       store.resolvedSessionId &&
-      latestTask.value?.canApproveFinal &&
+      latestTask.value?.canFinalizeWorkspace &&
       hasCurrentTaskWorkspaceProjection.value &&
       store.currentWorkspace?.status !== 'Finalized' &&
       taskArtifacts.value.length > 0 &&

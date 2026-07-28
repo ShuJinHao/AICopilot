@@ -11,6 +11,38 @@ namespace AICopilot.AggregateTests;
 public sealed class AgentArtifactDomainTests
 {
     [Fact]
+    public void AgentStep_ShouldNotCompleteWhileWaitingForApproval()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            SessionId.New(),
+            Guid.NewGuid(),
+            "Approval invariant",
+            "Approval invariant",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.High,
+            null,
+            "{}",
+            now);
+        var step = task.AddStep(
+            "Finalize",
+            "Finalize only after approval.",
+            AgentStepType.Finalize,
+            "finalize_artifacts",
+            requiresApproval: true,
+            now);
+
+        var action = () => step.Complete(
+            """{"resultType":"finalization-checkpoint","status":"finalized"}""",
+            now);
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("Only running or approved agent steps can complete.");
+        step.Status.Should().Be(AgentStepStatus.WaitingApproval);
+        step.OutputJson.Should().BeNull();
+    }
+
+    [Fact]
     public void AgentTask_ShouldRequirePlanApprovalBeforeRun()
     {
         var now = DateTimeOffset.UtcNow;

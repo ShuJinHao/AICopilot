@@ -71,6 +71,166 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
     }
 
     [Fact]
+    public void ArtifactOutputBinding_ShouldRequireClosedExactPersistedIdentity()
+    {
+        var fixture = CreateArtifactProvenanceFixture((artifact, _) => CanonicalJson.Serialize(new
+        {
+            status = "completed",
+            resultType = "artifact",
+            artifactType = "markdown",
+            artifactId = artifact.Id.Value
+        }));
+        using var validDocument = JsonDocument.Parse(fixture.Step.OutputJson!);
+
+        AgentArtifactOutputContractBinding.MatchesExact(validDocument.RootElement, fixture.Artifact)
+            .Should().BeTrue();
+        AgentArtifactOutputContractBinding.MatchesExact(fixture.Step.OutputJson, fixture.Artifact)
+            .Should().BeTrue();
+
+        var snapshot = new AgentToolOutputSnapshot(
+            fixture.Step.OutputJson!,
+            Encoding.UTF8.GetByteCount(fixture.Step.OutputJson!));
+        AgentArtifactOutputBindingGate.Validate(
+                fixture.Task,
+                fixture.Workspace,
+                fixture.Step,
+                CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+                snapshot)
+            .IsValid.Should().BeTrue();
+        AgentArtifactOutputBindingGate.Validate(
+                fixture.Task,
+                fixture.Workspace,
+                fixture.Step,
+                CreateTool("generate_markdown_report", ToolProviderType.BuiltIn),
+                snapshot)
+            .IsValid.Should().BeFalse("only an Artifact provider may declare an artifact result");
+        const string nonArtifactJson =
+            """{"itemCount":1,"resultType":"table-summary","rowCount":1,"status":"completed"}""";
+        AgentArtifactOutputBindingGate.Validate(
+                fixture.Task,
+                fixture.Workspace,
+                fixture.Step,
+                CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+                new AgentToolOutputSnapshot(
+                    nonArtifactJson,
+                    Encoding.UTF8.GetByteCount(nonArtifactJson)))
+            .IsValid.Should().BeFalse("an Artifact provider must return one exact artifact identity");
+
+        var invalidOutputs = new[]
+        {
+            CanonicalJson.Serialize(new
+            {
+                status = "completed",
+                resultType = "artifact",
+                artifactType = "markdown",
+                artifactId = Guid.NewGuid()
+            }),
+            CanonicalJson.Serialize(new
+            {
+                status = "completed",
+                resultType = "artifact",
+                artifactType = "pdf",
+                artifactId = fixture.Artifact.Id.Value
+            }),
+            CanonicalJson.Serialize(new
+            {
+                status = "completed",
+                resultType = "artifact",
+                artifactType = "markdown",
+                artifactId = fixture.Artifact.Id.Value,
+                unexpected = true
+            }),
+            CanonicalJson.Serialize(new
+            {
+                resultType = "artifact",
+                artifactType = "markdown",
+                artifactId = fixture.Artifact.Id.Value
+            }),
+            CanonicalJson.Serialize(new
+            {
+                status = "completed",
+                resultType = "artifact",
+                artifactType = "markdown",
+                artifactId = fixture.Artifact.Id.Value.ToString("D").ToUpperInvariant()
+            }),
+            "[]",
+            "{"
+        };
+
+        invalidOutputs.Should().OnlyContain(output =>
+            !AgentArtifactOutputContractBinding.MatchesExact(output, fixture.Artifact));
+
+        var mismatchedSnapshot = new AgentToolOutputSnapshot(
+            invalidOutputs[0],
+            Encoding.UTF8.GetByteCount(invalidOutputs[0]));
+        AgentArtifactOutputBindingGate.Validate(
+                fixture.Task,
+                fixture.Workspace,
+                fixture.Step,
+                CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+                mismatchedSnapshot)
+            .IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void FinalizationProvenance_ShouldRejectMismatchedProducerOutputAndDanglingStepIdentity()
+    {
+        var exact = CreateArtifactProvenanceFixture((artifact, _) => CanonicalJson.Serialize(new
+        {
+            status = "completed",
+            resultType = "artifact",
+            artifactType = artifact.ArtifactType.ToString().ToLowerInvariant(),
+            artifactId = artifact.Id.Value
+        }));
+        AgentFinalizationCheckpointStateValidator.ValidateArtifactProvenance(exact.Task, exact.Workspace)
+            .IsSuccess.Should().BeTrue();
+
+        var finishedAt = typeof(AgentStep).GetProperty(nameof(AgentStep.FinishedAt))!;
+        var producerFinishedAt = exact.Step.FinishedAt;
+        finishedAt.SetValue(exact.Step, null);
+        AgentFinalizationCheckpointStateValidator.ValidateArtifactProvenance(exact.Task, exact.Workspace)
+            .IsSuccess.Should().BeFalse();
+        finishedAt.SetValue(exact.Step, producerFinishedAt);
+
+        var artifactCreatedAt = typeof(Artifact).GetProperty(nameof(Artifact.CreatedAt))!;
+        var originalArtifactCreatedAt = exact.Artifact.CreatedAt;
+        artifactCreatedAt.SetValue(exact.Artifact, exact.Step.StartedAt!.Value.AddTicks(-1));
+        AgentFinalizationCheckpointStateValidator.ValidateArtifactProvenance(exact.Task, exact.Workspace)
+            .IsSuccess.Should().BeFalse();
+        artifactCreatedAt.SetValue(exact.Artifact, originalArtifactCreatedAt);
+
+        var mismatched = CreateArtifactProvenanceFixture((_, _) => CanonicalJson.Serialize(new
+        {
+            status = "completed",
+            resultType = "artifact",
+            artifactType = "markdown",
+            artifactId = Guid.NewGuid()
+        }));
+        var mismatchResult = AgentFinalizationCheckpointStateValidator.ValidateArtifactProvenance(
+            mismatched.Task,
+            mismatched.Workspace);
+        mismatchResult.IsSuccess.Should().BeFalse();
+        mismatchResult.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+
+        var dangling = CreateArtifactProvenanceFixture(
+            (artifact, _) => CanonicalJson.Serialize(new
+            {
+                status = "completed",
+                resultType = "artifact",
+                artifactType = "markdown",
+                artifactId = artifact.Id.Value
+            }),
+            bindArtifactToProducer: false);
+        var danglingResult = AgentFinalizationCheckpointStateValidator.ValidateArtifactProvenance(
+            dangling.Task,
+            dangling.Workspace);
+        danglingResult.IsSuccess.Should().BeFalse();
+        danglingResult.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+    }
+
+    [Fact]
     public void AgentPlannerToolSummary_DefaultOutputSchema_ShouldBeFrozenStrictEmptyObject()
     {
         var summary = new AgentPlannerToolSummary(
@@ -1240,6 +1400,54 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
             payload
         };
     }
+
+    private static ArtifactProvenanceFixture CreateArtifactProvenanceFixture(
+        Func<Artifact, AgentStep, string> buildOutput,
+        bool bindArtifactToProducer = true)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new AgentTask(
+            SessionId.New(),
+            UserId,
+            "Artifact provenance fixture",
+            "Artifact provenance fixture",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
+            null,
+            "{}",
+            now);
+        var step = task.AddStep(
+            "Generate markdown",
+            "Generate the persisted artifact.",
+            AgentStepType.ArtifactGeneration,
+            "generate_markdown_report",
+            requiresApproval: false,
+            now);
+        var workspace = new ArtifactWorkspace(
+            task.Id,
+            $"ws_{Guid.NewGuid():N}",
+            @"C:\aicopilot-workspaces\test",
+            "/api/aigateway/workspaces/test",
+            now);
+        var artifact = workspace.AddDraftArtifact(
+            ArtifactType.Markdown,
+            "report.md",
+            "draft/report.md",
+            1,
+            "text/markdown",
+            bindArtifactToProducer ? step.Id : AgentStepId.New(),
+            now);
+        task.AttachWorkspace(workspace.Id, now);
+        step.Start(now);
+        step.Complete(buildOutput(artifact, step), now);
+        return new ArtifactProvenanceFixture(task, workspace, step, artifact);
+    }
+
+    private sealed record ArtifactProvenanceFixture(
+        AgentTask Task,
+        ArtifactWorkspace Workspace,
+        AgentStep Step,
+        Artifact Artifact);
 
     private sealed class StatefulProviderOutput
     {

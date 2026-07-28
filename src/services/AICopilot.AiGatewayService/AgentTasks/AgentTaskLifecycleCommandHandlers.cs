@@ -12,77 +12,19 @@ using AICopilot.SharedKernel.Result;
 namespace AICopilot.AiGatewayService.AgentTasks;
 
 public sealed class ApproveAgentTaskPlanCommandHandler(
-    IRepository<AgentTask> repository,
-    IRepository<ApprovalRequest> approvalRepository,
     AgentTaskDtoQueryService dtoQueryService,
-    AgentAuditRecorder auditRecorder,
-    ICurrentUser currentUser,
-    AgentPlanDraftConfirmationService planDraftConfirmationService,
-    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
+    AgentApprovalDecisionCoordinator approvalDecisionCoordinator)
     : ICommandHandler<ApproveAgentTaskPlanCommand, Result<AgentTaskDto>>
 {
     public async Task<Result<AgentTaskDto>> Handle(ApproveAgentTaskPlanCommand request, CancellationToken cancellationToken)
     {
-        var taskResult = await AgentTaskCommandLoader.LoadTaskAsync(repository, currentUser, request.Id, cancellationToken);
-        if (!taskResult.IsSuccess)
-        {
-            return Result.From(taskResult);
-        }
-
-        var task = taskResult.Value!;
-        var userId = currentUser.Id!.Value;
-        var now = DateTimeOffset.UtcNow;
-        var approval = await approvalRepository.FirstOrDefaultAsync(
-            new PendingApprovalRequestByTaskAndTargetSpec(
-                task.Id,
-                AgentApprovalType.Plan,
-                task.Id.Value.ToString()),
+        var result = await approvalDecisionCoordinator.ApprovePlanForTaskAsync(
+            request.Id,
+            "Plan approved.",
             cancellationToken);
-        if (approval is null && task.Status is AgentTaskStatus.Draft or AgentTaskStatus.WaitingPlanApproval)
-        {
-            approval = new ApprovalRequest(
-                task.Id,
-                AgentApprovalType.Plan,
-                task.Id.Value.ToString(),
-                task.UserId,
-                now);
-            approvalRepository.Add(approval);
-        }
-
-        if (task.Status is AgentTaskStatus.Draft or AgentTaskStatus.WaitingPlanApproval)
-        {
-            var confirmation = await planDraftConfirmationService.ConfirmAsync(task, now, cancellationToken);
-            if (!confirmation.IsSuccess)
-            {
-                return Result.From(confirmation);
-            }
-
-            task.ApprovePlan(now);
-        }
-
-        if (approval is not null)
-        {
-            approval.Approve(userId, "Plan approved.", now);
-            approvalRepository.Update(approval);
-            if (timelineProjectionWriter is not null)
-            {
-                await timelineProjectionWriter.StageApprovalDecidedAsync(task, approval, cancellationToken);
-            }
-        }
-
-        repository.Update(task);
-        if (approval is not null)
-        {
-            await auditRecorder.RecordApprovalDecisionAsync(
-                approval,
-                task,
-                AuditResults.Succeeded,
-                "Agent task plan approved.",
-                cancellationToken);
-        }
-
-        await repository.SaveChangesAsync(cancellationToken);
-        return Result.Success(await dtoQueryService.MapAsync(task, cancellationToken));
+        return result.IsSuccess
+            ? Result.Success(await dtoQueryService.MapAsync(result.Value!, cancellationToken))
+            : Result.From(result);
     }
 }
 

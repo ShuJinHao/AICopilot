@@ -138,6 +138,7 @@ export interface AgentTask {
   canRetry?: boolean
   canSubmitFinalReview: boolean
   canApproveFinal: boolean
+  canFinalizeWorkspace: boolean
   failureSummary?: AgentTaskFailureSummary | null
   activeRunAttemptId?: string | null
   runAttemptCount?: number

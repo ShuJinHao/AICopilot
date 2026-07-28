@@ -56,6 +56,7 @@ public sealed record AgentTaskDto(
     bool CanRetry = false,
     bool CanSubmitFinalReview = false,
     bool CanApproveFinal = false,
+    bool CanFinalizeWorkspace = false,
     AgentTaskFailureSummaryDto? FailureSummary = null,
     Guid? ActiveRunAttemptId = null,
     int RunAttemptCount = 0,
@@ -196,7 +197,7 @@ internal static class AgentTaskDtoMapper
         int pendingApprovalCount = 0,
         AgentTaskRunQueueItem? activeQueueItem = null,
         bool canApproveFinal = false,
-        bool? canSubmitFinalReview = null)
+        bool canFinalizeWorkspace = false)
     {
         var planMetadata = AgentTaskPlanMetadataResolver.Resolve(task);
         var hasExecutablePlan =
@@ -231,9 +232,9 @@ internal static class AgentTaskDtoMapper
                 or AgentTaskStatus.GeneratingArtifacts
                 or AgentTaskStatus.WaitingToolApproval),
             hasExecutablePlan && task.Status is AgentTaskStatus.Failed,
-            hasExecutablePlan &&
-            task.Status is AgentTaskStatus.WorkspaceReady && (canSubmitFinalReview ?? true),
+            false,
             hasExecutablePlan && task.Status is AgentTaskStatus.WaitingFinalApproval && canApproveFinal,
+            hasExecutablePlan && task.Status is AgentTaskStatus.WaitingFinalApproval && canFinalizeWorkspace,
             AgentTaskFailureSummaryResolver.Resolve(task),
             task.ActiveRunAttemptId?.Value,
             task.RunAttemptCount,

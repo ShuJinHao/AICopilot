@@ -431,6 +431,7 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
                 new InMemoryRepository<ApprovalRequest>(approval),
                 new InMemoryRepository<AgentTask>(task),
                 new InMemoryRepository<ArtifactWorkspace>(workspace),
+                attemptRepository,
                 new AgentAuditRecorder(new CapturingAuditLogWriter()),
                 new AgentTaskRunQueue(
                     queueRepository,
@@ -953,23 +954,31 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         var knowledgeBaseId = Guid.NewGuid();
         var (task, workspace) = CreateRagApprovedTask(knowledgeBaseId);
         var executionRepository = new InMemoryToolExecutionAuditStore();
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>();
+        var attempts = new InMemoryAgentTaskRunAttemptStore();
         var accessChecker = new RecordingKnowledgeBaseAccessChecker();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
-            new InMemoryRepository<ApprovalRequest>(),
+            approvalRepository,
             executionRepository,
             CreateGuard(CreateTool("rag_search", ToolProviderType.BuiltIn)),
             knowledgeBaseAccessCheckers: [accessChecker],
-            identityAccessService: new StubIdentityAccessService([], roleName: "Admin"));
+            identityAccessService: new StubIdentityAccessService([], roleName: "Admin"),
+            runAttemptRepository: attempts,
+            freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
 
         var result = await runtime.RunAsync(task, CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        task.Status.Should().Be(AgentTaskStatus.Failed);
         accessChecker.ObservedUserId.Should().Be(UserId);
         accessChecker.ObservedIsAdmin.Should().BeTrue();
         executionRepository.Items.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Succeeded);
+        approvalRepository.Items.Should().BeEmpty("P0 has no no-artifact finalization semantics");
+        var attempt = attempts.Items.Should().ContainSingle().Which;
+        attempt.Status.Should().Be(AgentTaskRunAttemptStatus.Failed);
+        attempt.FailureCode.Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
     }
     [Fact]
     public async Task GetSessionTimeline_ShouldExposeRagStepSummaryWithoutRawOutput()
@@ -1278,6 +1287,459 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         attempts.Items.Should().NotContain(item => item.Status == AgentTaskRunAttemptStatus.Succeeded);
     }
 
+    [Fact]
+    public async Task AgentTaskRuntime_ShouldFailEmptyWorkspaceBeforeCreatingFinalOutputApproval()
+    {
+        var (task, workspace) = CreateDownstreamRuntimeApprovedTask(
+            "generate_markdown_report");
+        var approvals = new InMemoryRepository<ApprovalRequest>();
+        var attempts = new InMemoryAgentTaskRunAttemptStore();
+        var executions = new InMemoryToolExecutionAuditStore();
+        var runtime = CreateRuntime(
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ArtifactWorkspace>(workspace),
+            approvals,
+            executions,
+            CreateGuard(
+                CreateTool("generate_markdown_report", ToolProviderType.Artifact),
+                CreateTool(
+                    "finalize_artifacts",
+                    ToolProviderType.Artifact,
+                    requiresApproval: true,
+                    riskLevel: AiToolRiskLevel.RequiresApproval)),
+            toolExecutors:
+            [
+                new FixedResultAgentToolExecutor(
+                    "generate_markdown_report",
+                    AgentToolExecutionResult.From(new
+                    {
+                        status = "completed",
+                        resultType = "artifact",
+                        artifactType = "markdown",
+                        artifactId = Guid.NewGuid().ToString("D")
+                    }))
+            ],
+            runAttemptRepository: attempts,
+            freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
+
+        var result = await runtime.RunAsync(task, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue("runtime failures are persisted as typed task outcomes");
+        task.Status.Should().Be(AgentTaskStatus.Failed);
+        task.Steps.Single(step => step.ToolCode == "generate_markdown_report")
+            .Status.Should().Be(AgentStepStatus.Failed);
+        task.Steps.Single(step => step.ToolCode == "finalize_artifacts")
+            .Status.Should().Be(AgentStepStatus.WaitingApproval);
+        task.ActiveRunAttemptId.Should().BeNull();
+        task.RunLeaseId.Should().BeNull();
+        task.RunLeaseOwner.Should().BeNull();
+        task.RunLeaseExpiresAt.Should().BeNull();
+        var attempt = attempts.Items.Should().ContainSingle().Which;
+        attempt.Status.Should().Be(AgentTaskRunAttemptStatus.Failed);
+        attempt.FailureCode.Should().Be(AppProblemCodes.ToolOutputSchemaInvalid);
+        attempt.LeaseId.Should().BeNull();
+        attempt.LeaseOwner.Should().BeNull();
+        attempt.LeaseExpiresAt.Should().BeNull();
+        approvals.Items.Should().BeEmpty("an empty workspace must not leave an orphan final approval");
+        var execution = executions.Items.Should().ContainSingle().Which;
+        execution.ToolCode.Should().Be("generate_markdown_report");
+        execution.Status.Should().Be(ToolExecutionStatus.Failed);
+        execution.ErrorCode.Should().Be(AppProblemCodes.ToolOutputSchemaInvalid);
+        executions.Items.Should().NotContain(item => item.ToolCode == "finalize_artifacts");
+    }
+
+    [Fact]
+    public async Task AgentTaskRuntime_ShouldTreatFinalOutputAsIdempotentApprovalCheckpointOnResume()
+    {
+        var (task, workspace) = CreateDownstreamRuntimeApprovedTask("generate_markdown_report");
+        var now = DateTimeOffset.UtcNow;
+        var artifactStep = task.Steps.Single(step => step.ToolCode == "generate_markdown_report");
+        artifactStep.Start(now);
+        var artifact = workspace.AddDraftArtifact(
+            ArtifactType.Markdown,
+            "report.md",
+            "draft/report.md",
+            1,
+            "text/markdown",
+            artifactStep.Id,
+            now);
+        artifactStep.Complete(CanonicalJson.Serialize(new
+        {
+            status = "completed",
+            resultType = "artifact",
+            artifactType = "markdown",
+            artifactId = artifact.Id.Value
+        }), now);
+        task.Start(now);
+        task.MarkWorkspaceReady(now);
+        task.WaitForFinalApproval(now);
+        var finalStep = task.Steps.Single(step => step.ToolCode == "finalize_artifacts");
+        finalStep.Approve();
+        var approval = new ApprovalRequest(
+            task.Id,
+            AgentApprovalType.FinalOutput,
+            workspace.WorkspaceCode,
+            task.UserId,
+            now);
+        approval.Approve(task.UserId, "approved", now);
+        var approvals = new InMemoryRepository<ApprovalRequest>(approval);
+        var activeAttempt = new AgentTaskRunAttempt(
+            task.Id,
+            attemptNo: 1,
+            AgentTaskRunTriggerType.Manual,
+            "finalization-resume-fixture",
+            now,
+            TimeSpan.FromMinutes(5));
+        task.BeginRunAttempt(
+            activeAttempt.Id,
+            activeAttempt.AttemptNo,
+            activeAttempt.LeaseId!.Value,
+            activeAttempt.LeaseOwner!,
+            activeAttempt.LeaseExpiresAt!.Value,
+            now);
+        activeAttempt.WaitForApproval(now, "Waiting for final output approval.");
+        task.ReleaseRunLease(now, clearActiveAttempt: false);
+        var attempts = new InMemoryAgentTaskRunAttemptStore(activeAttempt);
+        var executions = new InMemoryToolExecutionAuditStore();
+        var runtime = CreateRuntime(
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ArtifactWorkspace>(workspace),
+            approvals,
+            executions,
+            CreateGuard(CreateTool(
+                "finalize_artifacts",
+                ToolProviderType.Artifact,
+                requiresApproval: true,
+                riskLevel: AiToolRiskLevel.RequiresApproval)),
+            toolExecutors:
+            [
+                new FixedResultAgentToolExecutor(
+                    "finalize_artifacts",
+                    AgentToolExecutionResult.From(new { mustNotExecute = true }))
+            ],
+            runAttemptRepository: attempts,
+            freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate());
+
+        var result = await runtime.RunAsync(
+            task,
+            AgentTaskRunTriggerType.ApprovalResume,
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        finalStep.Status.Should().Be(AgentStepStatus.Approved);
+        approvals.Items.Should().ContainSingle().Which.Id.Should().Be(approval.Id);
+        attempts.Items.Should().ContainSingle().Which.Id.Should().Be(activeAttempt.Id);
+        activeAttempt.Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
+        task.ActiveRunAttemptId.Should().Be(activeAttempt.Id);
+        executions.Items.Should().BeEmpty("finalize_artifacts is not dispatched as a provider tool");
+    }
+
+    [Fact]
+    public async Task AgentTaskRuntime_ShouldRejectCorruptWaitingFinalCheckpointWithoutMutation()
+    {
+        var (task, workspace) = CreateDownstreamRuntimeApprovedTask("generate_markdown_report");
+        var now = DateTimeOffset.UtcNow;
+        var artifactStep = task.Steps.Single(step => step.ToolCode == "generate_markdown_report");
+        artifactStep.Start(now);
+        var artifact = workspace.AddDraftArtifact(
+            ArtifactType.Markdown,
+            "report.md",
+            "draft/report.md",
+            1,
+            "text/markdown",
+            artifactStep.Id,
+            now);
+        artifactStep.Complete(CanonicalJson.Serialize(new
+        {
+            status = "completed",
+            resultType = "artifact",
+            artifactType = "markdown",
+            artifactId = artifact.Id.Value
+        }), now);
+        task.Start(now);
+        task.MarkWorkspaceReady(now);
+        task.WaitForFinalApproval(now);
+        var finalStep = task.Steps.Single(step => step.ToolCode == "finalize_artifacts");
+        var finalApproval = new ApprovalRequest(
+            task.Id,
+            AgentApprovalType.FinalOutput,
+            workspace.WorkspaceCode,
+            task.UserId,
+            now);
+        var competingApproval = new ApprovalRequest(
+            task.Id,
+            AgentApprovalType.ToolCall,
+            artifactStep.Id.Value.ToString("D"),
+            task.UserId,
+            now);
+        var approvals = new InMemoryRepository<ApprovalRequest>(finalApproval, competingApproval);
+        var activeAttempt = new AgentTaskRunAttempt(
+            task.Id,
+            attemptNo: 1,
+            AgentTaskRunTriggerType.Manual,
+            "corrupt-finalization-resume-fixture",
+            now,
+            TimeSpan.FromMinutes(5));
+        task.BeginRunAttempt(
+            activeAttempt.Id,
+            activeAttempt.AttemptNo,
+            activeAttempt.LeaseId!.Value,
+            activeAttempt.LeaseOwner!,
+            activeAttempt.LeaseExpiresAt!.Value,
+            now);
+        activeAttempt.WaitForApproval(now, "Waiting for final output approval.");
+        task.ReleaseRunLease(now, clearActiveAttempt: false);
+        var attempts = new InMemoryAgentTaskRunAttemptStore(activeAttempt);
+        var executions = new InMemoryToolExecutionAuditStore();
+        var audits = new CapturingAuditLogWriter();
+        var executorInvoked = false;
+        var runtime = CreateRuntime(
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryRepository<ArtifactWorkspace>(workspace),
+            approvals,
+            executions,
+            CreateGuard(CreateTool(
+                "finalize_artifacts",
+                ToolProviderType.Artifact,
+                requiresApproval: true,
+                riskLevel: AiToolRiskLevel.RequiresApproval)),
+            toolExecutors:
+            [
+                new DeferredResultAgentToolExecutor(
+                    "finalize_artifacts",
+                    () =>
+                    {
+                        executorInvoked = true;
+                        return AgentToolExecutionResult.From(new { mustNotExecute = true });
+                    })
+            ],
+            runAttemptRepository: attempts,
+            freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate(),
+            auditLogWriter: audits);
+
+        var result = await runtime.RunAsync(
+            task,
+            AgentTaskRunTriggerType.ApprovalResume,
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        task.ActiveRunAttemptId.Should().Be(activeAttempt.Id);
+        task.RunLeaseId.Should().BeNull();
+        artifactStep.Status.Should().Be(AgentStepStatus.Completed);
+        finalStep.Status.Should().Be(AgentStepStatus.WaitingApproval);
+        finalStep.OutputJson.Should().BeNull();
+        workspace.Status.Should().Be(ArtifactWorkspaceStatus.Active);
+        artifact.Status.Should().Be(ArtifactStatus.Draft);
+        artifact.RelativePath.Should().Be("draft/report.md");
+        approvals.Items.Select(item => item.Id).Should().BeEquivalentTo(
+            [finalApproval.Id, competingApproval.Id]);
+        approvals.Items.Should().OnlyContain(item => item.Status == AgentApprovalStatus.Pending);
+        attempts.Items.Should().ContainSingle().Which.Should().BeSameAs(activeAttempt);
+        activeAttempt.Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
+        executions.Items.Should().BeEmpty();
+        audits.Requests.Should().BeEmpty();
+        executorInvoked.Should().BeFalse();
+    }
+
+    [Fact]
+    public void FinalizationCheckpointValidator_ShouldRejectStaleStepAndAttemptTerminalMetadata()
+    {
+        var fixture = CreatePausedFinalizationFixture();
+        AgentFinalizationCheckpointStateValidator.ValidatePaused(
+                fixture.Task,
+                fixture.Workspace,
+                [fixture.Approval],
+                fixture.Attempts)
+            .IsSuccess.Should().BeTrue();
+
+        var corruptions = new (object Target, string PropertyName, object Value)[]
+        {
+            (fixture.FinalStep, nameof(AgentStep.OutputJson), "{}"),
+            (fixture.FinalStep, nameof(AgentStep.ErrorMessage), "stale failure"),
+            (fixture.FinalStep, nameof(AgentStep.StartedAt), DateTimeOffset.UtcNow),
+            (fixture.FinalStep, nameof(AgentStep.FinishedAt), DateTimeOffset.UtcNow),
+            (fixture.ActiveAttempt, nameof(AgentTaskRunAttempt.CompletedAt), DateTimeOffset.UtcNow),
+            (fixture.ActiveAttempt, nameof(AgentTaskRunAttempt.FailureCode), "stale_failure"),
+            (fixture.Task, nameof(AgentTask.CompletedAt), DateTimeOffset.UtcNow),
+            (fixture.Task, nameof(AgentTask.FinalSummary), "stale terminal summary"),
+            (fixture.Workspace.Artifacts.Single(), nameof(Artifact.FinalizedAt), DateTimeOffset.UtcNow),
+            (fixture.Approval, nameof(ApprovalRequest.ApprovedBy), Guid.NewGuid()),
+            (fixture.Approval, nameof(ApprovalRequest.ApprovedAt), DateTimeOffset.UtcNow),
+            (fixture.Approval, nameof(ApprovalRequest.ApprovalComment), "stale decision")
+        };
+
+        foreach (var corruption in corruptions)
+        {
+            var property = corruption.Target.GetType().GetProperty(corruption.PropertyName)!;
+            property.SetValue(corruption.Target, corruption.Value);
+            var result = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+                fixture.Task,
+                fixture.Workspace,
+                [fixture.Approval],
+                fixture.Attempts);
+            result.IsSuccess.Should().BeFalse(corruption.PropertyName);
+            result.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+                .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+            property.SetValue(corruption.Target, null);
+        }
+
+        var stepType = typeof(AgentStep).GetProperty(nameof(AgentStep.StepType))!;
+        var producerStep = fixture.Task.Steps.Single(step => step.ToolCode == "generate_markdown_report");
+        stepType.SetValue(producerStep, AgentStepType.Finalize);
+        var aliasFinalize = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        aliasFinalize.IsSuccess.Should().BeFalse();
+        aliasFinalize.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        stepType.SetValue(producerStep, AgentStepType.ArtifactGeneration);
+
+        var approvalCreatedAt = typeof(ApprovalRequest).GetProperty(nameof(ApprovalRequest.CreatedAt))!;
+        var originalApprovalCreatedAt = fixture.Approval.CreatedAt;
+        approvalCreatedAt.SetValue(fixture.Approval, fixture.Task.CreatedAt.AddTicks(-1));
+        var prematureApproval = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        prematureApproval.IsSuccess.Should().BeFalse();
+        prematureApproval.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        approvalCreatedAt.SetValue(fixture.Approval, originalApprovalCreatedAt);
+
+        var workspaceCreatedAt = typeof(ArtifactWorkspace)
+            .GetProperty(nameof(ArtifactWorkspace.CreatedAt))!;
+        var originalWorkspaceCreatedAt = fixture.Workspace.CreatedAt;
+        workspaceCreatedAt.SetValue(fixture.Workspace, fixture.Task.CreatedAt.AddTicks(-1));
+        var prematureWorkspace = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        prematureWorkspace.IsSuccess.Should().BeFalse();
+        prematureWorkspace.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        workspaceCreatedAt.SetValue(fixture.Workspace, originalWorkspaceCreatedAt);
+
+        var producerStartedAt = typeof(AgentStep).GetProperty(nameof(AgentStep.StartedAt))!;
+        var originalProducerStartedAt = producerStep.StartedAt;
+        producerStartedAt.SetValue(producerStep, fixture.Workspace.CreatedAt.AddTicks(-1));
+        var prematureProducer = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        prematureProducer.IsSuccess.Should().BeFalse();
+        prematureProducer.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        producerStartedAt.SetValue(producerStep, originalProducerStartedAt);
+
+        fixture.FinalStep.Approve();
+        typeof(ApprovalRequest).GetProperty(nameof(ApprovalRequest.Status))!
+            .SetValue(fixture.Approval, AgentApprovalStatus.Approved);
+        var approvedWithoutProof = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        approvedWithoutProof.IsSuccess.Should().BeFalse();
+        approvedWithoutProof.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+    }
+
+    [Fact]
+    public void FinalizationCheckpointValidator_ShouldRejectLeasedOrForeignHistoricalAttempt()
+    {
+        var fixture = CreatePausedFinalizationFixture(includeTerminalHistory: true);
+        AgentFinalizationCheckpointStateValidator.ValidatePaused(
+                fixture.Task,
+                fixture.Workspace,
+                [fixture.Approval],
+                fixture.Attempts)
+            .IsSuccess.Should().BeTrue();
+
+        var historicalAttempt = fixture.Attempts.Single(attempt => attempt.AttemptNo == 1);
+        var leaseId = typeof(AgentTaskRunAttempt).GetProperty(nameof(AgentTaskRunAttempt.LeaseId))!;
+        leaseId.SetValue(historicalAttempt, Guid.NewGuid());
+        var staleLease = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        staleLease.IsSuccess.Should().BeFalse();
+        staleLease.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        leaseId.SetValue(historicalAttempt, null);
+
+        var completedAt = typeof(AgentTaskRunAttempt).GetProperty(nameof(AgentTaskRunAttempt.CompletedAt))!;
+        var terminalTime = historicalAttempt.CompletedAt;
+        terminalTime.Should().NotBeNull();
+        completedAt.SetValue(historicalAttempt, null);
+        historicalAttempt.CompletedAt.Should().BeNull();
+        historicalAttempt.IsTerminal.Should().BeTrue();
+        var missingTerminalProof = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        missingTerminalProof.IsSuccess.Should().BeFalse();
+        missingTerminalProof.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        completedAt.SetValue(historicalAttempt, terminalTime);
+
+        completedAt.SetValue(historicalAttempt, historicalAttempt.StartedAt.AddTicks(-1));
+        var invertedHistoricalAttempt = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        invertedHistoricalAttempt.IsSuccess.Should().BeFalse();
+        invertedHistoricalAttempt.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        completedAt.SetValue(historicalAttempt, terminalTime);
+
+        completedAt.SetValue(historicalAttempt, fixture.ActiveAttempt.StartedAt.AddTicks(1));
+        var overlappingAttempts = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        overlappingAttempts.IsSuccess.Should().BeFalse();
+        overlappingAttempts.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        completedAt.SetValue(historicalAttempt, terminalTime);
+
+        var startedAt = typeof(AgentTaskRunAttempt)
+            .GetProperty(nameof(AgentTaskRunAttempt.StartedAt))!;
+        var activeStartedAt = fixture.ActiveAttempt.StartedAt;
+        startedAt.SetValue(fixture.ActiveAttempt, fixture.Task.CreatedAt.AddTicks(-1));
+        var prematureActiveAttempt = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        prematureActiveAttempt.IsSuccess.Should().BeFalse();
+        prematureActiveAttempt.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        startedAt.SetValue(fixture.ActiveAttempt, activeStartedAt);
+
+        var taskId = typeof(AgentTaskRunAttempt).GetProperty(nameof(AgentTaskRunAttempt.TaskId))!;
+        taskId.SetValue(historicalAttempt, AgentTaskId.New());
+        var foreignAttempt = AgentFinalizationCheckpointStateValidator.ValidatePaused(
+            fixture.Task,
+            fixture.Workspace,
+            [fixture.Approval],
+            fixture.Attempts);
+        foreignAttempt.IsSuccess.Should().BeFalse();
+        foreignAttempt.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+    }
     [Fact]
     public async Task AgentTaskRuntime_ShouldBlockMcpTool_WhenRuntimeSafetyPolicyRejectsIt()
     {
@@ -1621,6 +2083,96 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         return (task, workspace);
     }
 
+    private static PausedFinalizationFixture CreatePausedFinalizationFixture(
+        bool includeTerminalHistory = false)
+    {
+        var (task, workspace) = CreateDownstreamRuntimeApprovedTask("generate_markdown_report");
+        var now = DateTimeOffset.UtcNow;
+        var artifactStep = task.Steps.Single(step => step.ToolCode == "generate_markdown_report");
+        artifactStep.Start(now);
+        var artifact = workspace.AddDraftArtifact(
+            ArtifactType.Markdown,
+            "report.md",
+            "draft/report.md",
+            1,
+            "text/markdown",
+            artifactStep.Id,
+            now);
+        artifactStep.Complete(CanonicalJson.Serialize(new
+        {
+            status = "completed",
+            resultType = "artifact",
+            artifactType = "markdown",
+            artifactId = artifact.Id.Value
+        }), now);
+        task.Start(now);
+        task.MarkWorkspaceReady(now);
+        task.WaitForFinalApproval(now);
+        var finalStep = task.Steps.Single(step => step.ToolCode == "finalize_artifacts");
+        var approval = new ApprovalRequest(
+            task.Id,
+            AgentApprovalType.FinalOutput,
+            workspace.WorkspaceCode,
+            task.UserId,
+            now);
+        var attempts = new List<AgentTaskRunAttempt>();
+        if (includeTerminalHistory)
+        {
+            var historicalAttempt = new AgentTaskRunAttempt(
+                task.Id,
+                attemptNo: 1,
+                AgentTaskRunTriggerType.Manual,
+                "historical-finalization-fixture",
+                now,
+                TimeSpan.FromMinutes(5));
+            task.BeginRunAttempt(
+                historicalAttempt.Id,
+                historicalAttempt.AttemptNo,
+                historicalAttempt.LeaseId!.Value,
+                historicalAttempt.LeaseOwner!,
+                historicalAttempt.LeaseExpiresAt!.Value,
+                now);
+            historicalAttempt.MarkFailed(
+                "historical_failure",
+                "Historical attempt failed safely.",
+                now);
+            task.ReleaseRunLease(now, clearActiveAttempt: true);
+            attempts.Add(historicalAttempt);
+        }
+
+        var attempt = new AgentTaskRunAttempt(
+            task.Id,
+            attemptNo: includeTerminalHistory ? 2 : 1,
+            AgentTaskRunTriggerType.Manual,
+            "paused-finalization-fixture",
+            now,
+            TimeSpan.FromMinutes(5));
+        task.BeginRunAttempt(
+            attempt.Id,
+            attempt.AttemptNo,
+            attempt.LeaseId!.Value,
+            attempt.LeaseOwner!,
+            attempt.LeaseExpiresAt!.Value,
+            now);
+        attempt.WaitForApproval(now, "Waiting for final output approval.");
+        task.ReleaseRunLease(now, clearActiveAttempt: false);
+        attempts.Add(attempt);
+        return new PausedFinalizationFixture(
+            task,
+            workspace,
+            finalStep,
+            approval,
+            attempt,
+            attempts);
+    }
+
+    private sealed record PausedFinalizationFixture(
+        AgentTask Task,
+        ArtifactWorkspace Workspace,
+        AgentStep FinalStep,
+        ApprovalRequest Approval,
+        AgentTaskRunAttempt ActiveAttempt,
+        IReadOnlyCollection<AgentTaskRunAttempt> Attempts);
 
     private sealed class FixedResultAgentToolExecutor(
         string toolCode,

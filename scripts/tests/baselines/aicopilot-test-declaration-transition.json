@@ -6,17 +6,17 @@
     "gitTree": "88aee67db521a1a33ff6de524c0163d513396123",
     "declarationCount": 785,
     "orderedSymbolSha256": "62a8fa4fe89e98b8b7be0a74f020db16c5bbdac3714b1838e194b2bef189e312",
-    "transitionContentSha256": "21c311961acafbba600a2d5b7f5f43b472858317cdd550d1bba4b4f9be2589b8"
+    "transitionContentSha256": "1d91123d75f24b60d809586de6e3c9ccf3869818ffef8e83bbf05f7f1f19726a"
   },
   "current": {
     "baselinePath": "scripts/tests/baselines/aicopilot-test-cases.json",
-    "availableDeclarationCount": 845
+    "availableDeclarationCount": 857
   },
   "summary": {
-    "retainedSelf": 628,
+    "retainedSelf": 627,
     "retiredDuplicate": 0,
     "retiredSourceGuard": 2,
-    "replaced": 155
+    "replaced": 156
   },
   "transitions": [
     {
@@ -650,9 +650,9 @@
       "oldSymbol": "AICopilot.ArchitectureTests.ArchitectureBoundaryTests.ArtifactWorkspaceSubmitFinalize_ShouldStayBehindCoordinator()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.AgentArtifactHttpEndToEndTests.PlanCompilerUnavailable_ShouldFailClosedWithoutWorkspaceArtifactOrApproval"
+        "AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests.PrivilegedApprover_ShouldCrossUserApproveToolFinalOutput_AndFinalize"
       ],
-      "reason": "P0 生产没有可信 compiler，旧正向 submit/finalize 闭环由真实 Aspire HTTP fail-closed 证据替代：确认与运行均拒绝，且不创建 approval、workspace、artifact、tool execution 或 final output。"
+      "reason": "workspace finalization 协调、终审权限、download、幂等终态和审计由真实 Aspire HTTP 与隔离 downstream runtime harness 的精确行为测试覆盖；P0 生产 PlanCompiler 仍 fail-closed。"
     },
     {
       "oldSymbol": "AICopilot.ArchitectureTests.ArchitectureBoundaryTests.ArtifactWorkspaceP9_ShouldStayBehindCoordinator()",
@@ -1488,11 +1488,11 @@
     },
     {
       "oldSymbol": "AICopilot.BackendTests.AgentApprovalPermissionHardeningTests.UserRole_ShouldSubmitFinalReview_ButCannotApproveToolFinalOrFinalize()",
-      "disposition": "retained-self",
+      "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests.UserRole_ShouldSubmitFinalReview_ButCannotApproveToolFinalOrFinalize"
+        "AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests.UserRole_ShouldRejectLegacyWorkspaceReadySubmit_AndCannotApproveOrFinalize"
       ],
-      "reason": "测试方法名与语义保持不变；仅迁入新的物理 runner/支持项目分层。"
+      "reason": "旧用例允许 legacy workspace-ready submit；当前真实 HTTP runtime checkpoint 必须 fail-closed，普通用户仍不能批准或终审。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.UploadRecordPersistenceCommitTests.SessionUpload_ShouldLeavePendingAndReconcile_WhenCommitOutcomeIsUnknown()",
@@ -3803,9 +3803,10 @@
       "oldSymbol": "AICopilot.BackendTests.AcceptanceClosureVerificationTests.AgentArtifactClosure_ShouldFinalizeDownloadAndExposeTaskAuditSummary()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.AgentArtifactHttpEndToEndTests.PlanCompilerUnavailable_ShouldFailClosedWithoutWorkspaceArtifactOrApproval"
+        "AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests.PrivilegedApprover_ShouldCrossUserApproveToolFinalOutput_AndFinalize",
+        "AICopilot.HttpIntegrationTests.AgentArtifactVersioningTests.Owner_ShouldEditDiffDownloadAndRestoreDraftTextArtifact"
       ],
-      "reason": "旧正向 artifact finalize/download 混合闭环不适用于 P0 fail-closed runtime；真实 Aspire HTTP 证明 compiler-unavailable 时不产生 workspace、artifact、approval、download 或 final-output 证据。"
+      "reason": "旧混合闭环桶的 finalize/终审/审计与 draft artifact download/version 责任已分配给两条真实 Aspire HTTP 行为测试，不再由一条依赖生产 compiler 的巨型 E2E 伪闭环承担。"
     },
     {
       "oldSymbol": "AICopilot.BackendTests.ToolRegistryGovernanceTests.ArtifactGenerationFailure_ShouldNotCreatePlaceholderArtifact()",
@@ -4159,11 +4160,7 @@
       "replacementIds": [
         "AICopilot.UnitTests.IntentRoutingFallbackClassifierTests.TryClassify_ShouldRouteNewCloudOnlyAgentCapabilities",
         "AICopilot.UnitTests.IntentRoutingFallbackClassifierTests.TryClassify_ShouldRouteRecentDeviceInformationToReadonlyDeviceLogAnalysis",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.EmployeeAuthorizationPolicy_ShouldRequireAssignmentAndFunctionalPermission",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceRegistrationPolicy_ShouldRequireAdministratorRole",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceLifecyclePolicy_ShouldPreserveHistoryAndImmutableCode",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.BootstrapIdentityPolicy_ShouldRequireClientCodeToDeviceIdChain",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.RecipeVersioningPolicy_ShouldCreateNewArchivedVersion"
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.EmployeeAuthorizationPolicy_ShouldRequireAssignmentAndFunctionalPermission", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceRegistrationPolicy_ShouldRequireAdministratorRole", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceLifecyclePolicy_ShouldPreserveHistoryAndImmutableCode", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.BootstrapIdentityPolicy_ShouldRequireClientCodeToDeviceIdChain", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.RecipeVersioningPolicy_ShouldCreateNewArchivedVersion"
       ],
       "reason": "旧 fake-host 路由断言由生产分类器语义和真实端到端策略路由共同覆盖。"
     },
@@ -4725,11 +4722,7 @@
       "oldSymbol": "AICopilot.BackendTests.AcceptanceBaselineTests.ChinesePolicyAcceptanceChat_ShouldCoverAllPolicyTopics()",
       "disposition": "replaced",
       "replacementIds": [
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.EmployeeAuthorizationPolicy_ShouldRequireAssignmentAndFunctionalPermission",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceRegistrationPolicy_ShouldRequireAdministratorRole",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceLifecyclePolicy_ShouldPreserveHistoryAndImmutableCode",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.BootstrapIdentityPolicy_ShouldRequireClientCodeToDeviceIdChain",
-        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.RecipeVersioningPolicy_ShouldCreateNewArchivedVersion"
+        "AICopilot.EndToEndTests.PolicyChatEndToEndTests.EmployeeAuthorizationPolicy_ShouldRequireAssignmentAndFunctionalPermission", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceRegistrationPolicy_ShouldRequireAdministratorRole", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.DeviceLifecyclePolicy_ShouldPreserveHistoryAndImmutableCode", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.BootstrapIdentityPolicy_ShouldRequireClientCodeToDeviceIdChain", "AICopilot.EndToEndTests.PolicyChatEndToEndTests.RecipeVersioningPolicy_ShouldCreateNewArchivedVersion"
       ],
       "reason": "旧单例宽循环按员工授权、设备注册、设备生命周期、bootstrap 身份链和配方版本化拆成五个可独立发现的业务合同。"
     },
