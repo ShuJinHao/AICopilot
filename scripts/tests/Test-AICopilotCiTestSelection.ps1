@@ -214,6 +214,7 @@ try {
     Assert-ValidCategories $docs
     if (@($docs.unclassifiedFiles).Count -ne 0 -or
         @($docs.selectedDotNetProjects).Count -ne 0 -or
+        @($docs.requiredExplicitModes).Count -ne 0 -or
         [bool]$docs.dotNetAffected -or
         [bool]$docs.productionBuildRequired -or
         [bool]$docs.requiresDocker) {
@@ -285,6 +286,65 @@ try {
         @($identity.matchedSecurityImpactRules) -notcontains 'identity-persistence' -or
         @($identity.matchedSecurityImpactRules) -notcontains 'identity-http') {
         throw 'Identity path/owner mapping did not emit its Security impact evidence.'
+    }
+
+    $identitySecurityTestOutput = Join-Path $temporaryRoot 'identity-security-test.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles @(
+            'src/tests/AICopilot.PersistenceTests/CloudOidcBindingConcurrencyTests.cs') `
+        -OutputPath $identitySecurityTestOutput `
+        -GitHubOutputPath ''
+    $identitySecurityTest = Get-Content $identitySecurityTestOutput -Raw | ConvertFrom-Json
+    Assert-ValidCategories $identitySecurityTest
+    $identityPersistence = @($identitySecurityTest.selectedDotNetProjects |
+        Where-Object projectName -ceq 'AICopilot.PersistenceTests')
+    if ($identityPersistence.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$identityPersistence[0].testFilter) -or
+        @($identityPersistence[0].categories).Count -ne 1 -or
+        @($identityPersistence[0].categories) -notcontains 'Security' -or
+        @($identitySecurityTest.requiredExplicitModes).Count -ne 0) {
+        throw 'Identity Security test change did not retain the project-owned Security filter.'
+    }
+
+    $securityProjectFileOutput = Join-Path $temporaryRoot 'security-project-file.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles @(
+            'src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj') `
+        -OutputPath $securityProjectFileOutput `
+        -GitHubOutputPath ''
+    $securityProjectFile = Get-Content $securityProjectFileOutput -Raw | ConvertFrom-Json
+    Assert-ValidCategories $securityProjectFile
+    $unitProject = @($securityProjectFile.selectedDotNetProjects |
+        Where-Object projectName -ceq 'AICopilot.UnitTests')
+    if ($unitProject.Count -ne 1 -or
+        -not [string]::IsNullOrWhiteSpace([string]$unitProject[0].testFilter) -or
+        @($unitProject[0].categories) -notcontains 'Business' -or
+        @($unitProject[0].reasons) -notcontains
+            'affected-test:src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj' -or
+        @($securityProjectFile.requiredExplicitModes).Count -ne 0) {
+        throw 'Security-capable test project file change did not retain its unfiltered Business owner lane.'
+    }
+
+    $aspireTestKitOutput = Join-Path $temporaryRoot 'aspire-test-kit.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles @(
+            'src/testing/AICopilot.AspireIntegrationTestKit/FakeCloudOidcProviderHost.cs') `
+        -OutputPath $aspireTestKitOutput `
+        -GitHubOutputPath ''
+    $aspireTestKit = Get-Content $aspireTestKitOutput -Raw | ConvertFrom-Json
+    Assert-ValidCategories $aspireTestKit
+    $aspireHttp = @($aspireTestKit.selectedDotNetProjects |
+        Where-Object projectName -ceq 'AICopilot.HttpIntegrationTests')
+    if ($aspireHttp.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$aspireHttp[0].testFilter) -or
+        @($aspireHttp[0].categories).Count -ne 1 -or
+        @($aspireHttp[0].categories) -notcontains 'Security' -or
+        @($aspireTestKit.selectedDotNetProjects.categories) -contains 'Quality' -or
+        @($aspireTestKit.requiredExplicitModes).Count -ne 0) {
+        throw 'Aspire TestKit change did not execute its filtered Security dependent without expanding to Quality or Full.'
     }
 
     $agentOutput = Join-Path $temporaryRoot 'agent-security.json'
@@ -663,4 +723,4 @@ if ($runnerText -notmatch "ForEach-Object\s*\{\s*\[int\]\`$_\['discovered'\]\s*\
     throw 'AICopilot CI discovery aggregation does not safely read ordered result dictionaries.'
 }
 
-Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 activeContract=7 securityMapping=4 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'
+Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 activeContract=7 securityMapping=4 securityTest=1 securityProjectFile=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'

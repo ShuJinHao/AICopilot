@@ -83,10 +83,11 @@ Cloud AiRead 设备契约：
 ### 3.1 JIT 首次身份绑定并发
 
 - Cloud 身份首次登录命中同名、启用且尚未绑定其他 Cloud 身份的本地 AI 账号时，不得自动覆盖或创建重名账号；必须在短期 external cookie 有效期内要求用户用该账号的本地密码确认。确认请求只接收密码，本地用户名必须由已验证 Cloud profile 的 `employeeNo -> preferred_username -> sub` 规则推导，不得由浏览器提交。
-- 本地密码确认成功只建立 Cloud identity 与现有 AI 用户的一对一绑定，必须保留该用户已有 AI 角色、权限、SecurityStamp 治理和禁用状态；Cloud role 仍不得映射或覆盖 AI role。密码不得进入 JWT、Pinia、storage、URL、日志或审计。
-- 绑定确认必须在 Identity 事务内锁定并重新核对 `(provider, tenantId, externalUserId)` 与 `(userId, provider)` 两个唯一关系；完全相同的既有绑定幂等复用，任一侧指向其他身份则稳定拒绝且不得覆盖。密码错误允许在原 external cookie 有效期与登录限流内重试，取消、过期、账号禁用、Cloud 身份失效和不可恢复冲突必须清除 external cookie。
-- 两个首次 JIT 请求并发争用同一 Cloud 身份、本地用户或规范化用户名时，数据库唯一约束、事务内 fresh-read 与冲突映射必须共同保证至多形成一个绑定；胜者可以成功，完全相同绑定的迟到请求只能幂等返回同一用户，竞争到不同身份的请求必须稳定返回 `external_identity_conflict`。任何唯一约束异常都不得泄露数据库细节、创建第二用户或被通用重试改写为自动覆盖。
-- 同名确认要求、密码拒绝、绑定冲突和确认成功都必须写结构化 Identity 审计，但审计不得记录密码或原始凭据。
+- 本地密码确认成功只建立 Cloud identity 与现有 AI 用户的一对一绑定，必须保留该用户已有 AI 角色、权限、SecurityStamp 治理和禁用状态；Cloud role 仍不得映射或覆盖 AI role。历史账号的 SecurityStamp 为空或空白时，只允许在取得 binding invariant lock 后的同一 Identity 事务内初始化并持久化随机值，再以 fresh-read 的最终值签发 token；已有非空 SecurityStamp 不得因登录或绑定被轮换。密码不得进入 JWT、Pinia、storage、URL、日志或审计。
+- 首次 JIT、Bootstrap 管理员收编和既有账号密码确认必须共用同一 Identity 事务内 binding invariant guard；一次取得并按稳定顺序锁定 `(provider, tenantId, externalUserId)`、规范化本地用户名，以及已知或本次预分配的 `(userId, provider)`，随后以绕过 EF tracked entity 缓存的 fresh-read 重新读取用户与绑定，禁止用加锁前结果作绑定、禁用状态或 SecurityStamp 决定。完全相同的既有绑定幂等复用，任一侧指向其他身份则稳定拒绝且不得覆盖。
+- 两个请求并发争用同一 Cloud 身份、本地用户或规范化用户名时，事务内 fresh-read 与数据库唯一约束必须共同保证至多形成一个用户和一个绑定；完全相同请求的迟到重试只能返回同一用户，不同身份的迟到请求必须稳定返回 `external_identity_conflict`。只有规范化用户名、外部身份和用户/provider 三个已知唯一约束允许映射该错误码；连接失败、事务失败、未知约束和其它数据库异常必须保持系统失败，禁止伪装成账号冲突、泄露数据库细节、创建第二用户或自动覆盖。
+- 密码错误允许在原 external cookie 有效期与登录限流内重试；取消、过期、账号禁用、无本地密码、Cloud 身份失效和不可恢复冲突必须清除 external cookie。本地账号缺少密码、任一侧已有其他绑定、Cloud profile 用户名命中其他本地账号时必须返回具体安全说明，不得统一显示模糊的“账号冲突”。
+- 同名确认要求、密码拒绝、绑定冲突、确认取消、外部会话失效和登录成功都必须写结构化 Identity 审计；审计不得记录密码、token、cookie、URL 凭据或原始认证材料。
 - EdgeClient 不参与 Cloud-AICopilot OIDC 身份对齐。
 
 ## 4. RAG 规则

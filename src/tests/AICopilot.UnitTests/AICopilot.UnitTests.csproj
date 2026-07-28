@@ -6,7 +6,7 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Unit</AICopilotTestKind>
-    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.UnitTests.EnabledAdminInvariantPolicyTests</AICopilotCiSecurityFilter>
+    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.UnitTests.CloudOidcLoginTests|FullyQualifiedName~AICopilot.UnitTests.EnabledAdminInvariantPolicyTests</AICopilotCiSecurityFilter>
     <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
     <AICopilotTestOwner>IdentityPolicy</AICopilotTestOwner>
   </PropertyGroup>

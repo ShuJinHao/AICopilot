@@ -85,6 +85,7 @@ public sealed class CloudOidcLoginTests
             UserName = "E0001",
             SecurityStamp = Guid.NewGuid().ToString("N")
         };
+        var originalSecurityStamp = existingUser.SecurityStamp;
         var userManager = new InMemoryUserManager(existingUser);
         userManager.SetPassword(existingUser, "Local-Password-1!");
         await userManager.AddToRoleAsync(existingUser, IdentityRoleNames.Admin);
@@ -107,6 +108,7 @@ public sealed class CloudOidcLoginTests
             binding.UserId == existingUser.Id &&
             binding.ExternalUserId == "cloud-user-1");
         tokenGenerator.LastUser!.Roles.Should().BeEquivalentTo(IdentityRoleNames.Admin);
+        existingUser.SecurityStamp.Should().Be(originalSecurityStamp);
         auditWriter.Requests.Should().ContainSingle(request =>
             request.ActionCode == "Identity.CloudOidcExistingAccountConfirmed" &&
             request.Result == AuditResults.Succeeded);
@@ -142,6 +144,140 @@ public sealed class CloudOidcLoginTests
         auditWriter.Requests.Should().ContainSingle(request =>
             request.ActionCode == "Identity.CloudOidcExistingAccountPasswordRejected" &&
             request.Result == AuditResults.Rejected);
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldRejectPasswordlessAccountWithoutRetainingARecoverableState()
+    {
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "E0001",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingUser);
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var handler = CreateConfirmHandler(
+            userManager,
+            bindingStore,
+            auditWriter,
+            new RecordingJwtTokenGenerator());
+
+        var result = await handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(CreateProfile(), "irrelevant-password"),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        var problem = result.Errors!.OfType<ApiProblemDescriptor>().Single();
+        problem.Code.Should().Be(AuthProblemCodes.ExternalIdentityConflict);
+        problem.Detail.Should().Contain("没有可用于确认的密码");
+        bindingStore.Bindings.Should().BeEmpty();
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudOidcExistingAccountHasNoPassword" &&
+            request.Result == AuditResults.Rejected);
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldLockNormalizedUserNameAndProspectiveUserId()
+    {
+        var userManager = new InMemoryUserManager();
+        var guard = new RecordingExternalIdentityBindingInvariantGuard();
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User),
+            new InMemoryExternalIdentityBindingStore(),
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            invariantGuard: guard);
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(CreateProfile(preferredUserName: "e0001", employeeNo: "e0001")),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        var scope = guard.Scopes.Should().ContainSingle().Which;
+        scope.Provider.Should().Be(ExternalIdentityProviders.Cloud);
+        scope.NormalizedUserName.Should().Be("E0001");
+        scope.KnownUserIds.Should().ContainSingle().Which.Should()
+            .Be(userManager.StoredUsers.Single().Id);
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldMapOnlyKnownUniquenessFailuresToConflict()
+    {
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var transactionService = new KnownConflictTransactionalExecutionService(
+            ExternalIdentityInvariantConflictKind.NormalizedUserName);
+        var handler = CreateHandler(
+            new InMemoryUserManager(),
+            new InMemoryRoleManager(IdentityRoleNames.User),
+            new InMemoryExternalIdentityBindingStore(),
+            auditWriter,
+            new RecordingJwtTokenGenerator(),
+            transactionService: transactionService);
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(CreateProfile()),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should()
+            .Be(AuthProblemCodes.ExternalIdentityConflict);
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudOidcNormalizedUserNameConflict" &&
+            request.Result == AuditResults.Rejected);
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldNotDisguiseUnknownTransactionFailureAsConflict()
+    {
+        var failure = new InvalidOperationException("identity database unavailable");
+        var handler = CreateHandler(
+            new InMemoryUserManager(),
+            new InMemoryRoleManager(IdentityRoleNames.User),
+            new InMemoryExternalIdentityBindingStore(),
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            transactionService: new FailingTransactionalExecutionService(failure));
+
+        var action = () => handler.Handle(
+            new FinalizeCloudOidcLoginCommand(CreateProfile()),
+            CancellationToken.None);
+
+        var assertion = await action.Should().ThrowAsync<InvalidOperationException>();
+        assertion.Which.Should().BeSameAs(failure);
+    }
+
+    [Theory]
+    [InlineData(
+        CloudOidcExternalSessionAuditReason.Cancelled,
+        "Identity.CloudOidcConfirmationCancelled")]
+    [InlineData(
+        CloudOidcExternalSessionAuditReason.InvalidOrExpired,
+        "Identity.CloudOidcExternalSessionInvalid")]
+    public async Task AuditCloudOidcExternalSession_ShouldWriteCredentialFreeStructuredRejection(
+        CloudOidcExternalSessionAuditReason reason,
+        string expectedActionCode)
+    {
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var handler = new AuditCloudOidcExternalSessionCommandHandler(
+            auditWriter,
+            new InlineTransactionalExecutionService());
+
+        var result = await handler.Handle(
+            new AuditCloudOidcExternalSessionCommand(reason, CreateProfile()),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        var audit = auditWriter.Requests.Should().ContainSingle().Which;
+        audit.ActionCode.Should().Be(expectedActionCode);
+        audit.Result.Should().Be(AuditResults.Rejected);
+        audit.Metadata.Should().ContainKey("cloudUserId").WhoseValue.Should().Be("cloud-user-1");
+        var serializedAudit = System.Text.Json.JsonSerializer.Serialize(audit);
+        serializedAudit.Contains("password", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        serializedAudit.Contains("token", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        serializedAudit.Contains("cookie=", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
     }
 
     [Fact]
@@ -590,12 +726,15 @@ public sealed class CloudOidcLoginTests
         InMemoryIdentityAuditLogWriter auditWriter,
         RecordingJwtTokenGenerator tokenGenerator,
         CloudOidcBootstrapAdminBindingOptions? bootstrapAdminBindingOptions = null,
-        InlineTransactionalExecutionService? transactionService = null)
+        ITransactionalExecutionService? transactionService = null,
+        IExternalIdentityBindingInvariantGuard? invariantGuard = null)
     {
         return new FinalizeCloudOidcLoginCommandHandler(
             userManager,
             roleManager,
             bindingStore,
+            new InMemoryIdentityUserFreshReadStore(userManager),
+            invariantGuard ?? new NoOpExternalIdentityBindingInvariantGuard(),
             auditWriter,
             tokenGenerator,
             Options.Create(bootstrapAdminBindingOptions ?? new CloudOidcBootstrapAdminBindingOptions()),
@@ -607,12 +746,14 @@ public sealed class CloudOidcLoginTests
         InMemoryExternalIdentityBindingStore bindingStore,
         InMemoryIdentityAuditLogWriter auditWriter,
         RecordingJwtTokenGenerator tokenGenerator,
-        InlineTransactionalExecutionService? transactionService = null)
+        ITransactionalExecutionService? transactionService = null,
+        IExternalIdentityBindingInvariantGuard? invariantGuard = null)
     {
         return new ConfirmExistingCloudOidcAccountCommandHandler(
             userManager,
             bindingStore,
-            new NoOpExternalIdentityBindingInvariantGuard(),
+            new InMemoryIdentityUserFreshReadStore(userManager),
+            invariantGuard ?? new NoOpExternalIdentityBindingInvariantGuard(),
             auditWriter,
             tokenGenerator,
             transactionService ?? new InlineTransactionalExecutionService());
@@ -757,6 +898,61 @@ public sealed class CloudOidcLoginTests
         {
             ResultExecutionCount++;
             return operation(cancellationToken);
+        }
+    }
+
+    private sealed class KnownConflictTransactionalExecutionService(
+        ExternalIdentityInvariantConflictKind conflictKind)
+        : ITransactionalExecutionService
+    {
+        public Task<TResult> ExecuteAsync<TResult>(
+            Func<CancellationToken, Task<TResult>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            return operation(cancellationToken);
+        }
+
+        public Task<Result<TValue>> ExecuteResultAsync<TValue>(
+            Func<CancellationToken, Task<Result<TValue>>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            throw new ExternalIdentityInvariantConflictException(
+                conflictKind,
+                new InvalidOperationException("known unique constraint"));
+        }
+
+        public Task<Result> ExecuteResultAsync(
+            Func<CancellationToken, Task<Result>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            throw new ExternalIdentityInvariantConflictException(
+                conflictKind,
+                new InvalidOperationException("known unique constraint"));
+        }
+    }
+
+    private sealed class FailingTransactionalExecutionService(Exception failure)
+        : ITransactionalExecutionService
+    {
+        public Task<TResult> ExecuteAsync<TResult>(
+            Func<CancellationToken, Task<TResult>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromException<TResult>(failure);
+        }
+
+        public Task<Result<TValue>> ExecuteResultAsync<TValue>(
+            Func<CancellationToken, Task<Result<TValue>>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromException<Result<TValue>>(failure);
+        }
+
+        public Task<Result> ExecuteResultAsync(
+            Func<CancellationToken, Task<Result>> operation,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromException<Result>(failure);
         }
     }
 
@@ -912,12 +1108,57 @@ public sealed class CloudOidcLoginTests
         : IExternalIdentityBindingInvariantGuard
     {
         public Task AcquireAsync(
-            string provider,
-            string tenantId,
-            string externalUserId,
+            ExternalIdentityBindingInvariantScope scope,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class InMemoryIdentityUserFreshReadStore(InMemoryUserManager userManager)
+        : IIdentityUserFreshReadStore
+    {
+        public Task<ApplicationUser?> FindByNormalizedUserNameAsync(
+            string normalizedUserName,
+            CancellationToken cancellationToken = default)
+        {
+            return userManager.FindByNameAsync(normalizedUserName);
+        }
+
+        public Task<ApplicationUser?> FindByIdAsync(
             Guid userId,
             CancellationToken cancellationToken = default)
         {
+            return userManager.FindByIdAsync(userId.ToString());
+        }
+
+        public async Task<ApplicationUser?> InitializeSecurityStampIfMissingAsync(
+            Guid userId,
+            string securityStamp,
+            string concurrencyStamp,
+            CancellationToken cancellationToken = default)
+        {
+            var user = await userManager.FindByIdAsync(userId.ToString());
+            if (user is not null && string.IsNullOrWhiteSpace(user.SecurityStamp))
+            {
+                user.SecurityStamp = securityStamp;
+                user.ConcurrencyStamp = concurrencyStamp;
+            }
+
+            return user;
+        }
+    }
+
+    private sealed class RecordingExternalIdentityBindingInvariantGuard
+        : IExternalIdentityBindingInvariantGuard
+    {
+        public List<ExternalIdentityBindingInvariantScope> Scopes { get; } = [];
+
+        public Task AcquireAsync(
+            ExternalIdentityBindingInvariantScope scope,
+            CancellationToken cancellationToken = default)
+        {
+            Scopes.Add(scope);
             return Task.CompletedTask;
         }
     }
