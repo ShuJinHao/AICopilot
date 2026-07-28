@@ -1,0 +1,23 @@
+AI-BATCH-01 WORKTREE RECOVERY MANIFEST
+snapshot_ref  refs/codex/ai-batch-01/worktrees/ai-receipt-bootstrap-20260713
+snapshot_commit  0dbbc58b52e9518a3cb08a0a59fbfe2f3657dcaf
+snapshot_tree  efc1f403746db6306c487cfcb2d76b5a94441c6a
+base_head  198cc59318f4a1748c719b9b8ecff1d969952ce8
+branch  agent/ai-receipt-bootstrap-20260713
+worktree  /Users/shushu/Developer/产线系统架构升级/1/.codex-worktrees/ai-receipt-bootstrap
+
+DIRTY_STATUS
+ M docs/AI架构治理清单.md
+ M docs/改动复盘与规则沉淀.md
+?? scripts/tests/baselines/migrations/InvokeAICopilotGovernanceMigrationFromTrustedBase.v1.ps1
+?? scripts/tests/baselines/migrations/TestAICopilotGovernanceMigrationValidator.v1.ps1
+?? scripts/tests/baselines/migrations/ValidateAICopilotGovernanceMigration.v1.ps1
+?? scripts/tests/baselines/migrations/aicopilot-governance-migration-receipt.schema.json
+
+SHA256_DIRTY_TRACKED_AND_UNTRACKED
+aa39dfa9c9492951e73dd0e006a204a284bffe77a2e386bf152523ef401fc8d9  docs/AI架构治理清单.md
+f61998d44b46014d21cb8f6c4dd641d077f1f3108c14e529078e553172987f18  docs/改动复盘与规则沉淀.md
+94d69f529a752c8c0f52402f2059d1f75d031ed0f217365885dd8c4407a6f8ff  scripts/tests/baselines/migrations/InvokeAICopilotGovernanceMigrationFromTrustedBase.v1.ps1
+815a066696e63820588db1188c2432c4d399d283ad006546e0fee102fd3d3557  scripts/tests/baselines/migrations/TestAICopilotGovernanceMigrationValidator.v1.ps1
+8cf8ef48931c1ea2921fe8139b0c7dad880c3ac2a19cf4cd77cf725a6eb94f84  scripts/tests/baselines/migrations/ValidateAICopilotGovernanceMigration.v1.ps1
+cb482f82fa2c150e722f79b2efb43cc414542a0a76b3fb702d6ce74d5e09272c  scripts/tests/baselines/migrations/aicopilot-governance-migration-receipt.schema.json
