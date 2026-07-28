@@ -7,7 +7,6 @@ import { useAgentPlanPreview } from '@/composables/useAgentPlanPreview'
 
 const { latestTask, blockedStep } = useAgentWorkbench()
 const {
-  latestPlan,
   latestPlanCapabilityGaps,
   latestPlanIsSimulation,
   isPlanDraftTask,

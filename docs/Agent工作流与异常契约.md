@@ -11,6 +11,7 @@
 - 用户确认无 gap 的 `PlanDraft` 后才允许转换为 `ExecutablePlan` / `AgentTask`，进入 Tool、Schema、Guard、审批和 Worker 执行链路。
 - Tool、MCP、Knowledge、DataSource、Provider 或资源未匹配时，不能阻断服务端能力发现形成 `PlanDraft`；必须形成显式 capability gap，带 gap 的草案保持 node-free、不可确认且不得入队。
 - Plan v2 公共请求的 `pluginSelectionMode/capabilitySelectionMode` 只接受大小写精确的字符串 enum 名；数字 token、未知字符串和大小写变体必须在 HTTP model binding 阶段拒绝，不得进入 stream handler、session/repository、Tool、Cloud 或消息持久化。
+- Plan v1 只读兼容保留至 `2026-12-31`：已完成的 v1 历史任务必须仍可读取、展示和审计，但不得执行、重试、克隆、重新确认或转换成 v2。非终态 v1 任务只能取消后以 v2 重建；到期删除读取兼容前必须另行完成生产存量盘点与迁移裁决，不能因新执行轨已是 v2 就提前删除。
 - `SkillDefinition`、`IAgentDynamicPlanner` 及其兼容字段/API 已从生产轨物理退役。Plan 请求只允许 `pluginSelectionMode/selectedPluginIds/capabilitySelectionMode/requestedCapabilityCodes/knowledgeBaseIds/uploadIds/artifactTargets`；这些选择是编译上限，唯一 `AgentPlanCompiler` 与安全门禁必须取交集，不得恢复 Skill 选择、preferred ToolCode、alias/wrapper 或第二套影子编译器。
 - Plan v2 的 `262144` UTF-8 byte 上限按“最终含 64 位 SHA-256 digest 的 canonical payload”计算。`AgentCanonicalJsonV1` 是排序、JavaScript 转义、数字规范化、root exclusion、共享结构限制与 byte count 的唯一 owner；Seal 必须先以同长度 64-hex placeholder 做 bounded canonical measure，正好上限允许，首次越界以专用内部信号短路为 `max+1` 并映射 `plan_payload_too_large`，不得让通用 canonical preflight 把业务超限泛化成 `agent_plan_invalid`，也不得放宽现有全局 `Canonicalize` 预检。
 - Plan 能力发现和真实 Tool 分支必须共用同一生产安全门禁；只有通过 `AiToolSafetyPolicy` 的 tool 才能进入草案或执行上下文。`GoldenEvalTests` 必须穿过真实 `AgentWorkflowPipeline` 或其正式生产组件，数据集必须版本化并记录变更理由；不得直接调用 leaf policy 自证。
@@ -71,6 +72,16 @@ Cloud 只读 Agent 当前正式能力限定为：
 - 显式 `Development + CloudReadonly:Mode=Simulation + Simulation.Enabled=true + AlwaysMarkAsSimulation=true` profile 仍只能把唯一已授权 `SimulationBusiness` 数据源编译为固定的 `query_business_database_readonly → summarize_business_query_result → generate_markdown_report → finalize_artifacts` 四步图。该 profile 不得接 Cloud、MCP、Plugin、上传或 RAG，不得混合/回退 Real/Cloud 数据源；Plan 确认、入队和 Worker 每次 fresh-read 都必须重新校验 Simulation profile，配置关闭后旧计划立即 fail-closed。
 - Tool output 必须先通过注册表的 closed strict schema，才可记录 execution、step 或 run 成功。持久化 durable output 只保留规范化、版本化的安全 payload，不得保存 provider raw output。ArtifactWorkspace 的 workspace 初始化、draft 多文件创建、版本归档、当前文件替换和 final 文件集必须统一经过 file-set stage/journal、manifest hash、fencing token、数据库 checkpoint、commit marker、rollback/reconciliation 和 orphan cleanup；数据库或文件系统任一结果未知时不得宣称完成。
 - Markdown、HTML、PDF、PPTX、XLSX、图表 payload 和 Chat 追问必须绑定同一最终 `EvidenceSetDigest`，不得各自重算或只取最后一次 Cloud 查询。Chat 只能通过显式 `ReferencedAgentTaskId` 引用当前用户、当前会话内 `Completed` 任务的最新 `Succeeded` attempt；服务端必须验证 finalization checkpoint、全部 durable Evidence scope/expiry/seal 和完整 lineage，仅注入 bounded safe summary/findings/citations。不得自动选“最近任务”，不得从旧回答文本反推事实；路由命中新设备、工序、级别或时间范围时必须走本轮新只读查询，不得混入旧 EvidenceSet。
+
+### 2.4 最终产物审批、关单与恢复
+
+- 严格审批元组必须唯一绑定 `taskId + workspaceId/workspaceCode + finalStepId + finalOutputApprovalId + activeRunAttemptId + task/node fencing token + EvidenceSetDigest + manifest digest + Artifact binding/file SHA-256`。任一标识缺失、外来、重复或在审批后漂移，都必须返回 `agent_finalization_state_conflict`，不能按相似 workspace、最近 attempt 或最后一个审批猜测。
+- final-output `decision proof` 至少包含唯一审批状态、决策人、创建时间、决策时间和目标 workspace；`Pending` 不得携带决策字段，`Approved/Rejected` 必须有非空决策人与不早于创建时间的决策时间。审批请求必须晚于所有产物生成步骤完成；只有 `Approved` 可以触发 durable resume，`Rejected` 立即终结任务并返回 `agent_approval_rejected`。
+- 同一任务和 workspace 只能存在一个 final-output 审批。两个审批人竞争决定、批准与拒绝竞争、重复点击或迟到请求只能有一个决策胜出；相同已决结果可幂等读取，不同决策必须返回 `agent_approval_state_conflict`，不得覆盖首个 decision proof，也不得产生第二个关单队列项。
+- 批准不是关单。审批请求完成后任务仍为 `WaitingFinalApproval`，attempt 先保持无 lease 的 `WaitingApproval`；durable Worker 重新 claim 后才可校验元组并执行 file-set stage 与 fenced checkpoint。只有 Artifact、Workspace、最终步骤、attempt、任务和 file-set operation 在同一权威提交中一致到达终态，任务才是 `Completed`。
+- checkpoint 损坏、manifest/file binding 不一致、lease 过期、fencing 失效、提交结果未知或恢复时间线断裂时必须 fail-closed；不得从 Timeline、前端状态或目录是否存在反推完成。幂等恢复只能 fresh-read 权威 checkpoint/commit marker：已完成则返回既有结果，明确未提交才允许同一 fenced attempt 继续，结果未知进入 reconciliation，禁止重放审批、模型、Tool 或文件副作用。
+- 旧同步入口 fail-closed：`POST /api/aigateway/workspace/{code}/finalize` 不得直接复制 final 文件、修改 Artifact/Workspace 或把任务标记完成；它只能在完整批准元组验证通过后幂等请求 durable queue resume。待审批、拒绝、冲突、损坏或已被其他 lease 处理时必须返回当前稳定状态/错误，不得降级调用旧 finalization service。
+- 以上是最终闭环的活动契约；现有源码候选仍必须通过竞争审批/拒绝、checkpoint 损坏、commit outcome unknown、kill/restart 与幂等恢复的完整测试矩阵和生产证据，源码类或局部测试存在不等于该闭环已完成。
 
 ## 3. Cloud 写入禁止
 

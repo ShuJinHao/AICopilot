@@ -282,7 +282,7 @@ describe('chunkReducer', () => {
 
     expect(callbacks.setSessionError).toHaveBeenCalledWith(
       'session-1',
-      '规划模型不可用，请检查模型配置。'
+      '计划生成模型暂时不可用，请稍后重试或联系管理员检查模型配置。'
     )
   })
 

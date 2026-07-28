@@ -21,13 +21,10 @@ if (-not (Test-Path $resolvedSelection -PathType Leaf)) {
     throw "CI selection is missing: $resolvedSelection"
 }
 $selection = Get-Content $resolvedSelection -Raw | ConvertFrom-Json
-if ([int]$selection.schemaVersion -ne 2) {
+if ([int]$selection.schemaVersion -ne 3) {
     throw "Unsupported AICopilot CI selection schema: $($selection.schemaVersion)"
 }
 $projects = @($selection.selectedDotNetProjects)
-if ($projects.Count -eq 0) {
-    throw 'CI selection contains no .NET test projects.'
-}
 $mode = [string]$selection.mode
 $allowedCategories = @('Architecture', 'Security', 'Business', 'DeploymentContract', 'Quality', 'CrossProject')
 $allowedByMode = @{
@@ -71,18 +68,115 @@ if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') {
     throw "AICopilot CI test execution is not bound to a full Git HEAD: $head"
 }
 
+function Invoke-DotNetChecked {
+    param(
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$FailureMessage
+    )
+
+    & dotnet @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw $FailureMessage
+    }
+}
+
+$resolvedProjects = @{}
 foreach ($project in $projects) {
     $projectPath = Join-Path $root ([string]$project.path)
     if (-not (Test-Path $projectPath -PathType Leaf)) {
         throw "Selected test project is missing: $($project.path)"
     }
+    $resolvedProjects[[string]$project.path] = [IO.Path]::GetFullPath($projectPath)
+}
+
+$selectedGraphPath = ''
+if ($projects.Count -gt 0) {
+    $selectedGraphPath = Join-Path $resolvedResults 'AICopilot.CiSelected.slnx'
+    $projectElements = @($projects | ForEach-Object {
+            $relativePath = [IO.Path]::GetRelativePath(
+                $resolvedResults,
+                $resolvedProjects[[string]$_.path]).Replace('\', '/')
+            "  <Project Path=`"$([Security.SecurityElement]::Escape($relativePath))`" />"
+        })
+    @(
+        '<Solution>'
+        $projectElements
+        '</Solution>'
+    ) | Set-Content $selectedGraphPath -Encoding utf8
+
+    Invoke-DotNetChecked `
+        -Arguments @('restore', $selectedGraphPath, '--nologo') `
+        -FailureMessage 'Restore failed for the selected AICopilot test project graph.'
+    Invoke-DotNetChecked `
+        -Arguments @(
+            'build',
+            $selectedGraphPath,
+            '-c', $Configuration,
+            '--no-restore',
+            '--disable-build-servers',
+            '--nologo',
+            "-p:SourceRevisionId=$head") `
+        -FailureMessage 'Build failed for the selected AICopilot test project graph.'
+}
+
+$productionBuildRequired = [bool]$selection.productionBuildRequired
+$productionGraphPath = Join-Path $root ([string]$selection.productionSolution)
+if ($productionBuildRequired) {
+    if (-not (Test-Path $productionGraphPath -PathType Leaf)) {
+        throw "AICopilot production project graph is missing: $($selection.productionSolution)"
+    }
+    Invoke-DotNetChecked `
+        -Arguments @('restore', $productionGraphPath, '--nologo') `
+        -FailureMessage 'Restore failed for the AICopilot production project graph.'
+    Invoke-DotNetChecked `
+        -Arguments @(
+            'build',
+            $productionGraphPath,
+            '-c', $Configuration,
+            '--no-restore',
+            '--disable-build-servers',
+            '--nologo',
+            "-p:SourceRevisionId=$head") `
+        -FailureMessage 'Build failed for the AICopilot production project graph.'
+}
+
+foreach ($project in $projects) {
+    $projectPath = $resolvedProjects[[string]$project.path]
     $projectResults = Join-Path $resolvedResults ([string]$project.projectName)
     [void](New-Item $projectResults -ItemType Directory -Force)
+    $listArguments = @(
+        'test',
+        $projectPath,
+        '-c', $Configuration,
+        '--no-restore',
+        '--no-build',
+        '--disable-build-servers',
+        '--nologo',
+        "-p:SourceRevisionId=$head",
+        '--list-tests'
+    )
+    if (-not [string]::IsNullOrWhiteSpace([string]$project.testFilter)) {
+        $listArguments += @('--filter', [string]$project.testFilter)
+    }
+    $listOutput = @(& dotnet @listArguments 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Test discovery failed for selected AICopilot project: $($project.path)"
+    }
+    $listOutput | ForEach-Object { $_.ToString() } |
+        Set-Content (Join-Path $projectResults "$($project.projectName).list-tests.txt") -Encoding utf8
+    $listedTests = @($listOutput |
+        ForEach-Object { $_.ToString().Trim() } |
+        Where-Object { $_ -match '^AICopilot\.' })
+    if ($listedTests.Count -eq 0) {
+        throw "Selected AICopilot test filter discovered zero tests: project=$($project.path) filter=$($project.testFilter)"
+    }
+
     $arguments = @(
         'test',
         $projectPath,
         '-c', $Configuration,
         '--no-restore',
+        '--no-build',
         '--disable-build-servers',
         '--nologo',
         "-p:SourceRevisionId=$head",
@@ -121,6 +215,7 @@ foreach ($project in $projects) {
         categories = @($project.categories)
         testFilter = [string]$project.testFilter
         runtime = [string]$project.runtime
+        listed = $listedTests.Count
         discovered = $total
         executed = $executed
         passed = $passed
@@ -145,7 +240,7 @@ $discoveredTotal = [int](($results |
         ForEach-Object { [int]$_['discovered'] } |
         Measure-Object -Sum).Sum)
 [ordered]@{
-    schemaVersion = 2
+    schemaVersion = 3
     generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     selectionMode = [string]$selection.mode
     sourceRevision = $head
@@ -156,6 +251,15 @@ $discoveredTotal = [int](($results |
         sha256 = $selectionScopeSha256
     }
     selectedProjects = $results.Count
+    selectedTestGraph = if ([string]::IsNullOrWhiteSpace($selectedGraphPath)) {
+        $null
+    } else {
+        [IO.Path]::GetRelativePath($root, $selectedGraphPath).Replace('\', '/')
+    }
+    productionBuild = [ordered]@{
+        required = $productionBuildRequired
+        graph = [string]$selection.productionSolution
+    }
     discovered = $discoveredTotal
     projects = $results
 } | ConvertTo-Json -Depth 8 | Set-Content $inventoryPath -Encoding utf8
