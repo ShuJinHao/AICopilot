@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iiot.local/schemas/aicopilot-governance-migration-receipt-v1.json",
+  "title": "AICopilot governance migration receipt v1",
+  "$comment": "Reference schema for authoring and review. ValidateAICopilotGovernanceMigration.v1.ps1 is authoritative for byte limits, ordinal ordering, path portability, time windows, cross-field constraints, and state transitions. In v1, AI-TEST-GOV-TRUST-UPGRADE-001 may modify only the validator; the wrapper, schema, and self-test harness are base-owned and cannot be changed by any receipt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "ruleId",
+    "migrationId",
+    "issuedAgainstRevision",
+    "issuedAtUtc",
+    "expiresAtUtc",
+    "owner",
+    "approvedBy",
+    "reason",
+    "ruleIds",
+    "source",
+    "target",
+    "projectChanges",
+    "changes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "ruleId": {
+      "const": "AI-TEST-GOV-MIG-001"
+    },
+    "migrationId": {
+      "type": "string",
+      "pattern": "^AI-TEST-GOV-MIG-[A-Z0-9][A-Z0-9-]{2,80}$"
+    },
+    "issuedAgainstRevision": {
+      "$ref": "#/$defs/commitSha"
+    },
+    "issuedAtUtc": {
+      "$ref": "#/$defs/utcTimestamp"
+    },
+    "expiresAtUtc": {
+      "$ref": "#/$defs/utcTimestamp"
+    },
+    "owner": {
+      "enum": [
+        "AI.Architecture",
+        "AI.AgentWorkflow",
+        "AI.Persistence",
+        "AI.Tests",
+        "AI.Deployment",
+        "AI.Security",
+        "AI.Web"
+      ]
+    },
+    "approvedBy": {
+      "const": "ShuJinHao"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 500
+    },
+    "ruleIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "AI-ARCH-001",
+          "AI-EVAL-001",
+          "AI-TEST-001",
+          "AI-TEST-002",
+          "AI-TEST-003",
+          "AI-TEST-004",
+          "AI-TEST-DUP-001",
+          "AI-TEST-GOV-001",
+          "AI-TEST-UI-001",
+          "AI-TEST-GOV-TRUST-UPGRADE-001"
+        ]
+      }
+    },
+    "source": {
+      "$ref": "#/$defs/state"
+    },
+    "target": {
+      "$ref": "#/$defs/state"
+    },
+    "projectChanges": {
+      "$ref": "#/$defs/projectChanges"
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/change"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ruleIds": {
+            "contains": {
+              "const": "AI-TEST-GOV-TRUST-UPGRADE-001"
+            }
+          }
+        },
+        "required": [
+          "ruleIds"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ruleIds": {
+            "const": [
+              "AI-TEST-GOV-TRUST-UPGRADE-001"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commitSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repositoryProjects",
+        "testProjects",
+        "testSourceFiles",
+        "declarations",
+        "executionTemplates",
+        "projectedCases",
+        "runnerCases",
+        "vitestSourceFiles",
+        "playwrightSourceFiles",
+        "deploymentTestAssets",
+        "workflowFiles"
+      ],
+      "properties": {
+        "repositoryProjects": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "testProjects": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "testSourceFiles": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declarations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "executionTemplates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "projectedCases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runnerCases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "vitestSourceFiles": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "playwrightSourceFiles": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deploymentTestAssets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "workflowFiles": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baselineSha256",
+        "protectedManifestSha256",
+        "counts"
+      ],
+      "properties": {
+        "baselineSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "protectedManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "counts": {
+          "$ref": "#/$defs/counts"
+        }
+      }
+    },
+    "pathArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "projectChanges": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "added",
+        "removed",
+        "addedTests",
+        "removedTests"
+      ],
+      "properties": {
+        "added": {
+          "$ref": "#/$defs/pathArray"
+        },
+        "removed": {
+          "$ref": "#/$defs/pathArray"
+        },
+        "addedTests": {
+          "$ref": "#/$defs/pathArray"
+        },
+        "removedTests": {
+          "$ref": "#/$defs/pathArray"
+        }
+      }
+    },
+    "gitMode": {
+      "enum": [
+        "100644",
+        "100755"
+      ]
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "status",
+        "beforeMode",
+        "beforeSha256",
+        "afterMode",
+        "afterSha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "A",
+            "M",
+            "D"
+          ]
+        },
+        "beforeMode": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/gitMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "beforeSha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "afterMode": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/gitMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "afterSha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
