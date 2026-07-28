@@ -122,9 +122,28 @@ public interface IExternalIdentityBindingStore
 public interface IExternalIdentityBindingInvariantGuard
 {
     Task AcquireAsync(
-        string provider,
-        string tenantId,
-        string externalUserId,
-        Guid userId,
+        ExternalIdentityBindingInvariantScope scope,
         CancellationToken cancellationToken = default);
+}
+
+public sealed record ExternalIdentityBindingInvariantScope(
+    string Provider,
+    string TenantId,
+    string ExternalUserId,
+    string NormalizedUserName,
+    IReadOnlyCollection<Guid> KnownUserIds);
+
+public enum ExternalIdentityInvariantConflictKind
+{
+    NormalizedUserName,
+    ExternalIdentity,
+    UserProvider
+}
+
+public sealed class ExternalIdentityInvariantConflictException(
+    ExternalIdentityInvariantConflictKind conflictKind,
+    Exception innerException)
+    : Exception("A known external identity uniqueness invariant was violated.", innerException)
+{
+    public ExternalIdentityInvariantConflictKind ConflictKind { get; } = conflictKind;
 }

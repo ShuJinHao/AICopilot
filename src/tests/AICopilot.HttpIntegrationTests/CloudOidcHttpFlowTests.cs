@@ -17,15 +17,17 @@ public sealed class CloudOidcHttpFlowTests(CloudOidcHttpAppFixture fixture)
     };
 
     [Fact]
-    public async Task CloudOidcHttpFlow_ShouldCloseFiveLoginAndCookieScenarios()
+    public async Task CloudOidcHttpFlow_ShouldCloseLoginConflictRetryAndCookieScenarios()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var jitUserName = $"oidc-jit-{suffix}";
         var localUserName = $"oidc-local-{suffix}";
         var cancelUserName = $"oidc-cancel-{suffix}";
+        var disabledUserName = $"oidc-disabled-{suffix}";
 
         await CreateLocalUserAsync(localUserName);
         await CreateLocalUserAsync(cancelUserName);
+        await CreateDisabledLocalUserAsync(disabledUserName);
 
         var cookies = new CookieContainer();
         using var handler = new HttpClientHandler
@@ -94,6 +96,24 @@ public sealed class CloudOidcHttpFlowTests(CloudOidcHttpAppFixture fixture)
             .Be(AuthProblemCodes.ExternalIdentityConflict);
         AssertExternalCookieCleared(conflict, cookies);
 
+        fixture.Provider.SetIdentity(CreateIdentity("disabled-subject", disabledUserName));
+        await CompleteCloudCallbackAsync(oidcClient, cookies);
+        using var disabled = await oidcClient.PostAsync(
+            "/api/identity/cloud-oidc/finalize",
+            content: null);
+        disabled.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await ReadJsonAsync<ProblemDto>(disabled)).Code.Should()
+            .Be(AuthProblemCodes.AccountDisabled);
+        AssertExternalCookieCleared(disabled, cookies);
+
+        using var expired = await oidcClient.PostAsync(
+            "/api/identity/cloud-oidc/finalize",
+            content: null);
+        expired.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await ReadJsonAsync<ProblemDto>(expired)).Code.Should()
+            .Be(AuthProblemCodes.CloudOidcInvalidPrincipal);
+        AssertExternalCookieCleared(expired, cookies);
+
         fixture.Provider.SetIdentity(CreateIdentity("cancel-subject", cancelUserName));
         await CompleteCloudCallbackAsync(oidcClient, cookies);
         using var cancelConfirmationRequired = await oidcClient.PostAsync(
@@ -144,6 +164,41 @@ public sealed class CloudOidcHttpFlowTests(CloudOidcHttpAppFixture fixture)
             },
             JsonOptions);
         createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        fixture.ClearAuthToken();
+    }
+
+    private async Task CreateDisabledLocalUserAsync(string userName)
+    {
+        using var loginResponse = await fixture.HttpClient.PostAsJsonAsync(
+            "/api/identity/login",
+            new
+            {
+                username = fixture.BootstrapAdminUserName,
+                password = fixture.BootstrapAdminPassword
+            },
+            JsonOptions);
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var login = await ReadJsonAsync<LoginDto>(loginResponse);
+        fixture.HttpClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var createResponse = await fixture.HttpClient.PostAsJsonAsync(
+            "/api/identity/user",
+            new
+            {
+                userName,
+                password = LocalPassword,
+                roleName = "User"
+            },
+            JsonOptions);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var created = await ReadJsonAsync<CreatedUserDto>(createResponse);
+
+        using var disableResponse = await fixture.HttpClient.PutAsJsonAsync(
+            "/api/identity/user/disable",
+            new { userId = created.UserId },
+            JsonOptions);
+        disableResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         fixture.ClearAuthToken();
     }
 
@@ -211,6 +266,8 @@ public sealed class CloudOidcHttpFlowTests(CloudOidcHttpAppFixture fixture)
     }
 
     private sealed record LoginDto(string UserName, string Token);
+
+    private sealed record CreatedUserDto(string UserId);
 
     private sealed record CurrentUserDto(string UserName, string? RoleName);
 

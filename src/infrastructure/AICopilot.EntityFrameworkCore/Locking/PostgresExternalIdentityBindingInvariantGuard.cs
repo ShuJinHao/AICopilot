@@ -10,17 +10,18 @@ public sealed class PostgresExternalIdentityBindingInvariantGuard(
 {
     private const string ExternalIdentityKeySpace = "AICopilot.Identity.ExternalBinding.v1";
     private const string UserProviderKeySpace = "AICopilot.Identity.UserProviderBinding.v1";
+    private const string NormalizedUserNameKeySpace = "AICopilot.Identity.NormalizedUserName.v1";
 
     public async Task AcquireAsync(
-        string provider,
-        string tenantId,
-        string externalUserId,
-        Guid userId,
+        ExternalIdentityBindingInvariantScope scope,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(externalUserId);
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope.Provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope.ExternalUserId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope.NormalizedUserName);
+        ArgumentNullException.ThrowIfNull(scope.KnownUserIds);
 
         var currentTransaction = dbContext.Database.CurrentTransaction
             ?? throw new InvalidOperationException(
@@ -32,13 +33,19 @@ public sealed class PostgresExternalIdentityBindingInvariantGuard(
                 "The Identity transaction connection must be open before acquiring the external identity binding invariant.");
         }
 
-        var keys = new[]
+        var provider = scope.Provider.Trim();
+        var keys = new HashSet<long>
         {
             PostgreSqlAdvisoryLock.CreateKey(
-                $"{ExternalIdentityKeySpace}:{provider.Trim()}:{tenantId.Trim()}:{externalUserId.Trim()}"),
+                $"{ExternalIdentityKeySpace}:{provider}:{scope.TenantId.Trim()}:{scope.ExternalUserId.Trim()}"),
             PostgreSqlAdvisoryLock.CreateKey(
-                $"{UserProviderKeySpace}:{provider.Trim()}:{userId:N}")
+                $"{NormalizedUserNameKeySpace}:{scope.NormalizedUserName.Trim()}")
         };
+        foreach (var userId in scope.KnownUserIds.Where(userId => userId != Guid.Empty))
+        {
+            keys.Add(PostgreSqlAdvisoryLock.CreateKey(
+                $"{UserProviderKeySpace}:{provider}:{userId:N}"));
+        }
 
         foreach (var key in keys.Order())
         {

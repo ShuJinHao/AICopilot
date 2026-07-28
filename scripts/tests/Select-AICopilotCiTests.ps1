@@ -235,6 +235,30 @@ function Add-SelectedProject {
     }
 }
 
+function Test-ChangedTestFileUsesSecurityFilter {
+    param(
+        [Parameter(Mandatory)][object]$Project,
+        [Parameter(Mandatory)][string]$File
+    )
+
+    if ([string]::IsNullOrWhiteSpace([string]$Project.SecurityFilter)) {
+        return $false
+    }
+    if ($File -ceq $Project.Path) {
+        return $true
+    }
+
+    $testTypeName = [IO.Path]::GetFileNameWithoutExtension($File)
+    if ([string]::IsNullOrWhiteSpace($testTypeName)) {
+        return $false
+    }
+    $escapedTypeName = [Regex]::Escape($testTypeName)
+    return @(([string]$Project.SecurityFilter).Split(
+            '|',
+            [StringSplitOptions]::RemoveEmptyEntries) |
+        Where-Object { $_ -match "(?:^|\.)$escapedTypeName(?:\.|$)" }).Count -gt 0
+}
+
 function Get-BusinessReplacementProjects {
     param(
         [Parameter(Mandatory)][object]$BaselineProject,
@@ -765,6 +789,16 @@ if ($Mode -eq 'Quality') {
             } | Select-Object -First 1)
         if ($owner.Count -eq 1) {
             if ($owner[0].IsTest) {
+                if ($Mode -in @('Default', 'Deployment') -and
+                    (Test-ChangedTestFileUsesSecurityFilter `
+                        -Project $owner[0] `
+                        -File $file)) {
+                    Add-SelectedProject -Selected $selected -Project $owner[0] `
+                        -Category Security `
+                        -TestFilter $owner[0].SecurityFilter `
+                        -Reason "affected-security-test:$file"
+                    continue
+                }
                 switch ($owner[0].Category) {
                     'Architecture' {
                         Add-SelectedProject -Selected $selected -Project $owner[0] `
@@ -826,6 +860,22 @@ if ($Mode -eq 'Quality') {
                         -Reason "affected-security:$($owner[0].Path)"
                 }
                 continue
+            }
+            if ($owner[0].Path.StartsWith('src/testing/', [StringComparison]::Ordinal)) {
+                foreach ($dependent in @($mandatoryDependents | Where-Object {
+                            $_.Category -ceq 'Architecture'
+                        })) {
+                    Add-SelectedProject -Selected $selected -Project $dependent `
+                        -Category Architecture -Reason "affected-architecture:$($owner[0].Path)"
+                }
+                foreach ($dependent in @($mandatoryDependents | Where-Object {
+                            -not [string]::IsNullOrWhiteSpace($_.SecurityFilter)
+                        })) {
+                    Add-SelectedProject -Selected $selected -Project $dependent `
+                        -Category Security `
+                        -TestFilter $dependent.SecurityFilter `
+                        -Reason "affected-security:$($owner[0].Path)"
+                }
             }
             if ($businessDependents.Count -eq 0 -and $mandatoryDependents.Count -eq 0) {
                 $qualityOnly = @($dependents | Where-Object Category -ceq 'Quality').Count -gt 0

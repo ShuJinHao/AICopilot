@@ -15,6 +15,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole<Guid>> roleManager,
     IExternalIdentityBindingStore bindingStore,
+    IExternalIdentityBindingInvariantGuard bindingInvariantGuard,
     IIdentityAuditLogWriter auditLogWriter,
     IJwtTokenGenerator jwtTokenGenerator,
     IOptions<CloudOidcBootstrapAdminBindingOptions> bootstrapAdminBindingOptions,
@@ -27,38 +28,51 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     {
         var profile = NormalizeProfile(command.Profile);
         var rejectionAudit = new RejectionAuditBuffer();
-
-        var result = await transactionalExecutionService.ExecuteResultAsync(
-            async ct =>
-            {
-                rejectionAudit.Clear();
-                if (!profile.AccountEnabled)
+        Result<LoginUserDto> result;
+        try
+        {
+            result = await transactionalExecutionService.ExecuteResultAsync(
+                async ct =>
                 {
-                    rejectionAudit.Set(CreateRejectedAudit(
-                        "Identity.CloudOidcAccountDisabled",
-                        profile,
-                        "Cloud 账号已禁用，拒绝换取 AI 登录态。"));
+                    rejectionAudit.Clear();
+                    if (!profile.AccountEnabled)
+                    {
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            "Identity.CloudOidcAccountDisabled",
+                            profile,
+                            "Cloud 账号已禁用，拒绝换取 AI 登录态。"));
 
-                    return Result.Unauthorized(new ApiProblemDescriptor(
-                        AuthProblemCodes.CloudIdentityInactive,
-                        "Cloud 账号已禁用，无法登录 AICopilot。"));
-                }
+                        return Result.Unauthorized(new ApiProblemDescriptor(
+                            AuthProblemCodes.CloudIdentityInactive,
+                            "Cloud 账号已禁用，无法登录 AICopilot。"));
+                    }
 
-                if (!profile.EmployeeActive)
-                {
-                    rejectionAudit.Set(CreateRejectedAudit(
-                        "Identity.CloudOidcEmployeeInactive",
-                        profile,
-                        "Cloud 员工已失效，拒绝换取 AI 登录态。"));
+                    if (!profile.EmployeeActive)
+                    {
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            "Identity.CloudOidcEmployeeInactive",
+                            profile,
+                            "Cloud 员工已失效，拒绝换取 AI 登录态。"));
 
-                    return Result.Unauthorized(new ApiProblemDescriptor(
-                        AuthProblemCodes.CloudIdentityInactive,
-                        "Cloud 员工状态无效，无法登录 AICopilot。"));
-                }
+                        return Result.Unauthorized(new ApiProblemDescriptor(
+                            AuthProblemCodes.CloudIdentityInactive,
+                            "Cloud 员工状态无效，无法登录 AICopilot。"));
+                    }
 
-                return await FinalizeLoginAsync(profile, rejectionAudit, ct);
-            },
-            cancellationToken);
+                    return await FinalizeLoginAsync(profile, rejectionAudit, ct);
+                },
+                cancellationToken);
+        }
+        catch (ExternalIdentityInvariantConflictException exception)
+        {
+            var problem = CreateKnownInvariantConflictProblem(exception.ConflictKind);
+            rejectionAudit.Clear();
+            rejectionAudit.Set(CreateRejectedAudit(
+                ResolveKnownInvariantConflictAuditCode(exception.ConflictKind),
+                profile,
+                problem.Detail));
+            result = Result.Unauthorized(problem);
+        }
 
         if (!result.IsSuccess && rejectionAudit.Request is not null)
         {
@@ -77,16 +91,73 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
+        var localUserName = ResolveLocalUserName(profile);
+        var normalizedUserName = userManager.NormalizeName(localUserName);
+        if (string.IsNullOrWhiteSpace(normalizedUserName))
+        {
+            throw new InvalidOperationException(
+                "Cloud OIDC profile did not produce a normalized AICopilot user name.");
+        }
+
+        var bindingBeforeLock = await bindingStore.FindByExternalIdentityAsync(
+            ExternalIdentityProviders.Cloud,
+            profile.TenantId,
+            profile.Subject,
+            cancellationToken);
+        var userBeforeLock = await userManager.FindByNameAsync(localUserName);
+        var prospectiveUserId = Guid.NewGuid();
+        var knownUserIds = new[]
+            {
+                bindingBeforeLock?.UserId,
+                userBeforeLock?.Id,
+                prospectiveUserId
+            }
+            .Where(userId => userId.HasValue)
+            .Select(userId => userId!.Value)
+            .Distinct()
+            .ToArray();
+
+        await bindingInvariantGuard.AcquireAsync(
+            new ExternalIdentityBindingInvariantScope(
+                ExternalIdentityProviders.Cloud,
+                profile.TenantId,
+                profile.Subject,
+                normalizedUserName,
+                knownUserIds),
+            cancellationToken);
+
         var binding = await bindingStore.FindByExternalIdentityAsync(
             ExternalIdentityProviders.Cloud,
             profile.TenantId,
             profile.Subject,
             cancellationToken);
+        var localUser = await userManager.FindByNameAsync(localUserName);
+        if (binding is not null && localUser is not null && localUser.Id != binding.UserId)
+        {
+            const string detail =
+                "Cloud profile 对应的 AICopilot 用户名属于另一个本地账号，与既有绑定不一致。";
+            rejectionAudit.Set(CreateRejectedAudit(
+                "Identity.CloudOidcProfileUserNameConflict",
+                profile,
+                detail,
+                localUser.Id.ToString(),
+                localUser.UserName));
+            return Result.Unauthorized(new ApiProblemDescriptor(
+                AuthProblemCodes.ExternalIdentityConflict,
+                detail));
+        }
 
         var resolution = binding is null
-            ? await ResolveFirstBindingUserAsync(profile, now, rejectionAudit, cancellationToken)
+            ? await ResolveFirstBindingUserAsync(
+                profile,
+                now,
+                localUserName,
+                localUser,
+                prospectiveUserId,
+                rejectionAudit,
+                cancellationToken)
             : new CloudOidcLoginResolution(
-                await LoadBoundUserAsync(profile, binding, now, rejectionAudit, cancellationToken),
+                await LoadBoundUserAsync(profile, binding, now, cancellationToken),
                 IsFirstBinding: false,
                 IsBootstrapAdminAdoption: false,
                 RejectionProblem: null);
@@ -96,9 +167,8 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         {
             return Result.Unauthorized(
                 resolution.RejectionProblem ??
-                new ApiProblemDescriptor(
-                    AuthProblemCodes.ExternalIdentityConflict,
-                    "Cloud 身份与现有 AI 账号存在冲突，已拒绝自动绑定。"));
+                throw new InvalidOperationException(
+                    "A rejected Cloud OIDC login resolution did not provide a precise problem."));
         }
 
         if (IdentityGovernanceHelper.IsUserDisabled(user))
@@ -117,15 +187,8 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
 
         if (string.IsNullOrWhiteSpace(user.SecurityStamp))
         {
-            var stampResult = await userManager.UpdateSecurityStampAsync(user);
-            if (!stampResult.Succeeded)
-            {
-                throw new InvalidOperationException(
-                    "Unable to initialize the Cloud-bound user's security stamp.");
-            }
-
-            user = await userManager.FindByIdAsync(user.Id.ToString())
-                ?? throw new InvalidOperationException($"User '{user.Id}' was not found after updating security stamp.");
+            throw new InvalidOperationException(
+                $"Cloud-bound AICopilot user '{user.Id}' has no security stamp.");
         }
 
         var token = await GenerateAiTokenAsync(user, profile, cancellationToken);
@@ -149,11 +212,12 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     private async Task<CloudOidcLoginResolution> ResolveFirstBindingUserAsync(
         CloudOidcIdentityProfile profile,
         DateTime now,
+        string localUserName,
+        ApplicationUser? existingUser,
+        Guid prospectiveUserId,
         RejectionAuditBuffer rejectionAudit,
         CancellationToken cancellationToken)
     {
-        var localUserName = ResolveLocalUserName(profile);
-        var existingUser = await userManager.FindByNameAsync(localUserName);
         if (existingUser is not null)
         {
             if (IdentityGovernanceHelper.IsUserDisabled(existingUser))
@@ -200,7 +264,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 }
 
                 rejectionAudit.Set(CreateRejectedAudit(
-                    "Identity.CloudOidcBindingConflict",
+                    "Identity.CloudOidcLocalUserBoundToDifferentIdentity",
                     profile,
                     $"AI 本地用户 {existingUser.UserName} 已绑定其他 Cloud 身份，拒绝覆盖。",
                     existingUser.Id.ToString(),
@@ -208,7 +272,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 return CloudOidcLoginResolution.Rejected(
                     new ApiProblemDescriptor(
                         AuthProblemCodes.ExternalIdentityConflict,
-                        "AICopilot 本地账号已绑定其他 Cloud 身份，请联系 AI 管理员处理。"));
+                        "该 AICopilot 本地账号已绑定到另一个 Cloud 身份，拒绝覆盖。"));
             }
 
             var adoptedUser = await TryAdoptBootstrapAdminAsync(
@@ -253,15 +317,13 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
 
         if (!await roleManager.RoleExistsAsync(IdentityRoleNames.User))
         {
-            rejectionAudit.Set(CreateRejectedAudit(
-                "Identity.CloudOidcMissingDefaultRole",
-                profile,
-                "AI 默认 User 角色不存在，拒绝 Cloud 登录。"));
-            return CloudOidcLoginResolution.RejectedFirstBinding;
+            throw new InvalidOperationException(
+                "AICopilot JIT login cannot create a user because the local User role is missing.");
         }
 
         var user = new ApplicationUser
         {
+            Id = prospectiveUserId,
             UserName = localUserName,
             SecurityStamp = Guid.NewGuid().ToString("N")
         };
@@ -269,23 +331,33 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         var createResult = await userManager.CreateAsync(user);
         if (!createResult.Succeeded)
         {
-            rejectionAudit.Set(CreateRejectedAudit(
-                "Identity.CloudOidcCreateUserFailed",
-                profile,
-                "Cloud 身份 JIT 创建 AI 用户失败。"));
-            return CloudOidcLoginResolution.RejectedFirstBinding;
+            if (createResult.Errors.Any(error =>
+                    string.Equals(
+                        error.Code,
+                        nameof(IdentityErrorDescriber.DuplicateUserName),
+                        StringComparison.Ordinal)))
+            {
+                const string detail =
+                    "该 Cloud 身份对应的 AICopilot 用户名已被其他账号占用，请重新从 Cloud 登录。";
+                rejectionAudit.Set(CreateRejectedAudit(
+                    "Identity.CloudOidcNormalizedUserNameConflict",
+                    profile,
+                    detail));
+                return CloudOidcLoginResolution.Rejected(
+                    new ApiProblemDescriptor(
+                        AuthProblemCodes.ExternalIdentityConflict,
+                        detail));
+            }
+
+            throw new InvalidOperationException(
+                $"Cloud OIDC JIT user creation failed: {string.Join(',', createResult.Errors.Select(error => error.Code))}");
         }
 
         var roleResult = await userManager.AddToRoleAsync(user, IdentityRoleNames.User);
         if (!roleResult.Succeeded)
         {
-            rejectionAudit.Set(CreateRejectedAudit(
-                "Identity.CloudOidcAssignDefaultRoleFailed",
-                profile,
-                "Cloud 身份 JIT 创建后分配默认 User 角色失败。",
-                user.Id.ToString(),
-                user.UserName));
-            return CloudOidcLoginResolution.RejectedFirstBinding;
+            throw new InvalidOperationException(
+                $"Cloud OIDC JIT default-role assignment failed: {string.Join(',', roleResult.Errors.Select(error => error.Code))}");
         }
 
         await CreateBindingAsync(user.Id, profile, now, cancellationToken);
@@ -362,13 +434,19 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             cancellationToken);
     }
 
-    private async Task<ApplicationUser?> LoadBoundUserAsync(
+    private async Task<ApplicationUser> LoadBoundUserAsync(
         CloudOidcIdentityProfile profile,
         ExternalIdentityBindingSnapshot binding,
         DateTime now,
-        RejectionAuditBuffer rejectionAudit,
         CancellationToken cancellationToken)
     {
+        var user = await userManager.FindByIdAsync(binding.UserId.ToString());
+        if (user is null)
+        {
+            throw new InvalidOperationException(
+                $"Cloud identity binding '{binding.Id}' references missing AICopilot user '{binding.UserId}'.");
+        }
+
         await bindingStore.UpdateSnapshotAsync(
             new UpdateExternalIdentityBindingSnapshotRequest(
                 binding.Id,
@@ -382,20 +460,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 profile.EmployeeActive,
                 now),
             cancellationToken);
-
-        var user = await userManager.FindByIdAsync(binding.UserId.ToString());
-        if (user is not null)
-        {
-            return user;
-        }
-
-        rejectionAudit.Set(CreateRejectedAudit(
-            "Identity.CloudOidcBoundUserMissing",
-            profile,
-            $"Cloud 身份绑定的 AI 用户 {binding.UserId} 不存在，拒绝登录。",
-            binding.UserId.ToString(),
-            profile.PreferredUserName));
-        return null;
+        return user;
     }
 
     private async Task<string> GenerateAiTokenAsync(
@@ -529,6 +594,37 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         return metadata;
     }
 
+    private static ApiProblemDescriptor CreateKnownInvariantConflictProblem(
+        ExternalIdentityInvariantConflictKind conflictKind)
+    {
+        var detail = conflictKind switch
+        {
+            ExternalIdentityInvariantConflictKind.NormalizedUserName =>
+                "该 Cloud 身份对应的 AICopilot 用户名已被其他账号占用，请重新从 Cloud 登录。",
+            ExternalIdentityInvariantConflictKind.ExternalIdentity =>
+                "该 Cloud 身份已绑定到另一个 AICopilot 本地账号，拒绝覆盖。",
+            ExternalIdentityInvariantConflictKind.UserProvider =>
+                "该 AICopilot 本地账号已绑定到另一个 Cloud 身份，拒绝覆盖。",
+            _ => throw new ArgumentOutOfRangeException(nameof(conflictKind), conflictKind, null)
+        };
+        return new ApiProblemDescriptor(AuthProblemCodes.ExternalIdentityConflict, detail);
+    }
+
+    private static string ResolveKnownInvariantConflictAuditCode(
+        ExternalIdentityInvariantConflictKind conflictKind)
+    {
+        return conflictKind switch
+        {
+            ExternalIdentityInvariantConflictKind.NormalizedUserName =>
+                "Identity.CloudOidcNormalizedUserNameConflict",
+            ExternalIdentityInvariantConflictKind.ExternalIdentity =>
+                "Identity.CloudOidcExternalIdentityBoundToDifferentUser",
+            ExternalIdentityInvariantConflictKind.UserProvider =>
+                "Identity.CloudOidcLocalUserBoundToDifferentIdentity",
+            _ => throw new ArgumentOutOfRangeException(nameof(conflictKind), conflictKind, null)
+        };
+    }
+
     private static string ResolveLocalUserName(CloudOidcIdentityProfile profile)
     {
         return FirstNonEmpty(profile.EmployeeNo, profile.PreferredUserName, profile.Subject);
@@ -603,12 +699,6 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         bool IsBootstrapAdminAdoption,
         ApiProblemDescriptor? RejectionProblem)
     {
-        public static CloudOidcLoginResolution RejectedFirstBinding { get; } = new(
-            User: null,
-            IsFirstBinding: true,
-            IsBootstrapAdminAdoption: false,
-            RejectionProblem: null);
-
         public static CloudOidcLoginResolution Rejected(ApiProblemDescriptor problem)
         {
             return new CloudOidcLoginResolution(

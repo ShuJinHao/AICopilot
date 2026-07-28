@@ -2,6 +2,7 @@ using AICopilot.HttpApi.Infrastructure;
 using AICopilot.HttpApi.Models;
 using AICopilot.IdentityService.Commands;
 using AICopilot.IdentityService.Queries;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 using MediatR;
 using Microsoft.AspNetCore.Authentication;
@@ -79,6 +80,7 @@ public class IdentityController(
             result => HasProblemCode(
                 result,
                 AuthProblemCodes.ExternalIdentityConfirmationRequired));
+        await AuditInvalidExternalSessionAsync(result);
 
         return ReturnResult(result);
     }
@@ -103,6 +105,7 @@ public class IdentityController(
             _ => HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme),
             HttpContext.RequestAborted,
             result => HasProblemCode(result, AuthProblemCodes.InvalidCredentials));
+        await AuditInvalidExternalSessionAsync(result);
 
         return ReturnResult(result);
     }
@@ -112,7 +115,34 @@ public class IdentityController(
     [EnableRateLimiting("login")]
     public async Task<IActionResult> CancelCloudOidcAccountConfirmation()
     {
-        await HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+        CloudOidcIdentityProfile? profile = null;
+        try
+        {
+            var authentication = await HttpContext.AuthenticateAsync(
+                CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+            if (authentication.Succeeded &&
+                authentication.Principal is not null &&
+                CloudOidcPrincipalMapper.TryMap(
+                    authentication.Principal,
+                    cloudOidcOptions.Value.Issuer,
+                    out var mappedProfile,
+                    out _))
+            {
+                profile = mappedProfile;
+            }
+
+            await Sender.Send(
+                new AuditCloudOidcExternalSessionCommand(
+                    CloudOidcExternalSessionAuditReason.Cancelled,
+                    profile),
+                HttpContext.RequestAborted);
+        }
+        finally
+        {
+            await HttpContext.SignOutAsync(
+                CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+        }
+
         return NoContent();
     }
 
@@ -235,5 +265,19 @@ public class IdentityController(
         return result.Errors?
             .OfType<ApiProblemDescriptor>()
             .Any(problem => string.Equals(problem.Code, problemCode, StringComparison.Ordinal)) == true;
+    }
+
+    private async Task AuditInvalidExternalSessionAsync<T>(Result<T> result)
+    {
+        if (!HasProblemCode(result, AuthProblemCodes.CloudOidcInvalidPrincipal))
+        {
+            return;
+        }
+
+        await Sender.Send(
+            new AuditCloudOidcExternalSessionCommand(
+                CloudOidcExternalSessionAuditReason.InvalidOrExpired,
+                Profile: null),
+            HttpContext.RequestAborted);
     }
 }

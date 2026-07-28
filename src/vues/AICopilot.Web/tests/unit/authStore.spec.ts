@@ -137,6 +137,39 @@ describe('authStore', () => {
     expect(JSON.stringify(store.$state)).not.toContain('Local-Password-1!')
   })
 
+  it('closes confirmation and displays the precise backend reason for an unrecoverable binding conflict', async () => {
+    identityServiceMock.finalizeCloudOidcLogin.mockRejectedValue(new ApiError('API Error: 401', 401, {
+      code: 'external_identity_confirmation_required'
+    }))
+    const conflict = new ApiError('API Error: 401', 401, {
+      code: 'external_identity_conflict',
+      detail: '该 AICopilot 本地账号已绑定到另一个 Cloud 身份，拒绝覆盖。'
+    })
+    identityServiceMock.confirmExistingCloudOidcAccount.mockRejectedValue(conflict)
+    const store = useAuthStore()
+    await expect(store.finalizeCloudOidcLogin()).rejects.toBeInstanceOf(ApiError)
+
+    await expect(store.confirmExistingCloudOidcAccount('Local-Password-1!')).rejects.toBe(conflict)
+
+    expect(store.isCloudAccountConfirmationRequired).toBe(false)
+    expect(store.errorMessage).toBe('该 AICopilot 本地账号已绑定到另一个 Cloud 身份，拒绝覆盖。')
+    expect(JSON.stringify(store.$state)).not.toContain('Local-Password-1!')
+  })
+
+  it('shows an expired external session as a stable Cloud login error without opening confirmation', async () => {
+    const expired = new ApiError('API Error: 401', 401, {
+      code: 'cloud_oidc_invalid_principal',
+      detail: 'Cloud 登录态无效或已过期，请重新从 Cloud 登录。'
+    })
+    identityServiceMock.finalizeCloudOidcLogin.mockRejectedValue(expired)
+    const store = useAuthStore()
+
+    await expect(store.finalizeCloudOidcLogin()).rejects.toBe(expired)
+
+    expect(store.isCloudAccountConfirmationRequired).toBe(false)
+    expect(store.errorMessage).toBe('Cloud 登录态无效或已过期，请重新登录。')
+  })
+
   it('cancels the pending Cloud account confirmation and clears its state', async () => {
     identityServiceMock.finalizeCloudOidcLogin.mockRejectedValue(new ApiError('API Error: 401', 401, {
       code: 'external_identity_confirmation_required'

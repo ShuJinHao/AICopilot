@@ -1,6 +1,7 @@
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace AICopilot.EntityFrameworkCore.Transactions;
 
@@ -59,6 +60,51 @@ public sealed class IdentityTransactionalExecutionService(
         {
             return exception.Result;
         }
+        catch (DbUpdateException exception)
+        {
+            var conflictKind = GetKnownExternalIdentityConflict(exception);
+            if (conflictKind is not null)
+            {
+                throw new ExternalIdentityInvariantConflictException(
+                    conflictKind.Value,
+                    exception);
+            }
+
+            throw;
+        }
+    }
+
+    private static ExternalIdentityInvariantConflictKind? GetKnownExternalIdentityConflict(
+        DbUpdateException exception)
+    {
+        var postgresException = FindPostgresException(exception);
+        if (postgresException?.SqlState != PostgresErrorCodes.UniqueViolation)
+        {
+            return null;
+        }
+
+        return postgresException.ConstraintName switch
+        {
+            "UserNameIndex" => ExternalIdentityInvariantConflictKind.NormalizedUserName,
+            "IX_external_identity_bindings_Provider_TenantId_ExternalUserId" =>
+                ExternalIdentityInvariantConflictKind.ExternalIdentity,
+            "IX_external_identity_bindings_UserId_Provider" =>
+                ExternalIdentityInvariantConflictKind.UserProvider,
+            _ => null
+        };
+    }
+
+    private static PostgresException? FindPostgresException(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is PostgresException postgresException)
+            {
+                return postgresException;
+            }
+        }
+
+        return null;
     }
 
     private sealed class IdentityCommitParticipant<TResult>(

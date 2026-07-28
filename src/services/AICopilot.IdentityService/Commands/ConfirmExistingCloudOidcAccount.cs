@@ -25,126 +25,167 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
         CancellationToken cancellationToken)
     {
         var profile = NormalizeProfile(command.Profile);
+        var localUserName = ResolveLocalUserName(profile);
+        var normalizedUserName = userManager.NormalizeName(localUserName);
+        if (string.IsNullOrWhiteSpace(normalizedUserName))
+        {
+            throw new InvalidOperationException(
+                "Cloud OIDC profile did not produce a normalized AICopilot user name.");
+        }
+
         var rejectionAudit = new RejectionAuditBuffer();
-
-        var result = await transactionalExecutionService.ExecuteResultAsync(
-            async ct =>
-            {
-                rejectionAudit.Clear();
-                if (!profile.AccountEnabled || !profile.EmployeeActive)
+        Result<LoginUserDto> result;
+        try
+        {
+            result = await transactionalExecutionService.ExecuteResultAsync(
+                async ct =>
                 {
-                    rejectionAudit.Set(CreateRejectedAudit(
-                        "Identity.CloudOidcExistingAccountCloudIdentityInactive",
-                        profile,
-                        "Cloud 账号或员工状态无效，拒绝确认现有 AI 账号。"));
-                    return Result.Unauthorized(new ApiProblemDescriptor(
-                        AuthProblemCodes.CloudIdentityInactive,
-                        "Cloud 账号或员工状态无效，无法登录 AICopilot。"));
-                }
-
-                var localUserName = ResolveLocalUserName(profile);
-                var user = await userManager.FindByNameAsync(localUserName);
-                if (user is null)
-                {
-                    rejectionAudit.Set(CreateRejectedAudit(
-                        "Identity.CloudOidcExistingAccountMissing",
-                        profile,
-                        "Cloud 身份对应的同名 AI 本地账号不存在，拒绝绑定。"));
-                    return Result.Unauthorized(new ApiProblemDescriptor(
-                        AuthProblemCodes.ExternalIdentityConflict,
-                        "Cloud 身份对应的 AI 本地账号不存在，请重新登录或联系 AI 管理员。"));
-                }
-
-                await bindingInvariantGuard.AcquireAsync(
-                    ExternalIdentityProviders.Cloud,
-                    profile.TenantId,
-                    profile.Subject,
-                    user.Id,
-                    ct);
-
-                user = await userManager.FindByIdAsync(user.Id.ToString());
-                if (user is null)
-                {
-                    rejectionAudit.Set(CreateRejectedAudit(
-                        "Identity.CloudOidcExistingAccountMissing",
-                        profile,
-                        "Cloud 身份对应的同名 AI 本地账号不存在，拒绝绑定。"));
-                    return Result.Unauthorized(new ApiProblemDescriptor(
-                        AuthProblemCodes.ExternalIdentityConflict,
-                        "Cloud 身份对应的 AI 本地账号不存在，请重新登录或联系 AI 管理员。"));
-                }
-
-                if (IdentityGovernanceHelper.IsUserDisabled(user))
-                {
-                    rejectionAudit.Set(CreateRejectedAudit(
-                        "Identity.CloudOidcExistingAccountDisabled",
-                        profile,
-                        "同名 AI 本地账号已禁用，拒绝 Cloud 身份绑定。",
-                        user));
-                    return Result.Unauthorized(new ApiProblemDescriptor(
-                        AuthProblemCodes.AccountDisabled,
-                        "AICopilot 本地账号已禁用，请联系 AI 管理员恢复启用。"));
-                }
-
-                if (string.IsNullOrEmpty(command.Password) ||
-                    !await userManager.CheckPasswordAsync(user, command.Password))
-                {
-                    rejectionAudit.Set(CreateRejectedAudit(
-                        "Identity.CloudOidcExistingAccountPasswordRejected",
-                        profile,
-                        "同名 AI 本地账号密码确认失败，拒绝 Cloud 身份绑定。",
-                        user));
-                    return Result.Unauthorized(new ApiProblemDescriptor(
-                        AuthProblemCodes.InvalidCredentials,
-                        "本地 AI 账号密码无效，请重新输入。"));
-                }
-
-                var bindingResult = await ResolveBindingAsync(user, profile, ct);
-                if (!bindingResult.IsSuccess)
-                {
-                    rejectionAudit.Set(CreateRejectedAudit(
-                        "Identity.CloudOidcExistingAccountBindingConflict",
-                        profile,
-                        "Cloud 身份或 AI 本地账号已绑定到其他身份，拒绝覆盖。",
-                        user));
-                    return Result.Unauthorized(new ApiProblemDescriptor(
-                        AuthProblemCodes.ExternalIdentityConflict,
-                        "Cloud 身份或本地 AI 账号已存在其他绑定，请联系 AI 管理员处理。"));
-                }
-
-                if (string.IsNullOrWhiteSpace(user.SecurityStamp))
-                {
-                    var stampResult = await userManager.UpdateSecurityStampAsync(user);
-                    if (!stampResult.Succeeded)
+                    rejectionAudit.Clear();
+                    if (!profile.AccountEnabled || !profile.EmployeeActive)
                     {
-                        throw new InvalidOperationException(
-                            "Unable to initialize the confirmed Cloud-bound user's security stamp.");
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            "Identity.CloudOidcExistingAccountCloudIdentityInactive",
+                            profile,
+                            "Cloud 账号或员工状态无效，拒绝确认现有 AI 账号。"));
+                        return Result.Unauthorized(new ApiProblemDescriptor(
+                            AuthProblemCodes.CloudIdentityInactive,
+                            "Cloud 账号或员工状态无效，无法登录 AICopilot。"));
                     }
 
-                    user = await userManager.FindByIdAsync(user.Id.ToString())
-                        ?? throw new InvalidOperationException(
-                            $"User '{user.Id}' was not found after updating security stamp.");
-                }
+                    var userBeforeLock = await userManager.FindByNameAsync(localUserName);
+                    var bindingBeforeLock = await bindingStore.FindByExternalIdentityAsync(
+                        ExternalIdentityProviders.Cloud,
+                        profile.TenantId,
+                        profile.Subject,
+                        ct);
+                    var knownUserIds = new[] { userBeforeLock?.Id, bindingBeforeLock?.UserId }
+                        .Where(userId => userId.HasValue)
+                        .Select(userId => userId!.Value)
+                        .Distinct()
+                        .ToArray();
 
-                var token = await GenerateAiTokenAsync(user, profile, ct);
-                await auditLogWriter.WriteAsync(
-                    new AuditLogWriteRequest(
-                        AuditActionGroups.Identity,
-                        "Identity.CloudOidcExistingAccountConfirmed",
-                        "ExternalIdentityBinding",
-                        user.Id.ToString(),
-                        user.UserName ?? localUserName,
-                        AuditResults.Succeeded,
-                        bindingResult.Value!
-                            ? "Cloud 身份已由本地密码确认并绑定到现有 AI 账号。"
-                            : "Cloud 身份再次由本地密码确认，复用现有 AI 账号绑定。",
-                        BuildChangedFields(profile, bindingResult.Value!),
-                        BuildAuditMetadata(profile)),
-                    ct);
+                    await bindingInvariantGuard.AcquireAsync(
+                        new ExternalIdentityBindingInvariantScope(
+                            ExternalIdentityProviders.Cloud,
+                            profile.TenantId,
+                            profile.Subject,
+                            normalizedUserName,
+                            knownUserIds),
+                        ct);
 
-                return Result.Success(new LoginUserDto(user.UserName!, token));
-            },
-            cancellationToken);
+                    var user = await userManager.FindByNameAsync(localUserName);
+                    var externalBinding = await bindingStore.FindByExternalIdentityAsync(
+                        ExternalIdentityProviders.Cloud,
+                        profile.TenantId,
+                        profile.Subject,
+                        ct);
+                    if (user is null)
+                    {
+                        var actionCode = externalBinding is null
+                            ? "Identity.CloudOidcExistingAccountMissing"
+                            : "Identity.CloudOidcExternalIdentityBoundToDifferentUser";
+                        var detail = externalBinding is null
+                            ? "Cloud 身份对应的同名 AI 本地账号已不存在，请重新从 Cloud 登录。"
+                            : "该 Cloud 身份已绑定到另一个 AICopilot 本地账号，不能确认当前用户名。";
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            actionCode,
+                            profile,
+                            detail));
+                        return Result.Unauthorized(new ApiProblemDescriptor(
+                            AuthProblemCodes.ExternalIdentityConflict,
+                            detail));
+                    }
+
+                    if (IdentityGovernanceHelper.IsUserDisabled(user))
+                    {
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            "Identity.CloudOidcExistingAccountDisabled",
+                            profile,
+                            "同名 AI 本地账号已禁用，拒绝 Cloud 身份绑定。",
+                            user));
+                        return Result.Unauthorized(new ApiProblemDescriptor(
+                            AuthProblemCodes.AccountDisabled,
+                            "AICopilot 本地账号已禁用，请联系 AI 管理员恢复启用。"));
+                    }
+
+                    if (!await userManager.HasPasswordAsync(user))
+                    {
+                        const string detail =
+                            "AICopilot 本地账号没有可用于确认的密码，请联系 AI 管理员处理。";
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            "Identity.CloudOidcExistingAccountHasNoPassword",
+                            profile,
+                            detail,
+                            user));
+                        return Result.Unauthorized(new ApiProblemDescriptor(
+                            AuthProblemCodes.ExternalIdentityConflict,
+                            detail));
+                    }
+
+                    if (string.IsNullOrEmpty(command.Password) ||
+                        !await userManager.CheckPasswordAsync(user, command.Password))
+                    {
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            "Identity.CloudOidcExistingAccountPasswordRejected",
+                            profile,
+                            "同名 AI 本地账号密码确认失败，拒绝 Cloud 身份绑定。",
+                            user));
+                        return Result.Unauthorized(new ApiProblemDescriptor(
+                            AuthProblemCodes.InvalidCredentials,
+                            "本地 AI 账号密码无效，请重新输入。"));
+                    }
+
+                    var bindingResult = await ResolveBindingAsync(
+                        user,
+                        externalBinding,
+                        profile,
+                        ct);
+                    if (!bindingResult.IsSuccess)
+                    {
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            bindingResult.AuditActionCode!,
+                            profile,
+                            bindingResult.Problem!.Detail,
+                            user));
+                        return Result.Unauthorized(bindingResult.Problem!);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(user.SecurityStamp))
+                    {
+                        throw new InvalidOperationException(
+                            $"Confirmed AICopilot user '{user.Id}' has no security stamp.");
+                    }
+
+                    var token = await GenerateAiTokenAsync(user, profile, ct);
+                    await auditLogWriter.WriteAsync(
+                        new AuditLogWriteRequest(
+                            AuditActionGroups.Identity,
+                            "Identity.CloudOidcExistingAccountConfirmed",
+                            "ExternalIdentityBinding",
+                            user.Id.ToString(),
+                            user.UserName ?? localUserName,
+                            AuditResults.Succeeded,
+                            bindingResult.WasCreated
+                                ? "Cloud 身份已由本地密码确认并绑定到现有 AI 账号。"
+                                : "Cloud 身份再次由本地密码确认，复用现有 AI 账号绑定。",
+                            BuildChangedFields(profile, bindingResult.WasCreated),
+                            BuildAuditMetadata(profile)),
+                        ct);
+
+                    return Result.Success(new LoginUserDto(user.UserName!, token));
+                },
+                cancellationToken);
+        }
+        catch (ExternalIdentityInvariantConflictException exception)
+        {
+            var problem = CreateKnownInvariantConflictProblem(exception.ConflictKind);
+            rejectionAudit.Clear();
+            rejectionAudit.Set(CreateRejectedAudit(
+                ResolveKnownInvariantConflictAuditCode(exception.ConflictKind),
+                profile,
+                problem.Detail));
+            result = Result.Unauthorized(problem);
+        }
 
         if (!result.IsSuccess && rejectionAudit.Request is not null)
         {
@@ -157,16 +198,12 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
         return result;
     }
 
-    private async Task<Result<bool>> ResolveBindingAsync(
+    private async Task<ExternalIdentityBindingResolution> ResolveBindingAsync(
         ApplicationUser user,
+        ExternalIdentityBindingSnapshot? externalBinding,
         CloudOidcIdentityProfile profile,
         CancellationToken cancellationToken)
     {
-        var externalBinding = await bindingStore.FindByExternalIdentityAsync(
-            ExternalIdentityProviders.Cloud,
-            profile.TenantId,
-            profile.Subject,
-            cancellationToken);
         var userBinding = await bindingStore.FindByUserProviderAsync(
             user.Id,
             ExternalIdentityProviders.Cloud,
@@ -174,14 +211,18 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
 
         if (externalBinding is not null && externalBinding.UserId != user.Id)
         {
-            return Result.Failure();
+            return ExternalIdentityBindingResolution.Conflict(
+                "Identity.CloudOidcExternalIdentityBoundToDifferentUser",
+                "该 Cloud 身份已绑定到另一个 AICopilot 本地账号，拒绝覆盖。");
         }
 
         if (userBinding is not null &&
             (!string.Equals(userBinding.TenantId, profile.TenantId, StringComparison.Ordinal) ||
              !string.Equals(userBinding.ExternalUserId, profile.Subject, StringComparison.Ordinal)))
         {
-            return Result.Failure();
+            return ExternalIdentityBindingResolution.Conflict(
+                "Identity.CloudOidcLocalUserBoundToDifferentIdentity",
+                "该 AICopilot 本地账号已绑定到另一个 Cloud 身份，拒绝覆盖。");
         }
 
         var existingBinding = externalBinding ?? userBinding;
@@ -200,7 +241,7 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
                     profile.EmployeeActive,
                     DateTime.UtcNow),
                 cancellationToken);
-            return Result.Success(false);
+            return ExternalIdentityBindingResolution.Success(wasCreated: false);
         }
 
         await bindingStore.CreateAsync(
@@ -219,7 +260,7 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
                 profile.EmployeeActive,
                 DateTime.UtcNow),
             cancellationToken);
-        return Result.Success(true);
+        return ExternalIdentityBindingResolution.Success(wasCreated: true);
     }
 
     private async Task<string> GenerateAiTokenAsync(
@@ -322,6 +363,37 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
         return metadata;
     }
 
+    private static ApiProblemDescriptor CreateKnownInvariantConflictProblem(
+        ExternalIdentityInvariantConflictKind conflictKind)
+    {
+        var detail = conflictKind switch
+        {
+            ExternalIdentityInvariantConflictKind.NormalizedUserName =>
+                "该 Cloud 身份对应的 AICopilot 用户名已被其他账号占用，请重新从 Cloud 登录。",
+            ExternalIdentityInvariantConflictKind.ExternalIdentity =>
+                "该 Cloud 身份已绑定到另一个 AICopilot 本地账号，拒绝覆盖。",
+            ExternalIdentityInvariantConflictKind.UserProvider =>
+                "该 AICopilot 本地账号已绑定到另一个 Cloud 身份，拒绝覆盖。",
+            _ => throw new ArgumentOutOfRangeException(nameof(conflictKind), conflictKind, null)
+        };
+        return new ApiProblemDescriptor(AuthProblemCodes.ExternalIdentityConflict, detail);
+    }
+
+    private static string ResolveKnownInvariantConflictAuditCode(
+        ExternalIdentityInvariantConflictKind conflictKind)
+    {
+        return conflictKind switch
+        {
+            ExternalIdentityInvariantConflictKind.NormalizedUserName =>
+                "Identity.CloudOidcNormalizedUserNameConflict",
+            ExternalIdentityInvariantConflictKind.ExternalIdentity =>
+                "Identity.CloudOidcExternalIdentityBoundToDifferentUser",
+            ExternalIdentityInvariantConflictKind.UserProvider =>
+                "Identity.CloudOidcLocalUserBoundToDifferentIdentity",
+            _ => throw new ArgumentOutOfRangeException(nameof(conflictKind), conflictKind, null)
+        };
+    }
+
     private static string ResolveLocalUserName(CloudOidcIdentityProfile profile)
     {
         return FirstNonEmpty(profile.EmployeeNo, profile.PreferredUserName, profile.Subject);
@@ -390,6 +462,33 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
         if (!string.IsNullOrWhiteSpace(value))
         {
             metadata[key] = value.Trim();
+        }
+    }
+
+    private sealed record ExternalIdentityBindingResolution(
+        bool IsSuccess,
+        bool WasCreated,
+        string? AuditActionCode,
+        ApiProblemDescriptor? Problem)
+    {
+        public static ExternalIdentityBindingResolution Success(bool wasCreated)
+        {
+            return new ExternalIdentityBindingResolution(
+                IsSuccess: true,
+                wasCreated,
+                AuditActionCode: null,
+                Problem: null);
+        }
+
+        public static ExternalIdentityBindingResolution Conflict(
+            string auditActionCode,
+            string detail)
+        {
+            return new ExternalIdentityBindingResolution(
+                IsSuccess: false,
+                WasCreated: false,
+                auditActionCode,
+                new ApiProblemDescriptor(AuthProblemCodes.ExternalIdentityConflict, detail));
         }
     }
 
