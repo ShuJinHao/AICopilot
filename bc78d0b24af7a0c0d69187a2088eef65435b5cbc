@@ -1,0 +1,33 @@
+AI-BATCH-01 WORKTREE RECOVERY MANIFEST
+snapshot_ref  refs/codex/ai-batch-01/worktrees/ai-architecture-p0-20260717
+snapshot_commit  bc78d0b24af7a0c0d69187a2088eef65435b5cbc
+snapshot_tree  6d70523e2cd02d686c231dc223f1a9efa8c00a6c
+base_head  998b26b9e3cb2e13f9cecd0c17cb213460d11581
+branch  agent/ai-architecture-p0-20260717
+worktree  /Users/shushu/Developer/产线系统架构升级/1/.codex-worktrees/ai-p0-validator-fixes-20260720-4e098709
+
+DIRTY_STATUS
+ M docs/AI架构治理清单.md
+ M docs/改动复盘与规则沉淀.md
+ M scripts/tests/aicopilot-compatibility-inventory.json
+ M scripts/tests/baselines/aicopilot-compatibility.json
+ M scripts/tests/baselines/aicopilot-test-cases.json
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanContractV2.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs
+ M src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskPlanDocument.cs
+ M src/tests/AICopilot.PersistenceTests/AgentTaskPlanPersistenceAtomicityTests.cs
+ M src/tests/AICopilot.UnitTests/AgentPlanContractV2Tests.cs
+ M src/vues/AICopilot.Web/src/types/protocols.ts
+
+SHA256_DIRTY_TRACKED_AND_UNTRACKED
+1adb4d906775be568e4dd3d1a9453baaf51de4a068cb7baffe9f8f82d8fd5a60  docs/AI架构治理清单.md
+62dc63ebe9196cf5684665a6a9b553bc5d47cd18de5145c5b23b3585b7c569c3  docs/改动复盘与规则沉淀.md
+a6b26a5a0e47aad6af97405b1d88ee3566630ccfaa6f87072712873d5a2226ba  scripts/tests/aicopilot-compatibility-inventory.json
+61594a399eb3210976eda60a838b385e11c8ba97663d61a42aec03b50b2f2ced  scripts/tests/baselines/aicopilot-compatibility.json
+566181f9476c4224204269aedc7e3a2f0ae0f27a60c5dd0dacd47a01440d2603  scripts/tests/baselines/aicopilot-test-cases.json
+25595c2bfad94c39a1955f12961f8b6b993dae81bfbb0762ab9ca600c0c77f03  src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanContractV2.cs
+ba4cacadb6a970c0c916b958d30753efc44549f0f538954e71f362b51dd00778  src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs
+5c8a5982f040d5b3ac497c778cc49caf9fc55c8c35612fb0b2ed606254568dcb  src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskPlanDocument.cs
+4c923718c3df7e7cc99961f478e5c1cc1cf2f8c5fb3b8985dbcbf4d391c3a522  src/tests/AICopilot.PersistenceTests/AgentTaskPlanPersistenceAtomicityTests.cs
+e550ca9e85759e84455071a9c67f1821113f54196ee0e89de0680dc9c76a05be  src/tests/AICopilot.UnitTests/AgentPlanContractV2Tests.cs
+0630388935f76d95bec575e74696cbb6049252be7843680c99caa46b3bcaa27c  src/vues/AICopilot.Web/src/types/protocols.ts
