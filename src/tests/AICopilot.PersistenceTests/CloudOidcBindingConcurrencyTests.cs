@@ -310,6 +310,182 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
     }
 
     [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldUseSecurityStampCommittedWhileWaitingForBindingLock()
+    {
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
+        const string userName = "E-FRESH-STAMP-1001";
+        const string externalUserId = "fresh-stamp-subject";
+        const string refreshedSecurityStamp = "security-stamp-after-lock";
+        await SeedIdentityUserAsync(
+            database.ConnectionString,
+            userName,
+            IdentityRoleNames.User,
+            externalUserId);
+
+        await using var handlerContext = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        using var managers = IdentityManagerTestScope.Create(handlerContext);
+        var lockAcquired = NewSignal();
+        var releaseLock = NewSignal();
+        var tokenGenerator = new RecordingJwtTokenGenerator();
+        var handler = CreateFinalizeHandler(
+            database.ConnectionString,
+            handlerContext,
+            managers,
+            new HoldingInvariantGuard(
+                new PostgresExternalIdentityBindingInvariantGuard(handlerContext),
+                lockAcquired,
+                releaseLock),
+            tokenGenerator: tokenGenerator);
+
+        var loginTask = handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(userName, externalUserId)),
+            CancellationToken.None);
+        await lockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            await using var mutationContext = new IdentityStoreDbContext(
+                CreateIdentityOptions(database.ConnectionString));
+            var user = await mutationContext.Users.SingleAsync(
+                item => item.NormalizedUserName == userName.ToUpperInvariant());
+            user.SecurityStamp = refreshedSecurityStamp;
+            await mutationContext.SaveChangesAsync();
+        }
+        finally
+        {
+            releaseLock.TrySetResult(true);
+        }
+
+        (await loginTask).Status.Should().Be(ResultStatus.Ok);
+        tokenGenerator.User.Should().NotBeNull();
+        tokenGenerator.User!.SecurityStamp.Should().Be(refreshedSecurityStamp);
+    }
+
+    [Fact]
+    public async Task BootstrapAdoption_ShouldRejectUserDisabledWhileWaitingForBindingLock()
+    {
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
+        const string bootstrapUserName = "BOOTSTRAP-FRESH-DISABLED";
+        var bootstrapUserId = await SeedBootstrapAdminAsync(
+            database.ConnectionString,
+            bootstrapUserName);
+        _ = await SeedBootstrapAdminAsync(
+            database.ConnectionString,
+            "BOOTSTRAP-SAFETY-ADMIN");
+
+        await using var handlerContext = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        using var managers = IdentityManagerTestScope.Create(handlerContext);
+        var lockAcquired = NewSignal();
+        var releaseLock = NewSignal();
+        var handler = CreateFinalizeHandler(
+            database.ConnectionString,
+            handlerContext,
+            managers,
+            new HoldingInvariantGuard(
+                new PostgresExternalIdentityBindingInvariantGuard(handlerContext),
+                lockAcquired,
+                releaseLock),
+            new CloudOidcBootstrapAdminBindingOptions
+            {
+                BootstrapAdminAutoBindEnabled = true,
+                BootstrapAdminUserName = bootstrapUserName
+            });
+
+        var loginTask = handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(bootstrapUserName, "disabled-bootstrap-subject")),
+            CancellationToken.None);
+        await lockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            await using var mutationContext = new IdentityStoreDbContext(
+                CreateIdentityOptions(database.ConnectionString));
+            var user = await mutationContext.Users.SingleAsync(item => item.Id == bootstrapUserId);
+            IdentityGovernanceHelper.MarkUserDisabled(user);
+            IdentityGovernanceHelper.RefreshSecurityStamp(user);
+            await mutationContext.SaveChangesAsync();
+        }
+        finally
+        {
+            releaseLock.TrySetResult(true);
+        }
+
+        var result = await loginTask;
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should()
+            .Be(AuthProblemCodes.AccountDisabled);
+
+        await using var verification = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        (await verification.ExternalIdentityBindings.CountAsync()).Should().Be(0);
+        (await verification.AuditLogs.CountAsync(entry =>
+            entry.ActionCode == "Identity.CloudOidcLocalUserDisabled" &&
+            entry.Result == AuditResults.Rejected)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldRejectUserDisabledWhileWaitingForBindingLock()
+    {
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
+        const string userName = "E-CONFIRM-FRESH-DISABLED";
+        var userId = await SeedIdentityUserAsync(
+            database.ConnectionString,
+            userName,
+            IdentityRoleNames.User);
+
+        await using var handlerContext = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        using var managers = IdentityManagerTestScope.Create(handlerContext);
+        var lockAcquired = NewSignal();
+        var releaseLock = NewSignal();
+        var handler = CreateHandler(
+            database.ConnectionString,
+            handlerContext,
+            managers,
+            new HoldingInvariantGuard(
+                new PostgresExternalIdentityBindingInvariantGuard(handlerContext),
+                lockAcquired,
+                releaseLock));
+
+        var confirmTask = handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(userName, "disabled-confirm-subject"),
+                "ValidPassword123!"),
+            CancellationToken.None);
+        await lockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            await using var mutationContext = new IdentityStoreDbContext(
+                CreateIdentityOptions(database.ConnectionString));
+            var user = await mutationContext.Users.SingleAsync(item => item.Id == userId);
+            IdentityGovernanceHelper.MarkUserDisabled(user);
+            IdentityGovernanceHelper.RefreshSecurityStamp(user);
+            await mutationContext.SaveChangesAsync();
+        }
+        finally
+        {
+            releaseLock.TrySetResult(true);
+        }
+
+        var result = await confirmTask;
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should()
+            .Be(AuthProblemCodes.AccountDisabled);
+
+        await using var verification = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        (await verification.ExternalIdentityBindings.CountAsync()).Should().Be(0);
+        (await verification.AuditLogs.CountAsync(entry =>
+            entry.ActionCode == "Identity.CloudOidcExistingAccountDisabled" &&
+            entry.Result == AuditResults.Rejected)).Should().Be(1);
+    }
+
+    [Fact]
     public async Task IdentityTransaction_ShouldMapOnlyKnownExternalIdentityUniqueConstraints()
     {
         await using var database = await CreateMigratedDatabaseAsync(fixture);
@@ -590,6 +766,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         return new ConfirmExistingCloudOidcAccountCommandHandler(
             managers.UserManager,
             new ExternalIdentityBindingStore(dbContext),
+            new IdentityUserFreshReadStore(dbContext),
             invariantGuard,
             new IdentityAuditLogWriter(dbContext),
             new StubJwtTokenGenerator(),
@@ -601,15 +778,17 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         IdentityStoreDbContext dbContext,
         IdentityManagerTestScope managers,
         IExternalIdentityBindingInvariantGuard invariantGuard,
-        CloudOidcBootstrapAdminBindingOptions? bootstrapOptions = null)
+        CloudOidcBootstrapAdminBindingOptions? bootstrapOptions = null,
+        IJwtTokenGenerator? tokenGenerator = null)
     {
         return new FinalizeCloudOidcLoginCommandHandler(
             managers.UserManager,
             managers.RoleManager,
             new ExternalIdentityBindingStore(dbContext),
+            new IdentityUserFreshReadStore(dbContext),
             invariantGuard,
             new IdentityAuditLogWriter(dbContext),
-            new StubJwtTokenGenerator(),
+            tokenGenerator ?? new StubJwtTokenGenerator(),
             Options.Create(bootstrapOptions ?? new CloudOidcBootstrapAdminBindingOptions()),
             CreateService(connectionString, dbContext));
     }
@@ -635,9 +814,21 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         string connectionString,
         string userName)
     {
+        return await SeedIdentityUserAsync(
+            connectionString,
+            userName,
+            IdentityRoleNames.Admin);
+    }
+
+    private static async Task<Guid> SeedIdentityUserAsync(
+        string connectionString,
+        string userName,
+        string roleName,
+        string? externalUserId = null)
+    {
         await SeedRolesAsync(
             connectionString,
-            IdentityRoleNames.Admin,
+            roleName,
             IdentityRoleNames.User);
         await using var context = new IdentityStoreDbContext(
             CreateIdentityOptions(connectionString));
@@ -650,8 +841,29 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         };
         (await managers.UserManager.CreateAsync(user, "ValidPassword123!"))
             .Succeeded.Should().BeTrue();
-        (await managers.UserManager.AddToRoleAsync(user, IdentityRoleNames.Admin))
+        (await managers.UserManager.AddToRoleAsync(user, roleName))
             .Succeeded.Should().BeTrue();
+
+        if (externalUserId is not null)
+        {
+            var now = DateTime.UtcNow;
+            context.ExternalIdentityBindings.Add(new ExternalIdentityBinding
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Provider = ExternalIdentityProviders.Cloud,
+                TenantId = CloudOidcIdentityProfile.DefaultTenantId,
+                ExternalUserId = externalUserId,
+                AccountEnabledSnapshot = true,
+                EmployeeActiveSnapshot = true,
+                LastLoginAtUtc = now,
+                LastSyncAtUtc = now,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+            await context.SaveChangesAsync();
+        }
+
         return user.Id;
     }
 
@@ -685,6 +897,19 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             JwtTokenUser user,
             CancellationToken cancellationToken = default)
         {
+            return Task.FromResult($"token-{user.UserName}");
+        }
+    }
+
+    private sealed class RecordingJwtTokenGenerator : IJwtTokenGenerator
+    {
+        public JwtTokenUser? User { get; private set; }
+
+        public Task<string> GenerateTokenAsync(
+            JwtTokenUser user,
+            CancellationToken cancellationToken = default)
+        {
+            User = user;
             return Task.FromResult($"token-{user.UserName}");
         }
     }

@@ -119,6 +119,17 @@ public interface IExternalIdentityBindingStore
         CancellationToken cancellationToken = default);
 }
 
+public interface IIdentityUserFreshReadStore
+{
+    Task<ApplicationUser?> FindByNormalizedUserNameAsync(
+        string normalizedUserName,
+        CancellationToken cancellationToken = default);
+
+    Task<ApplicationUser?> FindByIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IExternalIdentityBindingInvariantGuard
 {
     Task AcquireAsync(

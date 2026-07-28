@@ -14,6 +14,7 @@ public sealed record ConfirmExistingCloudOidcAccountCommand(
 public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
     UserManager<ApplicationUser> userManager,
     IExternalIdentityBindingStore bindingStore,
+    IIdentityUserFreshReadStore userFreshReadStore,
     IExternalIdentityBindingInvariantGuard bindingInvariantGuard,
     IIdentityAuditLogWriter auditLogWriter,
     IJwtTokenGenerator jwtTokenGenerator,
@@ -52,7 +53,9 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
                             "Cloud 账号或员工状态无效，无法登录 AICopilot。"));
                     }
 
-                    var userBeforeLock = await userManager.FindByNameAsync(localUserName);
+                    var userBeforeLock = await userFreshReadStore.FindByNormalizedUserNameAsync(
+                        normalizedUserName,
+                        ct);
                     var bindingBeforeLock = await bindingStore.FindByExternalIdentityAsync(
                         ExternalIdentityProviders.Cloud,
                         profile.TenantId,
@@ -73,7 +76,9 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
                             knownUserIds),
                         ct);
 
-                    var user = await userManager.FindByNameAsync(localUserName);
+                    var user = await userFreshReadStore.FindByNormalizedUserNameAsync(
+                        normalizedUserName,
+                        ct);
                     var externalBinding = await bindingStore.FindByExternalIdentityAsync(
                         ExternalIdentityProviders.Cloud,
                         profile.TenantId,

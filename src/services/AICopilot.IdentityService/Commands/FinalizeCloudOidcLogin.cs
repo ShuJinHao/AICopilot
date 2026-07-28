@@ -15,6 +15,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     UserManager<ApplicationUser> userManager,
     RoleManager<IdentityRole<Guid>> roleManager,
     IExternalIdentityBindingStore bindingStore,
+    IIdentityUserFreshReadStore userFreshReadStore,
     IExternalIdentityBindingInvariantGuard bindingInvariantGuard,
     IIdentityAuditLogWriter auditLogWriter,
     IJwtTokenGenerator jwtTokenGenerator,
@@ -104,7 +105,9 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             profile.TenantId,
             profile.Subject,
             cancellationToken);
-        var userBeforeLock = await userManager.FindByNameAsync(localUserName);
+        var userBeforeLock = await userFreshReadStore.FindByNormalizedUserNameAsync(
+            normalizedUserName,
+            cancellationToken);
         var prospectiveUserId = Guid.NewGuid();
         var knownUserIds = new[]
             {
@@ -131,7 +134,9 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             profile.TenantId,
             profile.Subject,
             cancellationToken);
-        var localUser = await userManager.FindByNameAsync(localUserName);
+        var localUser = await userFreshReadStore.FindByNormalizedUserNameAsync(
+            normalizedUserName,
+            cancellationToken);
         if (binding is not null && localUser is not null && localUser.Id != binding.UserId)
         {
             const string detail =
@@ -440,7 +445,9 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         DateTime now,
         CancellationToken cancellationToken)
     {
-        var user = await userManager.FindByIdAsync(binding.UserId.ToString());
+        var user = await userFreshReadStore.FindByIdAsync(
+            binding.UserId,
+            cancellationToken);
         if (user is null)
         {
             throw new InvalidOperationException(

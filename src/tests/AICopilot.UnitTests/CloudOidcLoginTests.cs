@@ -733,6 +733,7 @@ public sealed class CloudOidcLoginTests
             userManager,
             roleManager,
             bindingStore,
+            new InMemoryIdentityUserFreshReadStore(userManager),
             invariantGuard ?? new NoOpExternalIdentityBindingInvariantGuard(),
             auditWriter,
             tokenGenerator,
@@ -751,6 +752,7 @@ public sealed class CloudOidcLoginTests
         return new ConfirmExistingCloudOidcAccountCommandHandler(
             userManager,
             bindingStore,
+            new InMemoryIdentityUserFreshReadStore(userManager),
             invariantGuard ?? new NoOpExternalIdentityBindingInvariantGuard(),
             auditWriter,
             tokenGenerator,
@@ -1110,6 +1112,24 @@ public sealed class CloudOidcLoginTests
             CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class InMemoryIdentityUserFreshReadStore(InMemoryUserManager userManager)
+        : IIdentityUserFreshReadStore
+    {
+        public Task<ApplicationUser?> FindByNormalizedUserNameAsync(
+            string normalizedUserName,
+            CancellationToken cancellationToken = default)
+        {
+            return userManager.FindByNameAsync(normalizedUserName);
+        }
+
+        public Task<ApplicationUser?> FindByIdAsync(
+            Guid userId,
+            CancellationToken cancellationToken = default)
+        {
+            return userManager.FindByIdAsync(userId.ToString());
         }
     }
 
