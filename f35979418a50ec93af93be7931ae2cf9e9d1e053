@@ -99,3 +99,55 @@ f7d8087ba87fc58dc320089da83a4132d7930cb31c37bdb75d0b0a330ba7e665  src/vues/AICop
 3e03e6b8d1c0b89a2697916f9b16f5b1b906bfce6ff7af0dcffd99d5ac5dbefc  src/vues/AICopilot.Web/tests/unit/chatErrorStore.spec.ts
 145a83b582e4dc8d326c2467e0ba0e82ef0039f84ad9955626472a83196ffc00  src/vues/AICopilot.Web/tests/unit/chatStoreSkills.spec.ts
 d315a97aeae7ff088fe989ada95b9c3214669ddea9f0ca8ca1230065918033b7  src/vues/AICopilot.Web/tests/unit/chunkReducer.spec.ts
+
+ADJUDICATION_MATRIX_V1
+scope snapshot_entry
+main_evidence_sha 77a8646e633ed26d45dc3e3bea6a8995c3603cdd
+columns path | decision | reason | current_main_evidence | allowed_hunk
+counts entered_main=10 still_valid=2 redo=21 obsolete=12 unknown=0 total=45
+
+docs/AI架构治理清单.md | 明确废弃 | 重复治理清单且不属于现行活动文档树 | main 已删除该文件；规则入口为 docs/AICopilot业务规则.md 与 docs/AI架构路线图.md | NONE
+docs/Agent工作流与异常契约.md | 需要重做 | 严格最终产物身份、审批 proof 与恢复方向有效，但旧文本基于旧同步 finalization/旧测试架构 | main 同名契约已扩展为 durable node、file-set journal、fencing 与当前错误目录 | SEMANTIC_ONLY: persisted output identity tuple、decision proof、artifact binding、P0 staging 约束；必须按当前契约重写
+docs/frontend-integration-contract-package-2026-05-17.md | 明确废弃 | 日期式前端集成包，内容已由活动契约与源码取代 | main 已删除；当前前端契约归 docs/Agent工作流与异常契约.md | NONE
+docs/改动复盘与规则沉淀.md | 明确废弃 | 滚动复盘/重复治理文档 | main 已删除；工作区总规则禁止恢复 | NONE
+scripts/tests/Test-AICopilotTestDeclarationTransition.ps1 | 明确废弃 | 以历史声明迁移和固定计数阻断测试演进 | main 已删除；当前测试 inventory 只描述实际发现 | NONE
+scripts/tests/baselines/aicopilot-test-cases.json | 明确废弃 | 历史 case 数基线 | main 已删除；当前规则禁止固定 case 下限 | NONE
+scripts/tests/baselines/aicopilot-test-declaration-transition.json | 明确废弃 | 历史 transition 账本 | main 已删除；当前规则禁止 transition/receipt 基线 | NONE
+src/hosts/AICopilot.HttpApi/Program.cs | 明确废弃 | 仅为旧 WAF/TestServer 夹具暴露 partial Program | main 真实编译与 Aspire 路径不需要该测试钩子 | NONE
+src/hosts/AICopilot.HttpApi/Properties/AssemblyInfo.cs | 明确废弃 | 仅为旧 HttpApi internals/WAF 测试别名放宽可见性 | main 当前测试通过正式 TestKit/公开契约接入 | NONE
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentApprovalDecisionCoordinator.cs | 需要重做 | exact pending set、plan approval、attempt 一致性和 staged enqueue 方向有效，但旧 UoW/queue API 已落后 | main 已采用 durable queue/node/fencing；当前仍缺完整严格 final approval tuple | SEMANTIC_ONLY: exact pending approval set、ApprovePlanForTask、attempt consistency、atomic staged enqueue、final decision identity/proof；禁止复制旧 coordinator
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtoComposer.cs | 需要重做 | 旧 DTO composer 试图区分最终提交权限，但基于旧 workspace review 入口 | main 当前 DTO 与 finalization node 已演进，仍需去除重复入口并公开独立 finalize permission | SEMANTIC_ONLY: distinct canFinalizeWorkspace；按当前 DTO 重写
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs | 需要重做 | 旧字段方向有效但混有落后 Plan/workspace 契约 | main 保留 Plan v1 只读兼容并使用当前 durable DTO | SEMANTIC_ONLY: finalization permission/status fields；不得删除 Plan v1 兼容
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskLifecycleCommandHandlers.cs | 需要重做 | 旧 handler 尝试收紧最终 review/finalize 状态但入口模型已变化 | main finalization 由 durable node 执行，仍有 legacy/redundant submit 语义待收口 | SEMANTIC_ONLY: one authoritative finalize transition、legacy entry fail-closed
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskRunQueue.cs | 需要重做 | 旧 staged enqueue/恢复原子性方向有效但 queue claim 模型已演进 | main 已有任务级 queue/run attempt 与节点级 NodeRun fencing | SEMANTIC_ONLY: enqueue 与审批事务一致、idempotent resume；按当前 queue API 重写
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskRuntime.cs | 已进入 main | checkpoint/binding/runtime 验证语义已吸收并被 durable node 扩展 | main 同名 runtime 与 Runtime/AgentFinalizationNodeExecutor.cs | NONE
+src/services/AICopilot.AiGatewayService/AgentTasks/Runtime/AgentRuntimeEventRecorder.cs | 已进入 main | 字节完全相同 | snapshot blob=main blob=5f130a70e43cb89ed9af98d56395ebf6c1d0c209 | NONE
+src/services/AICopilot.AiGatewayService/DependencyInjection.cs | 已进入 main | 有效 runtime/validator 注册已由当前依赖图吸收，旧残余架构已淘汰 | main 同名文件注册 current durable runtime/node services | NONE
+src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceLifecycleCoordinator.cs | 需要重做 | artifact 校验方向有效，但旧实现同步直接复制最终文件并越过 durable finalization node | main 使用 Runtime/AgentFinalizationNodeExecutor.cs 与 file-set journal | SEMANTIC_ONLY: fail-closed identity/binding/collision checks；禁止复制同步 publication
+src/services/AICopilot.AiGatewayService/Workspaces/ArtifactWorkspaceP9Coordinator.cs | 需要重做 | 旧 P9 review/finalize 入口与当前异步关单存在重复 | main current workspace coordinator/finalization node | SEMANTIC_ONLY: remove duplicate final-review submit、single async close path
+src/shared/AICopilot.SharedKernel/Result/ApiProblemDescriptor.cs | 已进入 main | 有效 Agent problem code 已进入当前 descriptor 体系并继续扩展 | main 同名 descriptor 与 docs/Agent工作流与异常契约.md 错误目录 | NONE
+src/testing/AICopilot.AgentWorkflowTestKit/AICopilot.AgentWorkflowTestKit.csproj | 已进入 main | 有效 TestKit consumer graph 已保留，旧 WAF 依赖残余已淘汰 | main 同名 csproj 与 current ProjectReference graph | NONE
+src/testing/AICopilot.AgentWorkflowTestKit/ToolRegistryGovernanceTestBase.cs | 已进入 main | 有效治理断言已吸收并按 Skill/DynamicPlanner 退役后的单轨 Tool 模型演进 | main 同名 TestKit 与 current Tool registry tests | NONE
+src/testing/AICopilot.AspireIntegrationTestKit/AICopilotAppEnvironment.cs | 明确废弃 | 改动只服务旧 WAF 下游 harness/虚拟化绕过 | main 使用真实 DistributedApplicationTestingBuilder/Aspire fixture | NONE
+src/tests/AICopilot.AggregateTests/AgentArtifactDomainTests.cs | 需要重做 | waiting-for-approval 不得提前完成的聚合不变量仍缺明确回归 | main aggregate/current finalization state model | TEST_SCENARIO_ONLY: AgentStep_ShouldNotCompleteWhileWaitingForApproval；按当前聚合 API 重写
+src/tests/AICopilot.ApplicationTests/ToolRegistryApplicationTests.cs | 明确废弃 | 独有断言属于已退役 Skill/DynamicPlanner 生产路径 | main 契约明确 Skill/DynamicPlanner 物理退役 | NONE
+src/tests/AICopilot.ContractTests/FrontendContractSnapshotTests.cs | 需要重做 | 前端需要独立 finalize permission 且不能保留重复 submit action | main current protocol snapshot 与 current DTO | TEST_SCENARIO_ONLY: canFinalizeWorkspace 独立字段、无 duplicate submit-final-review
+src/tests/AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj | 已进入 main | 有效 TestKit consumer edge 已保留；旧 MVC.Testing/WAF alias 依赖已淘汰 | main csproj 保留 AgentWorkflowTestKit 引用且无旧 WAF 依赖 | NONE
+src/tests/AICopilot.HttpIntegrationTests/AgentApprovalPermissionHardeningTests.cs | 需要重做 | competing/rejected/stale/cross-user approval 负向场景仍是独立阻断 | main current coordinator、authorization owner 与 durable checkpoint | TEST_SCENARIO_ONLY: competing pending approval、rejection、stale decision proof、cross-user privileged approval、legacy submit fail-closed
+src/tests/AICopilot.HttpIntegrationTests/AgentArtifactVersioningTests.cs | 需要重做 | finalization provenance、output identity、collision/empty workspace 场景仍不完整 | main AgentFinalizationWorkflowTests 只覆盖 enqueue 与大小写碰撞一部分 | TEST_SCENARIO_ONLY: exact persisted identity、dangling/mismatched producer output、collision、empty workspace no final approval、idempotent resume
+src/tests/AICopilot.HttpIntegrationTests/AspireTestFixtures.cs | 明确废弃 | 旧改动服务 WAF/TestServer 下游 harness 并弱化真实 Aspire 边界 | main current fixture 使用 AICopilotAppEnvironment 真实分布式环境 | NONE
+src/tests/AICopilot.UnitTests/ToolRegistryUnitTests.cs | 需要重做 | 文件中与 final output binding/provenance 有关的负向断言有效，旧 Skill/planner 部分无效 | main current Tool registry/finalization validators | TEST_SCENARIO_ONLY: closed exact persisted identity、mismatched producer output、dangling step identity；不得恢复 Skill/planner
+src/tests/AICopilot.WorkflowTests/ToolRegistryWorkflowTests.cs | 需要重做 | corrupt checkpoint/no mutation、resume 与 final approval gating 场景有效，旧 Tool/Skill 路径需按现架构改写 | main durable workflow/node executor/current Tool registry | TEST_SCENARIO_ONLY: corrupt checkpoint no mutation、idempotent resume、empty workspace no approval；不得恢复动态 planner
+src/vues/AICopilot.Web/src/components/chat/AgentRunThread.vue | 需要重做 | 最终提交按钮/状态需要绑定独立 finalize permission，旧 UI 基于重复入口 | main current Agent thread/workbench protocol | SEMANTIC_ONLY: render one authoritative finalize action from canFinalizeWorkspace
+src/vues/AICopilot.Web/src/components/chat/ArtifactWorkspacePanel.vue | 需要重做 | workspace 最终提交与 review action 需去重并对齐异步状态 | main current ArtifactWorkspacePanel 与 durable task state | SEMANTIC_ONLY: one finalize action、pending/queued/finalized states；无旧同步入口
+src/vues/AICopilot.Web/src/composables/useAgentWorkbench.ts | 需要重做 | command wiring 需移除 duplicate final-review submit 并使用独立权限 | main current composable/protocol | SEMANTIC_ONLY: single finalize command and permission gate
+src/vues/AICopilot.Web/src/stores/chatErrorStore.ts | 仍然有效 | 三个后端 Agent code 仍在错误目录且 main 前端缺失明确 fallback | main docs/Agent工作流与异常契约.md 列出 agent_approval_state_conflict、agent_approval_rejected；源码仍发出 agent_finalization_state_conflict | EXACT_HUNKS_ONLY: 仅三个 code 分支 agent_approval_state_conflict、agent_finalization_state_conflict、agent_approval_rejected；不得复制 Skill/planner 文案
+src/vues/AICopilot.Web/src/types/protocols.ts | 需要重做 | 独立 finalize permission/status 方向有效，但旧文件混有 Plan v1 删除和退役 Skill/planner 语义 | main 保留 Plan v1 readonly compatibility 至 2026-12-31 且 current protocol 已演进 | SEMANTIC_ONLY: additive canFinalizeWorkspace/finalization status；不得删除 Plan v1 或恢复 Skill/planner
+src/vues/AICopilot.Web/tests/smoke/acceptance.spec.ts | 需要重做 | UI smoke 需验证唯一 finalize action 与权限 | main current acceptance fixture/protocol | TEST_SCENARIO_ONLY: one finalize action、permission denied/queued states
+src/vues/AICopilot.Web/tests/unit/agentRunNotice.spec.ts | 需要重做 | notice 应区分 approval/finalization conflict/rejection | main current notice reducer/error store | TEST_SCENARIO_ONLY: current protocol messages only；不得引用旧 Skill/planner
+src/vues/AICopilot.Web/tests/unit/chatErrorStore.spec.ts | 仍然有效 | 与三个有效 code 的精确 fallback 回归可独立摘取 | main current spec 缺这三条映射 | EXACT_HUNKS_ONLY: 仅三个 code 的期望文案/断言，与 chatErrorStore.ts 同步
+src/vues/AICopilot.Web/tests/unit/chatStoreSkills.spec.ts | 明确废弃 | 专属于已退役 Skill/dynamic planner 前端路径 | main 已删除该路径并以 Intent/PlanCompiler 单轨取代 | NONE
+src/vues/AICopilot.Web/tests/unit/chunkReducer.spec.ts | 需要重做 | protocol chunk 对独立 finalize permission/status 的合并语义需按当前 DTO 验证 | main current chunk reducer/current protocol | TEST_SCENARIO_ONLY: additive finalization fields；不得复制旧 Plan v1/Skill fixture
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentArtifactOutputBindingGate.cs | 已进入 main | 字节完全相同 | snapshot blob=main blob=6cf2c545b87e6a305b11b0390cbd1fa6fe9e59ff | NONE
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentFinalizationCheckpointStateValidator.cs | 已进入 main | 方向已吸收且 main 有后续 durable checkpoint 扩展 | snapshot blob=0342095af9c5dd54a584b575f2dff8852ba926b9; main blob=60e1b0fbca4af485390b0f1c8600f8e7146378ba | NONE
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanRuntimeSnapshotVerifier.cs | 已进入 main | Plan runtime snapshot 验证已吸收并按现行 execution snapshot 演进 | snapshot blob=4b3502ed2da20e4a6466eebdc1de6f1bfd4e9cbd; main blob=3916fdfb2596b451586e1f5930b138ca6d3b4e2e | NONE
