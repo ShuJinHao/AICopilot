@@ -739,24 +739,24 @@ public sealed class AgentPlanContractV2Tests
     }
 
     [Fact]
-    public void MetadataResolver_ShouldExposeOnlyCompletedLegacyV1AsReadOnlyHistory()
+    public void DtoMapper_ShouldExposeCompletedPreV2PlanAsOpaqueReadOnlyHistory()
     {
         var now = DateTimeOffset.UtcNow;
-        var legacyJson = "{\"version\":1}";
+        var preV2Json = "{\"version\":1}";
         var active = new AgentTask(
             new AICopilot.Core.AiGateway.Ids.SessionId(Guid.NewGuid()),
             Guid.NewGuid(),
-            "Legacy active",
-            "Legacy active",
+            "Pre-v2 historical task",
+            "Pre-v2 historical task",
             AgentTaskType.ReportGeneration,
             AgentTaskRiskLevel.Low,
             null,
-            legacyJson,
+            preV2Json,
             now);
         AgentTaskPlanMetadataResolver.Resolve(active).IntegrityStatus.Should()
             .Be(AgentTaskPlanMetadataResolver.Invalid);
 
-        active.ConfirmExecutablePlan(legacyJson, [], now);
+        active.ConfirmExecutablePlan(preV2Json, [], now);
         active.ApprovePlan(now);
         active.AttachWorkspace(AICopilot.Core.AiGateway.Ids.ArtifactWorkspaceId.New(), now);
         active.Start(now);
@@ -765,10 +765,18 @@ public sealed class AgentPlanContractV2Tests
         active.Complete("completed historical output", now);
 
         var metadata = AgentTaskPlanMetadataResolver.Resolve(active);
-        metadata.IntegrityStatus.Should().Be(AgentTaskPlanMetadataResolver.LegacyCompletedReadOnly);
-        metadata.SchemaVersion.Should().Be(AgentPlanContractVersions.LegacyV1);
+        metadata.IntegrityStatus.Should().Be(AgentTaskPlanMetadataResolver.Invalid);
+        metadata.SchemaVersion.Should().BeNull();
         metadata.IsExecutable.Should().BeFalse();
-        AgentTaskDtoMapper.Map(active).CanRun.Should().BeFalse();
+        var dto = AgentTaskDtoMapper.Map(active);
+        dto.PlanJson.Should().Be(preV2Json);
+        dto.PlanIntegrityStatus.Should().Be(AgentTaskPlanMetadataResolver.Invalid);
+        dto.PlanSchemaVersion.Should().BeNull();
+        dto.IsPlanExecutable.Should().BeFalse();
+        dto.CanRun.Should().BeFalse();
+        dto.CanRetry.Should().BeFalse();
+        dto.CanSubmitFinalReview.Should().BeFalse();
+        dto.CanApproveFinal.Should().BeFalse();
     }
 
     [Fact]

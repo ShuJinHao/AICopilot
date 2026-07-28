@@ -1,7 +1,6 @@
 using AICopilot.AiGatewayService.Tools;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
-using System.Text.Json;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
 
@@ -286,7 +285,6 @@ internal sealed record AgentTaskPlanDtoMetadata(
 internal static class AgentTaskPlanMetadataResolver
 {
     public const string ValidV2 = "ValidV2";
-    public const string LegacyCompletedReadOnly = "LegacyCompletedReadOnly";
     public const string Invalid = "Invalid";
 
     public static AgentTaskPlanDtoMetadata Resolve(AgentTask task)
@@ -303,50 +301,7 @@ internal static class AgentTaskPlanMetadataResolver
                 ValidV2);
         }
 
-        if (task.Status == AgentTaskStatus.Completed &&
-            task.CompletedAt is not null &&
-            IsLegacyV1(task.PlanJson))
-        {
-            return new AgentTaskPlanDtoMetadata(
-                AgentPlanContractVersions.LegacyV1,
-                null,
-                null,
-                false,
-                LegacyCompletedReadOnly);
-        }
-
         return new AgentTaskPlanDtoMetadata(null, null, null, false, Invalid);
-    }
-
-    internal static bool IsLegacyV1(string planJson)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(planJson);
-            var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                return false;
-            }
-
-            if (root.TryGetProperty("schemaVersion", out var schemaVersion) &&
-                schemaVersion.ValueKind == JsonValueKind.String)
-            {
-                return string.Equals(
-                    schemaVersion.GetString(),
-                    AgentPlanContractVersions.LegacyV1,
-                    StringComparison.Ordinal);
-            }
-
-            return root.TryGetProperty("version", out var version) &&
-                   version.ValueKind == JsonValueKind.Number &&
-                   version.TryGetInt32(out var value) &&
-                   value == 1;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
     }
 }
 

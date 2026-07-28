@@ -101,7 +101,9 @@ public sealed class AgentTaskPlanPersistenceAtomicityTests(PostgresPersistenceFi
             new AgentTaskPlanPersistencePolicy(new AgentPlanCanonicalizer()));
         var historical = await scope.Business.AgentTasks.SingleAsync(task => task.Id == seeded.Task.Id);
         var metadata = AgentTaskPlanMetadataResolver.Resolve(historical);
-        metadata.IntegrityStatus.Should().Be(AgentTaskPlanMetadataResolver.LegacyCompletedReadOnly);
+        historical.PlanJson.Should().Be("{\"version\":1}");
+        metadata.IntegrityStatus.Should().Be(AgentTaskPlanMetadataResolver.Invalid);
+        metadata.SchemaVersion.Should().BeNull();
         metadata.IsExecutable.Should().BeFalse();
 
         historical.Cancel(DateTimeOffset.UtcNow);

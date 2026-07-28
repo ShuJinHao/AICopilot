@@ -10,7 +10,6 @@ namespace AICopilot.AiGatewayService.AgentTasks;
 
 internal static class AgentPlanContractVersions
 {
-    public const string LegacyV1 = "1.0";
     public const string PlanV2 = "2.0";
     public const string IntentV1 = "intent-candidate:v1";
     public const string NodeV1 = "agent-node:v1";

@@ -16131,8 +16131,8 @@
     {
       "assembly": "AICopilot.UnitTests",
       "class": "AICopilot.UnitTests.AgentPlanContractV2Tests",
-      "method": "MetadataResolver_ShouldExposeOnlyCompletedLegacyV1AsReadOnlyHistory",
-      "case": "AICopilot.UnitTests.AgentPlanContractV2Tests.MetadataResolver_ShouldExposeOnlyCompletedLegacyV1AsReadOnlyHistory",
+      "method": "DtoMapper_ShouldExposeCompletedPreV2PlanAsOpaqueReadOnlyHistory",
+      "case": "AICopilot.UnitTests.AgentPlanContractV2Tests.DtoMapper_ShouldExposeCompletedPreV2PlanAsOpaqueReadOnlyHistory",
       "kind": "Unit",
       "runtime": "Pure",
       "capability": "Platform",

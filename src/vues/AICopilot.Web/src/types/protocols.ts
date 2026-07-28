@@ -149,7 +149,7 @@ export interface AgentTask {
   planDigest?: string | null
   topologyProfile?: string | null
   isPlanExecutable?: boolean
-  planIntegrityStatus?: 'ValidV2' | 'LegacyCompletedReadOnly' | 'Invalid' | string
+  planIntegrityStatus?: 'ValidV2' | 'Invalid' | string
 }
 
 export interface AgentApprovalRequest {

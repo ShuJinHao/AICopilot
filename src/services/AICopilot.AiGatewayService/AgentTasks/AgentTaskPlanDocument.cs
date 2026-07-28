@@ -42,7 +42,7 @@ internal sealed record AgentTaskPlanDocument(
     [property: JsonPropertyName("isExecutable")] bool IsExecutable = true,
     [property: JsonPropertyName("lifecycleSealPadding")] string LifecycleSealPadding = "",
     [property: JsonPropertyName("capabilityGaps")] IReadOnlyCollection<string>? CapabilityGaps = null,
-    [property: JsonPropertyName("schemaVersion")] string SchemaVersion = AgentPlanContractVersions.LegacyV1,
+    [property: JsonPropertyName("schemaVersion")] string SchemaVersion = "",
     [property: JsonPropertyName("planId")] Guid? PlanId = null,
     [property: JsonPropertyName("planVersion")] int PlanVersion = 1,
     [property: JsonPropertyName("planDigest")] string? PlanDigest = null,
