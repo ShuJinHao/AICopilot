@@ -31,3 +31,21 @@ ba4cacadb6a970c0c916b958d30753efc44549f0f538954e71f362b51dd00778  src/services/A
 4c923718c3df7e7cc99961f478e5c1cc1cf2f8c5fb3b8985dbcbf4d391c3a522  src/tests/AICopilot.PersistenceTests/AgentTaskPlanPersistenceAtomicityTests.cs
 e550ca9e85759e84455071a9c67f1821113f54196ee0e89de0680dc9c76a05be  src/tests/AICopilot.UnitTests/AgentPlanContractV2Tests.cs
 0630388935f76d95bec575e74696cbb6049252be7843680c99caa46b3bcaa27c  src/vues/AICopilot.Web/src/types/protocols.ts
+
+ADJUDICATION_MATRIX_V1
+scope snapshot_entry
+main_evidence_sha 77a8646e633ed26d45dc3e3bea6a8995c3603cdd
+columns path | decision | reason | current_main_evidence | allowed_hunk
+counts entered_main=0 still_valid=0 redo=0 obsolete=11 unknown=0 total=11
+
+docs/AI架构治理清单.md | 明确废弃 | 重复治理清单 | main 已删除；权威入口为业务规则和路线图 | NONE
+docs/改动复盘与规则沉淀.md | 明确废弃 | 滚动复盘/重复治理文档 | main 已删除且工作区规则禁止恢复 | NONE
+scripts/tests/aicopilot-compatibility-inventory.json | 明确废弃 | 旧改动移除受治理 Plan v1 readonly consumer，且 inventory 不能成为历史数字账本 | main 明确保留 AI-COMPAT-COMPLETED-PLAN-V1-READONLY 至 2026-12-31 | NONE
+scripts/tests/baselines/aicopilot-compatibility.json | 明确废弃 | 删除有效且有期限的 Plan v1 readonly compatibility 基线 | main compatibility entry 有 consumer、deadline 与验证 | NONE
+scripts/tests/baselines/aicopilot-test-cases.json | 明确废弃 | 历史测试 case 数基线 | main 已删除；当前规则禁止固定 case 下限 | NONE
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentPlanContractV2.cs | 明确废弃 | 旧改动删除 Plan v1 completed readonly marker/解析，与有效兼容期限冲突 | main 保留 Plan v2 新执行单轨和 completed Plan v1 readonly view 至 2026-12-31 | NONE
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskDtos.cs | 明确废弃 | 旧改动把 completed Plan v1 视为 opaque invalid，与治理兼容冲突 | main DTO 保留只读兼容且禁止旧计划执行 | NONE
+src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskPlanDocument.cs | 明确废弃 | 旧改动物理删除 completed Plan v1 readonly 反序列化边界 | main 保留非执行、不可变历史读取 | NONE
+src/tests/AICopilot.PersistenceTests/AgentTaskPlanPersistenceAtomicityTests.cs | 明确废弃 | 测试改动要求删除有效 Plan v1 readonly 持久化兼容 | main 测试保持兼容 consumer 与期限 | NONE
+src/tests/AICopilot.UnitTests/AgentPlanContractV2Tests.cs | 明确废弃 | 测试改动把旧 completed plan 统一判 invalid，违反当前兼容决策 | main 测试区分新执行协议与只读历史 | NONE
+src/vues/AICopilot.Web/src/types/protocols.ts | 明确废弃 | 前端改动删除 Plan v1 readonly compatibility，与当前 consumer/deadline 冲突 | main 前端保留只读历史展示并禁止执行 | NONE
