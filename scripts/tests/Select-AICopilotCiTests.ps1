@@ -245,7 +245,7 @@ function Test-ChangedTestFileUsesSecurityFilter {
         return $false
     }
     if ($File -ceq $Project.Path) {
-        return $true
+        return $false
     }
 
     $testTypeName = [IO.Path]::GetFileNameWithoutExtension($File)

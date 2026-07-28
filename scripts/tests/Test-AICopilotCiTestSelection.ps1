@@ -307,6 +307,26 @@ try {
         throw 'Identity Security test change did not retain the project-owned Security filter.'
     }
 
+    $securityProjectFileOutput = Join-Path $temporaryRoot 'security-project-file.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles @(
+            'src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj') `
+        -OutputPath $securityProjectFileOutput `
+        -GitHubOutputPath ''
+    $securityProjectFile = Get-Content $securityProjectFileOutput -Raw | ConvertFrom-Json
+    Assert-ValidCategories $securityProjectFile
+    $unitProject = @($securityProjectFile.selectedDotNetProjects |
+        Where-Object projectName -ceq 'AICopilot.UnitTests')
+    if ($unitProject.Count -ne 1 -or
+        -not [string]::IsNullOrWhiteSpace([string]$unitProject[0].testFilter) -or
+        @($unitProject[0].categories) -notcontains 'Business' -or
+        @($unitProject[0].reasons) -notcontains
+            'affected-test:src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj' -or
+        @($securityProjectFile.requiredExplicitModes).Count -ne 0) {
+        throw 'Security-capable test project file change did not retain its unfiltered Business owner lane.'
+    }
+
     $aspireTestKitOutput = Join-Path $temporaryRoot 'aspire-test-kit.json'
     & $selector `
         -RepositoryRoot $root `
@@ -703,4 +723,4 @@ if ($runnerText -notmatch "ForEach-Object\s*\{\s*\[int\]\`$_\['discovered'\]\s*\
     throw 'AICopilot CI discovery aggregation does not safely read ordered result dictionaries.'
 }
 
-Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 activeContract=7 securityMapping=4 securityTest=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'
+Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 activeContract=7 securityMapping=4 securityTest=1 securityProjectFile=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'
