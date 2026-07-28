@@ -128,6 +128,12 @@ public interface IIdentityUserFreshReadStore
     Task<ApplicationUser?> FindByIdAsync(
         Guid userId,
         CancellationToken cancellationToken = default);
+
+    Task<ApplicationUser?> InitializeSecurityStampIfMissingAsync(
+        Guid userId,
+        string securityStamp,
+        string concurrencyStamp,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IExternalIdentityBindingInvariantGuard

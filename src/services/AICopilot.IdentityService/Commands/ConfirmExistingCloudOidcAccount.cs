@@ -155,11 +155,7 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
                         return Result.Unauthorized(bindingResult.Problem!);
                     }
 
-                    if (string.IsNullOrWhiteSpace(user.SecurityStamp))
-                    {
-                        throw new InvalidOperationException(
-                            $"Confirmed AICopilot user '{user.Id}' has no security stamp.");
-                    }
+                    user = await EnsureSecurityStampAsync(user, ct);
 
                     var token = await GenerateAiTokenAsync(user, profile, ct);
                     await auditLogWriter.WriteAsync(
@@ -201,6 +197,29 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
         }
 
         return result;
+    }
+
+    private async Task<ApplicationUser> EnsureSecurityStampAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(user.SecurityStamp))
+        {
+            return user;
+        }
+
+        var refreshedUser = await userFreshReadStore.InitializeSecurityStampIfMissingAsync(
+            user.Id,
+            Guid.NewGuid().ToString("N"),
+            Guid.NewGuid().ToString(),
+            cancellationToken);
+        if (refreshedUser is null || string.IsNullOrWhiteSpace(refreshedUser.SecurityStamp))
+        {
+            throw new InvalidOperationException(
+                $"Confirmed AICopilot user '{user.Id}' was not found with a persisted security stamp.");
+        }
+
+        return refreshedUser;
     }
 
     private async Task<ExternalIdentityBindingResolution> ResolveBindingAsync(

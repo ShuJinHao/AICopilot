@@ -1131,6 +1131,22 @@ public sealed class CloudOidcLoginTests
         {
             return userManager.FindByIdAsync(userId.ToString());
         }
+
+        public async Task<ApplicationUser?> InitializeSecurityStampIfMissingAsync(
+            Guid userId,
+            string securityStamp,
+            string concurrencyStamp,
+            CancellationToken cancellationToken = default)
+        {
+            var user = await userManager.FindByIdAsync(userId.ToString());
+            if (user is not null && string.IsNullOrWhiteSpace(user.SecurityStamp))
+            {
+                user.SecurityStamp = securityStamp;
+                user.ConcurrencyStamp = concurrencyStamp;
+            }
+
+            return user;
+        }
     }
 
     private sealed class RecordingExternalIdentityBindingInvariantGuard

@@ -364,6 +364,96 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
     }
 
     [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldInitializeAndPersistMissingSecurityStamp()
+    {
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
+        const string userName = "E-MISSING-STAMP-1001";
+        const string externalUserId = "missing-stamp-subject";
+        var userId = await SeedIdentityUserAsync(
+            database.ConnectionString,
+            userName,
+            IdentityRoleNames.User,
+            externalUserId);
+        await SetSecurityStampAsync(database.ConnectionString, userId, null);
+
+        await using var handlerContext = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        using var managers = IdentityManagerTestScope.Create(handlerContext);
+        var tokenGenerator = new RecordingJwtTokenGenerator();
+        var handler = CreateFinalizeHandler(
+            database.ConnectionString,
+            handlerContext,
+            managers,
+            new PostgresExternalIdentityBindingInvariantGuard(handlerContext),
+            tokenGenerator: tokenGenerator);
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(userName, externalUserId)),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        await using var verification = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        var persistedUser = await verification.Users.SingleAsync(user => user.Id == userId);
+        persistedUser.SecurityStamp.Should().NotBeNullOrWhiteSpace();
+        tokenGenerator.User.Should().NotBeNull();
+        tokenGenerator.User!.SecurityStamp.Should().Be(persistedUser.SecurityStamp);
+        var roleNames = await (
+            from userRole in verification.UserRoles
+            join role in verification.Roles on userRole.RoleId equals role.Id
+            where userRole.UserId == userId
+            select role.Name).ToArrayAsync();
+        roleNames.Should().Equal(IdentityRoleNames.User);
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldInitializeAndPersistBlankSecurityStamp()
+    {
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
+        const string userName = "E-BLANK-STAMP-1001";
+        var userId = await SeedIdentityUserAsync(
+            database.ConnectionString,
+            userName,
+            IdentityRoleNames.User);
+        await SetSecurityStampAsync(database.ConnectionString, userId, " ");
+
+        await using var handlerContext = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        using var managers = IdentityManagerTestScope.Create(handlerContext);
+        var tokenGenerator = new RecordingJwtTokenGenerator();
+        var handler = CreateHandler(
+            database.ConnectionString,
+            handlerContext,
+            managers,
+            new PostgresExternalIdentityBindingInvariantGuard(handlerContext),
+            tokenGenerator);
+
+        var result = await handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(userName, "blank-stamp-subject"),
+                "ValidPassword123!"),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        await using var verification = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        var persistedUser = await verification.Users.SingleAsync(user => user.Id == userId);
+        persistedUser.SecurityStamp.Should().NotBeNullOrWhiteSpace();
+        tokenGenerator.User.Should().NotBeNull();
+        tokenGenerator.User!.SecurityStamp.Should().Be(persistedUser.SecurityStamp);
+        (await verification.ExternalIdentityBindings.CountAsync(binding =>
+            binding.UserId == userId &&
+            binding.ExternalUserId == "blank-stamp-subject")).Should().Be(1);
+        var roleNames = await (
+            from userRole in verification.UserRoles
+            join role in verification.Roles on userRole.RoleId equals role.Id
+            where userRole.UserId == userId
+            select role.Name).ToArrayAsync();
+        roleNames.Should().Equal(IdentityRoleNames.User);
+    }
+
+    [Fact]
     public async Task BootstrapAdoption_ShouldRejectUserDisabledWhileWaitingForBindingLock()
     {
         await using var database = await CreateMigratedDatabaseAsync(fixture);
@@ -761,7 +851,8 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         string connectionString,
         IdentityStoreDbContext dbContext,
         IdentityManagerTestScope managers,
-        IExternalIdentityBindingInvariantGuard invariantGuard)
+        IExternalIdentityBindingInvariantGuard invariantGuard,
+        IJwtTokenGenerator? tokenGenerator = null)
     {
         return new ConfirmExistingCloudOidcAccountCommandHandler(
             managers.UserManager,
@@ -769,7 +860,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             new IdentityUserFreshReadStore(dbContext),
             invariantGuard,
             new IdentityAuditLogWriter(dbContext),
-            new StubJwtTokenGenerator(),
+            tokenGenerator ?? new StubJwtTokenGenerator(),
             CreateService(connectionString, dbContext));
     }
 
@@ -865,6 +956,18 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         }
 
         return user.Id;
+    }
+
+    private static async Task SetSecurityStampAsync(
+        string connectionString,
+        Guid userId,
+        string? securityStamp)
+    {
+        await using var context = new IdentityStoreDbContext(
+            CreateIdentityOptions(connectionString));
+        var user = await context.Users.SingleAsync(item => item.Id == userId);
+        user.SecurityStamp = securityStamp;
+        await context.SaveChangesAsync();
     }
 
     private static CloudOidcIdentityProfile CreateProfile(

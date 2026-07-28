@@ -190,11 +190,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 "AICopilot 本地账号已禁用，请联系 AI 管理员恢复启用。"));
         }
 
-        if (string.IsNullOrWhiteSpace(user.SecurityStamp))
-        {
-            throw new InvalidOperationException(
-                $"Cloud-bound AICopilot user '{user.Id}' has no security stamp.");
-        }
+        user = await EnsureSecurityStampAsync(user, cancellationToken);
 
         var token = await GenerateAiTokenAsync(user, profile, cancellationToken);
 
@@ -212,6 +208,29 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             cancellationToken);
 
         return Result.Success(new LoginUserDto(user.UserName!, token));
+    }
+
+    private async Task<ApplicationUser> EnsureSecurityStampAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(user.SecurityStamp))
+        {
+            return user;
+        }
+
+        var refreshedUser = await userFreshReadStore.InitializeSecurityStampIfMissingAsync(
+            user.Id,
+            Guid.NewGuid().ToString("N"),
+            Guid.NewGuid().ToString(),
+            cancellationToken);
+        if (refreshedUser is null || string.IsNullOrWhiteSpace(refreshedUser.SecurityStamp))
+        {
+            throw new InvalidOperationException(
+                $"Cloud-bound AICopilot user '{user.Id}' was not found with a persisted security stamp.");
+        }
+
+        return refreshedUser;
     }
 
     private async Task<CloudOidcLoginResolution> ResolveFirstBindingUserAsync(
