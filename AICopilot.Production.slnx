@@ -1,0 +1,43 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/analyzers/">
+    <Project Path="src/analyzers/AICopilot.Architecture.Analyzers/AICopilot.Architecture.Analyzers.csproj" />
+  </Folder>
+  <Folder Name="/src/core/">
+    <Project Path="src/core/AICopilot.Core.AiGateway/AICopilot.Core.AiGateway.csproj" />
+    <Project Path="src/core/AICopilot.Core.DataAnalysis/AICopilot.Core.DataAnalysis.csproj" />
+    <Project Path="src/core/AICopilot.Core.McpServer/AICopilot.Core.McpServer.csproj" />
+    <Project Path="src/core/AICopilot.Core.Rag/AICopilot.Core.Rag.csproj" />
+  </Folder>
+  <Folder Name="/src/hosts/">
+    <Project Path="src/hosts/AICopilot.AppHost/AICopilot.AppHost.csproj" />
+    <Project Path="src/hosts/AICopilot.DataWorker/AICopilot.DataWorker.csproj" />
+    <Project Path="src/hosts/AICopilot.HttpApi/AICopilot.HttpApi.csproj" />
+    <Project Path="src/hosts/AICopilot.MigrationWorkApp/AICopilot.MigrationWorkApp.csproj" />
+    <Project Path="src/hosts/AICopilot.RagWorker/AICopilot.RagWorker.csproj" />
+    <Project Path="src/hosts/AICopilot.ServiceDefaults/AICopilot.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/src/infrastructure/">
+    <Project Path="src/infrastructure/AICopilot.AiRuntime/AICopilot.AiRuntime.csproj" />
+    <Project Path="src/infrastructure/AICopilot.Dapper/AICopilot.Dapper.csproj" />
+    <Project Path="src/infrastructure/AICopilot.Embedding/AICopilot.Embedding.csproj" />
+    <Project Path="src/infrastructure/AICopilot.EntityFrameworkCore/AICopilot.EntityFrameworkCore.csproj" />
+    <Project Path="src/infrastructure/AICopilot.EventBus/AICopilot.EventBus.csproj" />
+    <Project Path="src/infrastructure/AICopilot.Infrastructure/AICopilot.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/services/">
+    <Project Path="src/services/AICopilot.AiGatewayService/AICopilot.AiGatewayService.csproj" />
+    <Project Path="src/services/AICopilot.DataAnalysisService/AICopilot.DataAnalysisService.csproj" />
+    <Project Path="src/services/AICopilot.IdentityService/AICopilot.IdentityService.csproj" />
+    <Project Path="src/services/AICopilot.McpService/AICopilot.McpService.csproj" />
+    <Project Path="src/services/AICopilot.RagService/AICopilot.RagService.csproj" />
+    <Project Path="src/services/AICopilot.Services.Contracts/AICopilot.Services.Contracts.csproj" />
+    <Project Path="src/services/AICopilot.Services.CrossCutting/AICopilot.Services.CrossCutting.csproj" />
+  </Folder>
+  <Folder Name="/src/shared/">
+    <Project Path="src/shared/AICopilot.AgentPlugin/AICopilot.AgentPlugin.csproj" />
+    <Project Path="src/shared/AICopilot.AgentPlugin.Runtime/AICopilot.AgentPlugin.Runtime.csproj" />
+    <Project Path="src/shared/AICopilot.SharedKernel/AICopilot.SharedKernel.csproj" />
+    <Project Path="src/shared/AICopilot.Visualization/AICopilot.Visualization.csproj" />
+  </Folder>
+</Solution>

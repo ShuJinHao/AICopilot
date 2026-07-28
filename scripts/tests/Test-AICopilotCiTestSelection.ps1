@@ -10,9 +10,9 @@ $root = (Resolve-Path $RepositoryRoot).Path
 $selector = Join-Path $root 'scripts/tests/Select-AICopilotCiTests.ps1'
 $allowedCategories = @('Architecture', 'Security', 'Business', 'DeploymentContract', 'Quality', 'CrossProject')
 function Assert-ValidCategories([object]$Selection) {
-    $invalid = @($Selection.selectedDotNetProjects.categories | Where-Object {
-            $_ -notin $allowedCategories
-        })
+    $invalid = @(@($Selection.selectedDotNetProjects) |
+        ForEach-Object { @($_.categories) } |
+        Where-Object { $_ -notin $allowedCategories })
     if ($invalid.Count -gt 0) {
         throw "Selector emitted non-canonical categories: $($invalid -join ', ')"
     }
@@ -173,20 +173,31 @@ try {
     $positiveNames = @($positive.selectedDotNetProjects.projectName)
     if ($positiveNames -notcontains 'AICopilot.ArchitectureTests' -or
         $positiveNames -notcontains 'AICopilot.Architecture.AnalyzerTests' -or
+        $positiveNames -notcontains 'AICopilot.AnalyzerFixtureTests' -or
         $positiveNames -notcontains 'AICopilot.AggregateTests') {
         throw "Positive selector fixture omitted mandatory or affected projects: $($positiveNames -join ', ')"
     }
-    if ($positiveNames -contains 'AICopilot.GoldenEvalTests' -or
-        $positiveNames -contains 'AICopilot.EndToEndTests') {
-        throw 'Default source selection included an explicit Quality project.'
+    foreach ($fastSecurityName in @(
+            'AICopilot.UnitTests',
+            'AICopilot.InProcessTests',
+            'AICopilot.PersistenceFilesystemTests')) {
+        $fastSecurity = @($positive.selectedDotNetProjects |
+            Where-Object projectName -ceq $fastSecurityName)
+        if ($fastSecurity.Count -ne 1 -or
+            [string]::IsNullOrWhiteSpace([string]$fastSecurity[0].testFilter) -or
+            @($fastSecurity[0].categories).Count -ne 1 -or
+            @($fastSecurity[0].categories) -notcontains 'Security') {
+            throw "Default source selection omitted filtered fast Security: $fastSecurityName"
+        }
     }
-    $httpSecurity = @($positive.selectedDotNetProjects |
-        Where-Object projectName -eq 'AICopilot.HttpIntegrationTests')
-    if ($httpSecurity.Count -ne 1 -or
-        [string]::IsNullOrWhiteSpace([string]$httpSecurity[0].testFilter) -or
-        @($httpSecurity[0].categories).Count -ne 1 -or
-        @($httpSecurity[0].categories) -notcontains 'Security') {
-        throw 'Default selection must run only the explicit HttpIntegration Security subset.'
+    if ($positiveNames -contains 'AICopilot.GoldenEvalTests' -or
+        $positiveNames -contains 'AICopilot.EndToEndTests' -or
+        $positiveNames -contains 'AICopilot.HttpIntegrationTests' -or
+        $positiveNames -contains 'AICopilot.PersistenceTests' -or
+        [bool]$positive.requiresDocker -or
+        -not [bool]$positive.productionBuildRequired -or
+        @($positive.matchedSecurityImpactRules).Count -ne 0) {
+        throw 'Generic source selection included an explicit Quality or heavy Security project.'
     }
 
     $docsOutput = Join-Path $temporaryRoot 'docs.json'
@@ -202,14 +213,182 @@ try {
     $docs = Get-Content $docsOutput -Raw | ConvertFrom-Json
     Assert-ValidCategories $docs
     if (@($docs.unclassifiedFiles).Count -ne 0 -or
-        @($docs.selectedDotNetProjects.categories | Where-Object {
-                $_ -notin @('Architecture', 'Security')
-            }).Count -ne 0 -or
-        @($docs.selectedDotNetProjects | Where-Object {
-                @($_.categories) -contains 'Security' -and
-                [string]::IsNullOrWhiteSpace([string]$_.testFilter)
+        @($docs.selectedDotNetProjects).Count -ne 0 -or
+        [bool]$docs.dotNetAffected -or
+        [bool]$docs.productionBuildRequired -or
+        [bool]$docs.requiresDocker) {
+        throw 'Ordinary documentation-only changes did not skip .NET build and test work.'
+    }
+
+    foreach ($contractPath in @(
+            'AGENTS.md',
+            'docs/AICopilot业务规则.md',
+            'docs/AICopilot安全部署契约.md',
+            'docs/AI架构路线图.md',
+            'docs/Agent工作流与异常契约.md',
+            'docs/Cloud只读数据分析契约.md',
+            'docs/DDD聚合根边界.md')) {
+        $contractOutput = Join-Path $temporaryRoot "$([IO.Path]::GetFileName($contractPath)).json"
+        & $selector `
+            -RepositoryRoot $root `
+            -ChangedFiles @($contractPath) `
+            -OutputPath $contractOutput `
+            -GitHubOutputPath ''
+        $contract = Get-Content $contractOutput -Raw | ConvertFrom-Json
+        Assert-ValidCategories $contract
+        $contractProjects = @($contract.selectedDotNetProjects)
+        $contractFilesystem = @($contractProjects |
+            Where-Object projectName -ceq 'AICopilot.ContractFilesystemTests')
+        $expectedProjectCount = if ($contractPath -ceq 'docs/AICopilot安全部署契约.md') {
+            2
+        } else {
+            1
+        }
+        if ($contractProjects.Count -ne $expectedProjectCount -or
+            $contractFilesystem.Count -ne 1 -or
+            @($contractFilesystem[0].categories).Count -ne 1 -or
+            @($contractFilesystem[0].categories) -notcontains 'Business' -or
+            -not [bool]$contract.dotNetAffected -or
+            [bool]$contract.productionBuildRequired -or
+            [bool]$contract.requiresDocker) {
+            throw "Active AI contract did not select its filesystem contract lane: $contractPath"
+        }
+        if ($contractPath -ceq 'docs/AICopilot安全部署契约.md' -and
+            (-not [bool]$contract.deploymentAffected -or
+             @($contractProjects.projectName) -notcontains 'AICopilot.DeploymentTests')) {
+            throw 'AICopilot deployment contract did not select the deployment filesystem lane.'
+        }
+    }
+
+    $identityOutput = Join-Path $temporaryRoot 'identity-security.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles @(
+            'src/services/AICopilot.IdentityService/Commands/BindCloudIdentityCommand.cs') `
+        -OutputPath $identityOutput `
+        -GitHubOutputPath ''
+    $identity = Get-Content $identityOutput -Raw | ConvertFrom-Json
+    Assert-ValidCategories $identity
+    foreach ($heavyName in @(
+            'AICopilot.PersistenceTests',
+            'AICopilot.HttpIntegrationTests')) {
+        $heavySelection = @($identity.selectedDotNetProjects |
+            Where-Object projectName -ceq $heavyName)
+        if ($heavySelection.Count -ne 1 -or
+            [string]::IsNullOrWhiteSpace([string]$heavySelection[0].testFilter) -or
+            @($heavySelection[0].categories).Count -ne 1 -or
+            @($heavySelection[0].categories) -notcontains 'Security') {
+            throw "Identity impact did not select the filtered heavy Security project: $heavyName"
+        }
+    }
+    if (-not [bool]$identity.requiresDocker -or
+        @($identity.matchedSecurityImpactRules) -notcontains 'identity-persistence' -or
+        @($identity.matchedSecurityImpactRules) -notcontains 'identity-http') {
+        throw 'Identity path/owner mapping did not emit its Security impact evidence.'
+    }
+
+    $agentOutput = Join-Path $temporaryRoot 'agent-security.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles @(
+            'src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskService.cs') `
+        -OutputPath $agentOutput `
+        -GitHubOutputPath ''
+    $agent = Get-Content $agentOutput -Raw | ConvertFrom-Json
+    Assert-ValidCategories $agent
+    $agentHttp = @($agent.selectedDotNetProjects |
+        Where-Object projectName -ceq 'AICopilot.HttpIntegrationTests')
+    if ($agentHttp.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$agentHttp[0].testFilter) -or
+        @($agentHttp[0].categories) -notcontains 'Security' -or
+        @($agent.selectedDotNetProjects.projectName) -contains 'AICopilot.PersistenceTests' -or
+        @($agent.matchedSecurityImpactRules).Count -ne 1 -or
+        @($agent.matchedSecurityImpactRules) -notcontains 'agent-http') {
+        throw 'Agent path/owner mapping did not isolate the expected heavy Security filter.'
+    }
+
+    foreach ($securityCase in @(
+            [pscustomobject]@{
+                Id = 'mcp-http'
+                Path = 'src/services/AICopilot.McpService/McpServers/McpServerManagement.cs'
+            },
+            [pscustomobject]@{
+                Id = 'model-secret-http'
+                Path = 'src/core/AICopilot.Core.AiGateway/Aggregates/LanguageModel/LanguageModel.cs'
+            })) {
+        $caseOutput = Join-Path $temporaryRoot "$($securityCase.Id).json"
+        & $selector `
+            -RepositoryRoot $root `
+            -ChangedFiles @($securityCase.Path) `
+            -OutputPath $caseOutput `
+            -GitHubOutputPath ''
+        $caseSelection = Get-Content $caseOutput -Raw | ConvertFrom-Json
+        Assert-ValidCategories $caseSelection
+        $caseHttp = @($caseSelection.selectedDotNetProjects |
+            Where-Object projectName -ceq 'AICopilot.HttpIntegrationTests')
+        if ($caseHttp.Count -ne 1 -or
+            [string]::IsNullOrWhiteSpace([string]$caseHttp[0].testFilter) -or
+            @($caseHttp[0].categories) -notcontains 'Security' -or
+            @($caseSelection.matchedSecurityImpactRules).Count -ne 1 -or
+            @($caseSelection.matchedSecurityImpactRules) -notcontains $securityCase.Id) {
+            throw "Security path/owner mapping failed: $($securityCase.Id)"
+        }
+    }
+
+    [xml]$productionSolution = Get-Content (
+        Join-Path $root 'AICopilot.Production.slnx') -Raw
+    $productionProjects = @($productionSolution.SelectNodes("//*[local-name()='Project']") |
+        ForEach-Object { ([string]$_.GetAttribute('Path')).Replace('\', '/') } |
+        Sort-Object -Unique)
+    $expectedProductionProjects = @(Get-ChildItem (Join-Path $root 'src') `
+            -Filter '*.csproj' -File -Recurse |
+        ForEach-Object {
+            [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+        } |
+        Where-Object {
+            -not $_.StartsWith('src/tests/', [StringComparison]::Ordinal) -and
+            -not $_.StartsWith('src/testing/', [StringComparison]::Ordinal)
+        } |
+        Sort-Object -Unique)
+    if (@(Compare-Object $expectedProductionProjects $productionProjects).Count -ne 0 -or
+        @($productionProjects | Where-Object {
+                $_.StartsWith('src/tests/', [StringComparison]::Ordinal) -or
+                $_.StartsWith('src/testing/', [StringComparison]::Ordinal)
             }).Count -ne 0) {
-        throw 'Documentation-only changes selected a non-red-line or unfiltered mixed runner.'
+        throw 'AICopilot production project graph is incomplete or includes test infrastructure.'
+    }
+
+    $unicodeRoot = Join-Path $temporaryRoot 'unicode-paths'
+    $unicodeBase = New-DynamicRunnerFixture -Root $unicodeRoot
+    & git -C $unicodeRoot config core.quotePath true
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to enable C-style Git path quoting in the Unicode fixture.' }
+    $unicodePath = 'docs/中文 路径说明.md'
+    Write-FixtureFile -Root $unicodeRoot -Path $unicodePath -Content '# Unicode path fixture'
+    & git -C $unicodeRoot add .
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to stage the Unicode path fixture.' }
+    & git -C $unicodeRoot -c user.name=selector-fixture -c user.email=selector@example.invalid `
+        commit -q -m unicode-path
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to commit the Unicode path fixture.' }
+    Import-Module (Join-Path $root 'scripts/tests/AICopilotGitPaths.psm1') -Force
+    $unicodeChanged = @(Get-AICopilotGitChangedFiles `
+            -RepositoryRoot $unicodeRoot `
+            -BaseRef $unicodeBase `
+            -HeadRef HEAD)
+    if ($unicodeChanged.Count -ne 1 -or $unicodeChanged[0] -cne $unicodePath) {
+        throw "NUL-delimited Git path discovery corrupted a Unicode path: $($unicodeChanged -join ', ')"
+    }
+    $unicodeOutput = Join-Path $temporaryRoot 'unicode.json'
+    & $selector `
+        -RepositoryRoot $unicodeRoot `
+        -BaseRef $unicodeBase `
+        -HeadRef HEAD `
+        -OutputPath $unicodeOutput `
+        -GitHubOutputPath ''
+    $unicode = Get-Content $unicodeOutput -Raw | ConvertFrom-Json
+    if (@($unicode.changedFiles).Count -ne 1 -or
+        @($unicode.changedFiles)[0] -cne $unicodePath -or
+        @($unicode.selectedDotNetProjects).Count -ne 0) {
+        throw 'Selector did not preserve the exact Unicode Git path from discovery to evidence.'
     }
 
     $globalBuildOutput = Join-Path $temporaryRoot 'global-build.json'
@@ -456,8 +635,22 @@ if ($workflowText -match "\`$env:CI_MODE\s+-ne\s+'default'" -or
     ($workflowText.Split('Test-AICopilotCiTestSelection.ps1', [StringSplitOptions]::None).Length - 1) -ne 2) {
     throw 'AICopilot selector behavior tests are still wired to an unrelated explicit mode.'
 }
-if ($workflowText -notmatch 'if\s*\(\[string\]::IsNullOrWhiteSpace\(\$baseRef\)\)\s*\{\s*\$baseRef\s*=\s*''HEAD\^''') {
+if ($workflowText -notmatch 'if\s*\(\[string\]::IsNullOrWhiteSpace\(\$baseRef\)\s+-or\s+\$baseRef\s+-match\s+''\^0\+\$''\)\s*\{\s*\$baseRef\s*=\s*''HEAD\^''') {
     throw 'AICopilot manual CI modes do not have a deterministic base ref.'
+}
+if ($workflowText -notmatch 'Import-Module\s+\./scripts/tests/AICopilotGitPaths\.psm1' -or
+    $workflowText -notmatch 'Get-AICopilotGitChangedFiles' -or
+    $workflowText -match 'git\s+diff\s+--name-only' -or
+    $workflowText -notmatch '-ChangedFiles\s+\$changedFiles') {
+    throw 'AICopilot workflow does not use one NUL-safe changed-path set for input gating and selection.'
+}
+if ($workflowText -match 'Restore selected \.NET test projects' -or
+    $runnerText -notmatch "'restore',\s+\`$selectedGraphPath" -or
+    $runnerText -notmatch "'restore',\s+\`$productionGraphPath" -or
+    $runnerText -notmatch "'--list-tests'" -or
+    $runnerText -notmatch "'--no-build'" -or
+    $runnerText -notmatch 'discovered zero tests') {
+    throw 'AICopilot CI does not enforce one build per graph and non-zero filtered discovery.'
 }
 if ($workflowText -notmatch '\$actual\.Major\s+-ne\s+\$requested\.Major' -or
     $workflowText -notmatch '\$actual\.Minor\s+-ne\s+\$requested\.Minor' -or
@@ -470,4 +663,4 @@ if ($runnerText -notmatch "ForEach-Object\s*\{\s*\[int\]\`$_\['discovered'\]\s*\
     throw 'AICopilot CI discovery aggregation does not safely read ordered result dictionaries.'
 }
 
-Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1 discoveryAggregation=1'
+Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 activeContract=7 securityMapping=4 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'

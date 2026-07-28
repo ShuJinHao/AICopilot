@@ -64,20 +64,26 @@ jobs:
         id: select
         shell: pwsh
         run: |
+          Import-Module ./scripts/tests/AICopilotGitPaths.psm1 -Force
           $baseRef = $env:QUALITY_BASE_SHA
-          if ([string]::IsNullOrWhiteSpace($baseRef)) {
+          if ([string]::IsNullOrWhiteSpace($baseRef) -or $baseRef -match '^0+$') {
             $baseRef = 'HEAD^'
           }
-          $selectorInputs = @(
-            & git diff --name-only $baseRef HEAD -- `
-              '.github/workflows/aicopilot-ci.yml' `
-              'scripts/tests/Select-AICopilotCiTests.ps1' `
-              'scripts/tests/Invoke-AICopilotCiSelectedTests.ps1' `
-              'scripts/tests/Test-AICopilotCiTestSelection.ps1'
+          $changedFiles = @(
+            Get-AICopilotGitChangedFiles `
+              -RepositoryRoot . `
+              -BaseRef $baseRef `
+              -HeadRef HEAD
           )
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Unable to determine whether the AICopilot CI selector changed.'
-          }
+          $selectorInputPaths = @(
+            '.github/workflows/aicopilot-ci.yml'
+            'AICopilot.Production.slnx'
+            'scripts/tests/AICopilotGitPaths.psm1'
+            'scripts/tests/Select-AICopilotCiTests.ps1'
+            'scripts/tests/Invoke-AICopilotCiSelectedTests.ps1'
+            'scripts/tests/Test-AICopilotCiTestSelection.ps1'
+          )
+          $selectorInputs = @($changedFiles | Where-Object { $_ -cin $selectorInputPaths })
           if ($selectorInputs.Count -gt 0) {
             ./scripts/tests/Test-AICopilotCiTestSelection.ps1
           } else {
@@ -87,24 +93,14 @@ jobs:
             -Mode $env:CI_MODE `
             -BaseRef $baseRef `
             -HeadRef HEAD `
+            -ChangedFiles $changedFiles `
             -OutputPath artifacts/ci-selection.json
 
       - name: Require container runtime only when selected tests need it
         if: ${{ steps.select.outputs.requires_docker == 'true' }}
         run: docker info
 
-      - name: Restore selected .NET test projects
-        shell: pwsh
-        run: |
-          $selection = Get-Content artifacts/ci-selection.json -Raw | ConvertFrom-Json
-          foreach ($project in @($selection.selectedDotNetProjects)) {
-            & dotnet restore $project.path
-            if ($LASTEXITCODE -ne 0) {
-              throw "Restore failed for selected project: $($project.path)"
-            }
-          }
-
-      - name: Run selected .NET tests and record current discovery
+      - name: Build selected graphs, run selected .NET tests and record current discovery
         shell: pwsh
         run: |
           $parameters = @{

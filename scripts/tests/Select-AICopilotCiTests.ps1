@@ -12,6 +12,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AICopilotGitPaths.psm1') -Force
 
 function ConvertTo-RepositoryPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -329,11 +330,10 @@ if (-not $PSBoundParameters.ContainsKey('ChangedFiles')) {
         if ([string]::IsNullOrWhiteSpace($BaseRef) -or $BaseRef -match '^0+$') {
             throw 'Default CI selection requires a non-zero BaseRef. Use workflow_dispatch mode Full for an initial branch history.'
         }
-        $diffOutput = @(& git -C $root diff --no-renames --name-only --diff-filter=ACMRTUXBD "$BaseRef...$HeadRef" 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            throw "Unable to calculate changed files for $BaseRef...${HeadRef}:`n$($diffOutput -join [Environment]::NewLine)"
-        }
-        $ChangedFiles = @($diffOutput)
+        $ChangedFiles = @(Get-AICopilotGitChangedFiles `
+                -RepositoryRoot $root `
+                -BaseRef $BaseRef `
+                -HeadRef $HeadRef)
     }
 }
 $changed = @($ChangedFiles |
@@ -405,31 +405,147 @@ if (-not [string]::IsNullOrWhiteSpace($BaseRef)) {
         }
     }
 }
-$selected = @{}
-foreach ($project in $testProjects) {
-    if ($Mode -ne 'Deployment' -and $project.Category -ceq 'Architecture') {
-        Add-SelectedProject -Selected $selected -Project $project `
-            -Category Architecture -Reason 'mandatory-architecture'
-    }
-    if ($Mode -ne 'Deployment' -and
-        -not [string]::IsNullOrWhiteSpace($project.SecurityFilter)) {
-        Add-SelectedProject -Selected $selected -Project $project `
-            -Category Security `
-            -TestFilter $project.SecurityFilter `
-            -Reason 'mandatory-security'
-    }
-}
-
 $webRoot = 'src/vues/AICopilot.Web/'
 $webChanged = [Collections.Generic.List[string]]::new()
 $webAffected = $false
 $webFull = $Mode -in @('Quality', 'Full')
 $deploymentAffected = $false
+$productionBuildRequired = $Mode -in @('Quality', 'Full') -or @($changed | Where-Object {
+        $_ -ceq 'AICopilot.Production.slnx' -or
+        $_ -ceq 'AICopilot.slnx' -or
+        $_ -match '^(?:global\.json|Directory\.(?:Build|Packages)\.(?:props|targets))$' -or
+        ($_.StartsWith('src/', [StringComparison]::Ordinal) -and
+            -not $_.StartsWith('src/tests/', [StringComparison]::Ordinal) -and
+            -not $_.StartsWith('src/testing/', [StringComparison]::Ordinal) -and
+            -not $_.StartsWith($webRoot, [StringComparison]::Ordinal))
+    }).Count -gt 0
+$codeAffected = @($changed | Where-Object {
+        $_ -ceq 'AICopilot.Production.slnx' -or
+        $_ -ceq 'AICopilot.slnx' -or
+        $_ -match '^(?:global\.json|Directory\.(?:Build|Packages)\.(?:props|targets))$' -or
+        $_.StartsWith('src/', [StringComparison]::Ordinal)
+    }).Count -gt 0
 $unclassified = [Collections.Generic.List[string]]::new()
 $deferredFiles = [Collections.Generic.List[string]]::new()
 $retiredBusinessFiles = [Collections.Generic.List[string]]::new()
 $retiredBusinessProjects = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $requiredExplicitMode = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$matchedSecurityRules = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$selected = @{}
+
+$fastSecurityProjectNames = @(
+    'AICopilot.UnitTests',
+    'AICopilot.InProcessTests',
+    'AICopilot.PersistenceFilesystemTests')
+$securityImpactRules = @(
+    [pscustomobject]@{
+        Id = 'identity-persistence'
+        ProjectName = 'AICopilot.PersistenceTests'
+        Filter = 'FullyQualifiedName~AICopilot.PersistenceTests.IdentityEnabledAdminInvariantTests|FullyQualifiedName~AICopilot.PersistenceTests.CloudOidcBindingConcurrencyTests'
+        Patterns = @(
+            '^src/services/AICopilot\.IdentityService/',
+            '^src/infrastructure/AICopilot\.EntityFrameworkCore/(?:ExternalIdentities/|Configuration/Identity/|Migrations/IdentityStoreDbContext/)',
+            '^src/hosts/AICopilot\.MigrationWorkApp/',
+            '^src/hosts/AICopilot\.HttpApi/(?:Controllers/IdentityController\.cs|Infrastructure/CloudOidc|Models/IdentityModels\.cs)')
+    },
+    [pscustomobject]@{
+        Id = 'identity-http'
+        ProjectName = 'AICopilot.HttpIntegrationTests'
+        Filter = 'FullyQualifiedName~AICopilot.HttpIntegrationTests.CloudOidcHttpFlowTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.IdentityAccessManagementTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.IdentityHttpBoundaryTests'
+        Patterns = @(
+            '^src/services/AICopilot\.IdentityService/',
+            '^src/infrastructure/AICopilot\.EntityFrameworkCore/(?:ExternalIdentities/|Configuration/Identity/|Migrations/IdentityStoreDbContext/)',
+            '^src/hosts/AICopilot\.HttpApi/(?:Controllers/IdentityController\.cs|HttpApiAuthenticationConfiguration\.cs|Infrastructure/(?:CloudOidc|CurrentUser|ApiProblemDetailsFactory)|Models/IdentityModels\.cs)')
+    },
+    [pscustomobject]@{
+        Id = 'agent-http'
+        ProjectName = 'AICopilot.HttpIntegrationTests'
+        Filter = 'FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentRunQueuePermissionTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentSafetyApprovalHttpTests'
+        Patterns = @(
+            '^src/services/AICopilot\.AiGatewayService/(?:AgentTasks|ApprovalPolicies|Approvals|Safety|Workspaces)/',
+            '^src/hosts/AICopilot\.HttpApi/Controllers/AiGateway(?:AgentTask|WorkspaceArtifact|Tool)?Controller\.cs')
+    },
+    [pscustomobject]@{
+        Id = 'mcp-http'
+        ProjectName = 'AICopilot.HttpIntegrationTests'
+        Filter = 'FullyQualifiedName~AICopilot.HttpIntegrationTests.McpToolGovernancePermissionTests'
+        Patterns = @(
+            '^src/services/AICopilot\.McpService/',
+            '^src/services/AICopilot\.AiGatewayService/Tools/',
+            '^src/services/AICopilot\.Services\.Contracts/Contracts/Mcp',
+            '^src/hosts/AICopilot\.HttpApi/Controllers/(?:McpController|AiGatewayToolController)\.cs')
+    },
+    [pscustomobject]@{
+        Id = 'model-secret-http'
+        ProjectName = 'AICopilot.HttpIntegrationTests'
+        Filter = 'FullyQualifiedName~AICopilot.HttpIntegrationTests.ModelApiKeyProtectionTests'
+        Patterns = @(
+            '^src/core/AICopilot\.Core\.AiGateway/Aggregates/LanguageModel/',
+            '^src/services/AICopilot\.AiGatewayService/(?:Commands|Queries)/LanguageModels/',
+            '^src/services/AICopilot\.RagService/.+EmbeddingModel',
+            '^src/infrastructure/AICopilot\.(?:Infrastructure|EntityFrameworkCore)/.+Secret',
+            '^src/hosts/AICopilot\.MigrationWorkApp/MigrationWorkerSecretMigrator\.cs')
+    })
+$activeContractPaths = @(
+    'AGENTS.md',
+    'docs/AICopilot业务规则.md',
+    'docs/AICopilot安全部署契约.md',
+    'docs/AI架构路线图.md',
+    'docs/Agent工作流与异常契约.md',
+    'docs/Cloud只读数据分析契约.md',
+    'docs/DDD聚合根边界.md')
+
+function Add-ArchitectureAndSecurityLayer {
+    param(
+        [Parameter(Mandatory)][ValidateSet('Fast', 'All')][string]$SecurityLayer,
+        [Parameter(Mandatory)][string]$Reason
+    )
+
+    foreach ($project in $testProjects) {
+        if ($project.Category -ceq 'Architecture') {
+            Add-SelectedProject -Selected $selected -Project $project `
+                -Category Architecture -Reason $Reason
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$project.SecurityFilter) -and
+            ($SecurityLayer -ceq 'All' -or $project.Name -in $fastSecurityProjectNames)) {
+            Add-SelectedProject -Selected $selected -Project $project `
+                -Category Security `
+                -TestFilter $project.SecurityFilter `
+                -Reason $Reason
+        }
+    }
+}
+
+if ($Mode -in @('Quality', 'Full')) {
+    Add-ArchitectureAndSecurityLayer -SecurityLayer All -Reason 'explicit-red-line'
+} elseif ($Mode -eq 'Default' -and $codeAffected) {
+    Add-ArchitectureAndSecurityLayer -SecurityLayer Fast -Reason 'code-red-line-fast'
+    foreach ($file in $changed) {
+        foreach ($rule in $securityImpactRules) {
+            if (@($rule.Patterns | Where-Object { $file -match $_ }).Count -eq 0) {
+                continue
+            }
+            $project = @($testProjects | Where-Object Name -ceq $rule.ProjectName)
+            if ($project.Count -ne 1) {
+                throw "Security impact rule '$($rule.Id)' did not resolve exactly one project: $($rule.ProjectName)"
+            }
+            $declaredFilters = @(([string]$project[0].SecurityFilter).Split(
+                    '|',
+                    [StringSplitOptions]::RemoveEmptyEntries))
+            $mappedFilters = @(([string]$rule.Filter).Split(
+                    '|',
+                    [StringSplitOptions]::RemoveEmptyEntries))
+            if (@($mappedFilters | Where-Object { $_ -notin $declaredFilters }).Count -gt 0) {
+                throw "Security impact rule '$($rule.Id)' contains a filter outside the project-owned Security declaration."
+            }
+            Add-SelectedProject -Selected $selected -Project $project[0] `
+                -Category Security `
+                -TestFilter $rule.Filter `
+                -Reason "security-impact:$($rule.Id):$file"
+            [void]$matchedSecurityRules.Add([string]$rule.Id)
+        }
+    }
+}
 
 if ($Mode -eq 'Quality') {
     foreach ($project in @($testProjects | Where-Object Category -ceq 'Quality')) {
@@ -475,10 +591,38 @@ if ($Mode -eq 'Quality') {
             }
             continue
         }
-        if ($file -match '^(?:docs/|资料/|[^/]+\.md$|AGENTS\.md$|README(?:\.[^/]+)?$|LICENSE(?:\.[^/]+)?$)') {
+        if ($file -in $activeContractPaths) {
+            if ($Mode -eq 'Default') {
+                $contractProject = @($testProjects |
+                    Where-Object Name -ceq 'AICopilot.ContractFilesystemTests')
+                if ($contractProject.Count -ne 1) {
+                    $unclassified.Add($file)
+                } else {
+                    Add-SelectedProject -Selected $selected -Project $contractProject[0] `
+                        -Category Business -Reason "active-contract:$file"
+                }
+            }
+            if ($file -ceq 'docs/AICopilot安全部署契约.md' -and
+                $Mode -in @('Default', 'Deployment')) {
+                $deploymentAffected = $true
+                $deploymentProject = @($testProjects |
+                    Where-Object Name -ceq 'AICopilot.DeploymentTests')
+                if ($deploymentProject.Count -ne 1) {
+                    $unclassified.Add($file)
+                } else {
+                    Add-SelectedProject -Selected $selected -Project $deploymentProject[0] `
+                        -Category DeploymentContract -Reason "active-deployment-contract:$file"
+                }
+            }
+            continue
+        }
+        if ($file -match '^(?:docs/|资料/|[^/]+\.md$|README(?:\.[^/]+)?$|LICENSE(?:\.[^/]+)?$)') {
             continue
         }
         if ($file -match '^(?:\.github/workflows/|scripts/tests/)') {
+            continue
+        }
+        if ($file -ceq 'AICopilot.Production.slnx') {
             continue
         }
         if ($file -ceq $solutionPath) {
@@ -658,7 +802,10 @@ if ($Mode -eq 'Quality') {
             $dependents = @($testProjects | Where-Object {
                     $projectClosures[$_.Path] -contains $owner[0].Path
                 })
-            $businessDependents = @($dependents | Where-Object Category -ceq 'Business')
+            $businessDependents = @($dependents | Where-Object {
+                    $_.Category -ceq 'Business' -and
+                    [string]::IsNullOrWhiteSpace([string]$_.SecurityFilter)
+                })
             $mandatoryDependents = @($dependents | Where-Object {
                     $_.Category -ceq 'Architecture' -or
                     -not [string]::IsNullOrWhiteSpace($_.SecurityFilter)
@@ -754,6 +901,7 @@ $selectedProjects = @($selected.Values | Sort-Object path | ForEach-Object {
 $requiresDocker = @($selectedProjects | Where-Object {
         $_.runtime -in @('Aspire', 'Postgres', 'Redis', 'RabbitMQ', 'Docker')
     }).Count -gt 0
+$dotNetAffected = $selectedProjects.Count -gt 0
 
 $resolvedOutput = if ([IO.Path]::IsPathRooted($OutputPath)) {
     [IO.Path]::GetFullPath($OutputPath)
@@ -762,7 +910,7 @@ $resolvedOutput = if ([IO.Path]::IsPathRooted($OutputPath)) {
 }
 [void](New-Item (Split-Path $resolvedOutput -Parent) -ItemType Directory -Force)
 $document = [ordered]@{
-    schemaVersion = 2
+    schemaVersion = 3
     generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     mode = $Mode
     baseRef = $BaseRef
@@ -780,6 +928,10 @@ $document = [ordered]@{
     }
     deploymentAffected = $deploymentAffected
     requiresDocker = $requiresDocker
+    dotNetAffected = $dotNetAffected
+    productionBuildRequired = $productionBuildRequired
+    productionSolution = 'AICopilot.Production.slnx'
+    matchedSecurityImpactRules = @($matchedSecurityRules | Sort-Object)
     deferredExplicitFiles = @($deferredFiles | Sort-Object -Unique)
     retiredBusinessFiles = @($retiredBusinessFiles | Sort-Object -Unique)
     retiredBusinessProjects = @($retiredBusinessProjects | Sort-Object)
@@ -796,6 +948,8 @@ if (-not [string]::IsNullOrWhiteSpace($GitHubOutputPath)) {
         "web_full=$($webFull.ToString().ToLowerInvariant())"
         "deployment_affected=$($deploymentAffected.ToString().ToLowerInvariant())"
         "requires_docker=$($requiresDocker.ToString().ToLowerInvariant())"
+        "dotnet_affected=$($dotNetAffected.ToString().ToLowerInvariant())"
+        "production_build_required=$($productionBuildRequired.ToString().ToLowerInvariant())"
     ) | Add-Content $GitHubOutputPath -Encoding utf8
 }
 

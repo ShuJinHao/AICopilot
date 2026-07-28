@@ -68,9 +68,10 @@ Cloud AiRead 设备契约：
 - `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName`、弹夹/结果/时间公共字段及 schema 化 `fields`；CP/AP 业务字段为 `plcCode`、`plcName`、`clipSlot`、`startTime`、`punchingQuantity`、`punchingSpeed`。`clipSlot` 只接受 Cloud 返回的 `MG1/MG2` 事实，不得由弹夹号或 PLC 名推断。它不提供 `processName/stationName/deviceCode/ClientCode`，缺失字段保持不存在或空，不得用其他显示字段代填或推断。
 - 生产语义固定映射：“正极模切”→`typeKey=cp`，“负极模切”→`typeKey=ap`；“正极模切05”“负极模切12”等带编号表达必须同时形成对应 typeKey 与中文 `plcName` 精确过滤。Cloud AiRead 客户端必须透传 `plcCode` / `plcName`，不得在模型回答阶段再做无证据筛选。
 - CP/AP 回答优先展示中文客户端名、中文 PLC 名、弹夹位、弹夹号、冲切数量、冲切速度、开始/完成时间；不得向普通用户展示 Cloud ClientCode，也不得把 MES `P2-CPUC` / `P1-APUC` 当作 Cloud 身份。
-- Cloud 小时产能的 `plcName` 必须保留到 AI typed DTO、结构化行和摘要；小时产能 `totalCount` 在 AI 面向人员的语义固定为“完工弹夹数”，不得笼统表述为“总产出”或推断为冲切数量。
+- 产能分组语义固定为：Cloud 小时产能按接口返回的小时、设备和 PLC 维度分组；每个分组的 `totalCount` / AI `outputQty` 表示该分组内的“完工弹夹数”，不是查询返回的记录数、冲切数量或分页总数。`plcName` 必须保留到 AI typed DTO、结构化行和摘要，跨分组汇总只能求和该指标，不得把命中行数当产能。
 - 需要从自然语言里的设备编码定位设备时，必须先走显式设备查询/解析；无法唯一命中时要求用户补充，不做隐式兼容。
 - AICopilot 的 Pilot 场景参数不得直接透传给 Cloud；只有 Cloud 端点真实声明的参数可以进入请求。
+- Cloud provider / AI consumer 跨版本发布顺序固定为：Cloud 先发布向后兼容的 provider 契约并用仍在生产的 AI consumer 验证，随后才发布依赖该契约的 AICopilot；字段收紧或删除必须等所有生产 consumer 完成迁移后再单独发布。禁止先发布依赖尚未生产存在字段的 AI consumer，也禁止以同一工作区源码存在代替两个生产版本的顺序和真实数据验收。
 
 ## 3. OIDC 身份边界
 
@@ -78,9 +79,13 @@ Cloud AiRead 设备契约：
 - AICopilot 保留本地 AI 用户、AI 角色、AI 权限、SecurityStamp、本地禁用、审计和 emergency admin。
 - Cloud role 不直接映射 AI role。
 - AICopilot 不读取 Cloud Cookie、不接收 Cloud 密码、不直连 Cloud 用户表。
+
+### 3.1 JIT 首次身份绑定并发
+
 - Cloud 身份首次登录命中同名、启用且尚未绑定其他 Cloud 身份的本地 AI 账号时，不得自动覆盖或创建重名账号；必须在短期 external cookie 有效期内要求用户用该账号的本地密码确认。确认请求只接收密码，本地用户名必须由已验证 Cloud profile 的 `employeeNo -> preferred_username -> sub` 规则推导，不得由浏览器提交。
 - 本地密码确认成功只建立 Cloud identity 与现有 AI 用户的一对一绑定，必须保留该用户已有 AI 角色、权限、SecurityStamp 治理和禁用状态；Cloud role 仍不得映射或覆盖 AI role。密码不得进入 JWT、Pinia、storage、URL、日志或审计。
 - 绑定确认必须在 Identity 事务内锁定并重新核对 `(provider, tenantId, externalUserId)` 与 `(userId, provider)` 两个唯一关系；完全相同的既有绑定幂等复用，任一侧指向其他身份则稳定拒绝且不得覆盖。密码错误允许在原 external cookie 有效期与登录限流内重试，取消、过期、账号禁用、Cloud 身份失效和不可恢复冲突必须清除 external cookie。
+- 两个首次 JIT 请求并发争用同一 Cloud 身份、本地用户或规范化用户名时，数据库唯一约束、事务内 fresh-read 与冲突映射必须共同保证至多形成一个绑定；胜者可以成功，完全相同绑定的迟到请求只能幂等返回同一用户，竞争到不同身份的请求必须稳定返回 `external_identity_conflict`。任何唯一约束异常都不得泄露数据库细节、创建第二用户或被通用重试改写为自动覆盖。
 - 同名确认要求、密码拒绝、绑定冲突和确认成功都必须写结构化 Identity 审计，但审计不得记录密码或原始凭据。
 - EdgeClient 不参与 Cloud-AICopilot OIDC 身份对齐。
 
@@ -135,6 +140,13 @@ Cloud AiRead 设备契约：
 - Human-in-the-loop 是 AICopilot 自身高风险动作的安全闸门。
 - 它不能覆盖 Cloud 业务只读规则。
 - 若未来允许调用 Cloud AI-facing API，审批规则必须与 Cloud 权限、Cloud 审计和接口契约一起设计。
+
+### 7.1 最终产物异步关单状态
+
+- 产物生成完成只允许进入 `WorkspaceReady → WaitingFinalApproval`；此时草稿、workspace、最终步骤和运行 attempt 均未关单，前端不得显示为完成。
+- 最终审批请求只记录 `Approved` / `Rejected` decision proof。`Approved` 只授权 durable queue 恢复，不得由 HTTP 审批请求同步复制文件或直接把任务改成 `Completed`；`Rejected` 必须把任务稳定终结为 `Rejected`，不得继续排队或自动重建审批。
+- durable Worker 只有在任务仍为 `WaitingFinalApproval`、唯一最终审批已批准、最终步骤是唯一末步、前置步骤和 Artifact binding 完整、attempt/lease/fencing 与 file-set stage 全部匹配时，才可在同一权威 checkpoint 中完成 Artifact、Workspace、最终步骤、attempt 和任务。`Finalized` 只是该原子关单中的内部过渡，用户可见成功只认 `Completed` 且 `CompletedAt`、最终摘要、manifest/digest 和 final 文件集一致。
+- 审批竞争、状态漂移、checkpoint 损坏、文件提交结果未知或恢复证据不完整时不得猜测完成；必须返回稳定冲突/结果未知语义并进入对账或人工处置。旧同步 finalize 入口只能验证并幂等入队，不能绕开 durable finalization checkpoint。
 
 ## 8. 对话产品规则
 
