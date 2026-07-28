@@ -21,3 +21,16 @@ f61998d44b46014d21cb8f6c4dd641d077f1f3108c14e529078e553172987f18  docs/改动复
 815a066696e63820588db1188c2432c4d399d283ad006546e0fee102fd3d3557  scripts/tests/baselines/migrations/TestAICopilotGovernanceMigrationValidator.v1.ps1
 8cf8ef48931c1ea2921fe8139b0c7dad880c3ac2a19cf4cd77cf725a6eb94f84  scripts/tests/baselines/migrations/ValidateAICopilotGovernanceMigration.v1.ps1
 cb482f82fa2c150e722f79b2efb43cc414542a0a76b3fb702d6ce74d5e09272c  scripts/tests/baselines/migrations/aicopilot-governance-migration-receipt.schema.json
+
+ADJUDICATION_MATRIX_V1
+scope snapshot_entry
+main_evidence_sha 77a8646e633ed26d45dc3e3bea6a8995c3603cdd
+columns path | decision | reason | current_main_evidence | allowed_hunk
+counts entered_main=0 still_valid=0 redo=0 obsolete=6 unknown=0 total=6
+
+docs/AI架构治理清单.md | 明确废弃 | 重复治理清单 | main 已删除；权威入口为业务规则和路线图 | NONE
+docs/改动复盘与规则沉淀.md | 明确废弃 | 滚动复盘/日期式治理载体 | main 已删除且工作区规则禁止恢复 | NONE
+scripts/tests/baselines/migrations/InvokeAICopilotGovernanceMigrationFromTrustedBase.v1.ps1 | 明确废弃 | 一次性治理迁移/回执生成器，不属于当前业务测试或长期入口 | main 已删除迁移回执体系；Git/immutable evidence 承载历史 | NONE
+scripts/tests/baselines/migrations/TestAICopilotGovernanceMigrationValidator.v1.ps1 | 明确废弃 | 只验证已废弃 migration receipt 账本 | main 不保留 receipt/transition 历史基线 | NONE
+scripts/tests/baselines/migrations/ValidateAICopilotGovernanceMigration.v1.ps1 | 明确废弃 | 旧治理迁移 validator 与当前动态测试治理冲突 | main selector/inventory 只基于当前源码 | NONE
+scripts/tests/baselines/migrations/aicopilot-governance-migration-receipt.schema.json | 明确废弃 | 日期式治理迁移回执 schema | main 不保留治理 receipt 文档/账本 | NONE
