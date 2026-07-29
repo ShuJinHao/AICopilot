@@ -240,7 +240,11 @@ internal sealed class AgentNodeRunClaimStore(
                     attempt.TaskFencingToken != claim.TaskFencingToken || attempt.LeaseId != claim.TaskLeaseId ||
                     queueItem.RunAttemptId != claim.RunAttemptId || queueItem.TaskFencingToken != claim.TaskFencingToken ||
                     queueItem.LeaseId != claim.TaskLeaseId || queueItem.Status != AgentTaskRunQueueStatus.Started ||
-                    node.Status is not AgentNodeRunStatus.Claimed and not AgentNodeRunStatus.Running)
+                    node.Status is not AgentNodeRunStatus.Claimed and not AgentNodeRunStatus.Running ||
+                    task.RunLeaseExpiresAt is null || task.RunLeaseExpiresAt <= nowUtc ||
+                    attempt.LeaseExpiresAt is null || attempt.LeaseExpiresAt <= nowUtc ||
+                    queueItem.LeaseExpiresAt is null || queueItem.LeaseExpiresAt <= nowUtc ||
+                    node.LeaseExpiresAt is null || node.LeaseExpiresAt <= nowUtc)
                 {
                     return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
                         AgentFencedWriteResult.StaleFence);

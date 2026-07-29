@@ -87,6 +87,181 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
     }
 
     [Fact]
+    public async Task FinalizationLeaseRenewal_ShouldRejectEveryExpiredAuthorityLeaseWithoutRevival()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before expired lease renewal test",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        DurableTaskClaim taskClaim;
+        using (var taskClaimScope = host.Services.CreateScope())
+        {
+            var taskClaimStore = taskClaimScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>();
+            taskClaim = (await taskClaimStore.TryClaimNextAsync(
+                "final-output-expired-renewal-test",
+                TimeSpan.FromMinutes(5)))!;
+            taskClaim.Should().NotBeNull();
+            (await taskClaimStore.TryMarkStartedAsync(
+                    taskClaim,
+                    DateTimeOffset.UtcNow))
+                .Should()
+                .Be(AgentFencedWriteResult.Succeeded);
+        }
+
+        var workerNow = taskClaim.RunAttempt.StartedAt.AddSeconds(2);
+        await using (var authorityContext = CreateAiGatewayContext(database.ConnectionString))
+        {
+            var attempt = await authorityContext.AgentTaskRunAttempts.SingleAsync(item =>
+                item.Id == taskClaim.RunAttempt.Id);
+            attempt.InitializeBudget(new AgentRunBudgetLimits(
+                "final-output-expired-renewal-test:v1",
+                MaxNodes: 2,
+                MaxToolCalls: 2,
+                MaxModelCalls: 0,
+                MaxInputTokens: 0,
+                MaxOutputTokens: 0,
+                MaxElapsedSeconds: 600,
+                MaxCostAmount: 0,
+                CostCurrency: "CNY",
+                MaxRetries: 0,
+                MaxArtifactCount: 1,
+                MaxArtifactBytes: 1_048_576));
+            var finalNode = await authorityContext.Set<AgentNodeRun>().SingleAsync(node =>
+                node.Id == seeded.FinalNodeRunId);
+            finalNode.BindTaskClaim(
+                taskClaim.QueueItem.Id,
+                taskClaim.TaskFencingToken,
+                workerNow);
+            await authorityContext.SaveChangesAsync();
+        }
+
+        AgentNodeRunClaim nodeClaim;
+        using (var nodeClaimScope = host.Services.CreateScope())
+        {
+            (await nodeClaimScope.ServiceProvider
+                    .GetRequiredService<IAgentNodeRunStore>()
+                    .TryReleaseApprovalAsync(
+                        seeded.FinalNodeRunId,
+                        taskClaim.RunAttempt.Id,
+                        taskClaim.TaskFencingToken,
+                        workerNow))
+                .Should()
+                .Be(AgentFencedWriteResult.Succeeded);
+            var claimStore = nodeClaimScope.ServiceProvider
+                .GetRequiredService<IAgentNodeRunClaimStore>();
+            var outcome = await claimStore.TryClaimAsync(
+                seeded.FinalNodeRunId,
+                taskClaim.RunAttempt.Id,
+                taskClaim.TaskFencingToken,
+                "final-output-expired-renewal-test",
+                TimeSpan.FromMinutes(5),
+                workerNow);
+            outcome.Code.Should().Be(AgentNodeRunClaimOutcomeCode.Claimed);
+            nodeClaim = outcome.Claim!;
+            (await claimStore.TryMarkRunningAsync(
+                    nodeClaim,
+                    workerNow.AddMilliseconds(1)))
+                .Should()
+                .Be(AgentFencedWriteResult.Succeeded);
+        }
+
+        var renewalAt = workerNow.AddSeconds(1);
+        foreach (var expiredAuthority in new[] { "task", "attempt", "queue", "node" })
+        {
+            var expiredAt = renewalAt.AddMilliseconds(-1);
+            var validUntil = renewalAt.AddMinutes(5);
+            await using (var mutation = CreateAiGatewayContext(database.ConnectionString))
+            {
+                (await mutation.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_tasks
+                     SET run_lease_expires_at = {(expiredAuthority == "task" ? expiredAt : validUntil)}
+                     WHERE id = {taskClaim.Task.Id.Value}
+                     """)).Should().Be(1);
+                (await mutation.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_task_run_attempts
+                     SET lease_expires_at = {(expiredAuthority == "attempt" ? expiredAt : validUntil)}
+                     WHERE id = {taskClaim.RunAttempt.Id.Value}
+                     """)).Should().Be(1);
+                (await mutation.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_task_run_queue_items
+                     SET lease_expires_at = {(expiredAuthority == "queue" ? expiredAt : validUntil)}
+                     WHERE id = {taskClaim.QueueItem.Id.Value}
+                     """)).Should().Be(1);
+                (await mutation.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_node_runs
+                     SET lease_expires_at = {(expiredAuthority == "node" ? expiredAt : validUntil)}
+                     WHERE id = {nodeClaim.NodeRun.Id.Value}
+                     """)).Should().Be(1);
+            }
+
+            var before = await ReadLeaseAuthorityAsync();
+            using (var renewalScope = host.Services.CreateScope())
+            {
+                (await renewalScope.ServiceProvider
+                        .GetRequiredService<IAgentNodeRunClaimStore>()
+                        .TryRenewTaskAndNodeLeaseAsync(
+                            nodeClaim,
+                            TimeSpan.FromMinutes(5),
+                            TimeSpan.FromMinutes(5),
+                            renewalAt))
+                    .Should()
+                    .Be(AgentFencedWriteResult.StaleFence);
+            }
+
+            (await ReadLeaseAuthorityAsync()).Should().Be(before);
+        }
+
+        async Task<(
+            DateTimeOffset? Task,
+            DateTimeOffset? Attempt,
+            DateTimeOffset? Queue,
+            DateTimeOffset? Node)> ReadLeaseAuthorityAsync()
+        {
+            await using var context = CreateAiGatewayContext(database.ConnectionString);
+            return (
+                await context.AgentTasks
+                    .AsNoTracking()
+                    .Where(item => item.Id == taskClaim.Task.Id)
+                    .Select(item => item.RunLeaseExpiresAt)
+                    .SingleAsync(),
+                await context.AgentTaskRunAttempts
+                    .AsNoTracking()
+                    .Where(item => item.Id == taskClaim.RunAttempt.Id)
+                    .Select(item => item.LeaseExpiresAt)
+                    .SingleAsync(),
+                await context.AgentTaskRunQueueItems
+                    .AsNoTracking()
+                    .Where(item => item.Id == taskClaim.QueueItem.Id)
+                    .Select(item => item.LeaseExpiresAt)
+                    .SingleAsync(),
+                await context.Set<AgentNodeRun>()
+                    .AsNoTracking()
+                    .Where(item => item.Id == nodeClaim.NodeRun.Id)
+                    .Select(item => item.LeaseExpiresAt)
+                    .SingleAsync());
+        }
+    }
+
+    [Fact]
     public async Task TimelineSequence_ShouldSerializeConcurrentRepositoryWriters()
     {
         await using var database = await CreateMigratedDatabaseAsync();
