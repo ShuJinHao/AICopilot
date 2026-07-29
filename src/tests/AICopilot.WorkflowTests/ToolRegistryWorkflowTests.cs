@@ -95,15 +95,16 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         executionRepository.Items.Should().BeEmpty();
     }
     [Fact]
-    public async Task AgentTaskRuntime_ShouldCreateRunAttempt_AndLinkExecutionRecord()
+    public async Task AgentTaskRuntime_ShouldCreateRunAttempt_AndLinkExecutionRecord_BeforeLegacyFinalizationFailsClosed()
     {
         var (task, workspace) = CreateApprovedTask("generate_chart_data");
         var runAttemptRepository = new InMemoryAgentTaskRunAttemptStore();
         var executionRepository = new InMemoryToolExecutionAuditStore();
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>();
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
-            new InMemoryRepository<ApprovalRequest>(),
+            approvalRepository,
             executionRepository,
             CreateGuard(
                 CreateTool("generate_chart_data", ToolProviderType.Artifact),
@@ -140,15 +141,17 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
 
         var result = await runtime.RunAsync(task, CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
+        result.IsSuccess.Should().BeFalse();
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
         task.RunAttemptCount.Should().Be(1);
-        task.IsRunInProgress(DateTimeOffset.UtcNow).Should().BeFalse();
         var attempt = runAttemptRepository.Items.Should().ContainSingle().Which;
         attempt.AttemptNo.Should().Be(1);
-        attempt.Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
         task.ActiveRunAttemptId.Should().Be(attempt.Id);
         executionRepository.Items.Should().ContainSingle()
             .Which.RunAttemptId.Should().Be(attempt.Id);
+        approvalRepository.Items.Should().BeEmpty(
+            "the non-durable runtime must not recreate the retired final-output approval path");
     }
     [Fact]
     public async Task RetryAgentTaskCommand_ShouldResetFailedStep_AndEnqueueRetry()
@@ -805,17 +808,18 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         failure.Summary.Should().NotContain("C:\\");
     }
     [Fact]
-    public async Task AgentTaskRuntime_ShouldEvaluateRagAdminAccessFromTaskOwner()
+    public async Task AgentTaskRuntime_ShouldEvaluateRagAdminAccessFromTaskOwner_BeforeLegacyFinalizationFailsClosed()
     {
         var knowledgeBaseId = Guid.NewGuid();
         var (task, workspace) = CreateRagApprovedTask(knowledgeBaseId);
         var executionRepository = new InMemoryToolExecutionAuditStore();
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>();
         var accessChecker = new RecordingKnowledgeBaseAccessChecker();
         var workspaceService = new CapturingWorkspaceService(workspace);
         var runtime = CreateRuntime(
             new InMemoryRepository<AgentTask>(task),
             new InMemoryRepository<ArtifactWorkspace>(workspace),
-            new InMemoryRepository<ApprovalRequest>(),
+            approvalRepository,
             executionRepository,
             CreateGuard(
                 CreateTool("rag_search", ToolProviderType.BuiltIn),
@@ -832,12 +836,15 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
 
         var result = await runtime.RunAsync(task, CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
-        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval, task.FinalSummary);
+        result.IsSuccess.Should().BeFalse();
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code
+            .Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
         accessChecker.ObservedUserId.Should().Be(UserId);
         accessChecker.ObservedIsAdmin.Should().BeTrue();
         executionRepository.Items.Should().ContainSingle(item => item.ToolCode == "rag_search")
             .Which.Status.Should().Be(ToolExecutionStatus.Succeeded);
+        approvalRepository.Items.Should().BeEmpty(
+            "the non-durable runtime must not recreate the retired final-output approval path");
     }
     [Fact]
     public async Task GetSessionTimeline_ShouldExposeRagStepSummaryWithoutRawOutput()
