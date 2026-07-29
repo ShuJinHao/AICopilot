@@ -4,6 +4,7 @@ using AICopilot.Core.AiGateway.Specifications.AgentTasks;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
@@ -16,7 +17,8 @@ internal sealed class AgentTaskRunQueueWorkerCoordinator(
     IAgentTaskRuntime runtime,
     IOptions<AgentRunQueueOptions>? options = null,
     AgentAuditRecorder? auditRecorder = null,
-    DurableTaskClaimCoordinator? durableTaskClaimCoordinator = null)
+    DurableTaskClaimCoordinator? durableTaskClaimCoordinator = null,
+    ILogger<AgentTaskRunQueueWorkerCoordinator>? logger = null)
 {
     private AgentRunQueueOptions QueueOptions => options?.Value ?? new AgentRunQueueOptions();
 
@@ -65,6 +67,47 @@ internal sealed class AgentTaskRunQueueWorkerCoordinator(
         AgentRuntimeTelemetry.RecordQueueWait(startedAtUtc - claim.QueueItem.CreatedAt);
 
         var result = await runtime.RunClaimedAsync(claim, cancellationToken);
+        var preClaimFinalizationConflict = result.Errors?
+            .OfType<ApiProblemDescriptor>()
+            .FirstOrDefault(problem => string.Equals(
+                problem.Code,
+                AppProblemCodes.AgentFinalizationStateConflict,
+                StringComparison.Ordinal));
+        if (!result.IsSuccess &&
+            preClaimFinalizationConflict is not null &&
+            claim.QueueItem.TriggerType == AgentTaskRunTriggerType.ApprovalResume &&
+            claim.QueueItem.SourceApprovalRequestId is not null)
+        {
+            try
+            {
+                var reconciliation =
+                    await durableTaskClaimCoordinator.RequireFinalizationReconciliationAsync(
+                        claim,
+                        preClaimFinalizationConflict.Detail,
+                        DateTimeOffset.UtcNow,
+                        cancellationToken);
+                if (!reconciliation.IsSuccess)
+                {
+                    logger?.LogWarning(
+                        "Approved final-output queue item {QueueItemId} could not enter reconciliation because its authority fence changed.",
+                        claim.QueueItem.Id.Value);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(
+                    "Approved final-output queue item {QueueItemId} could not atomically enter reconciliation. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                    claim.QueueItem.Id.Value,
+                    ex.GetType().Name);
+            }
+
+            return;
+        }
+
         var now = DateTimeOffset.UtcNow;
         var authoritativeTask = await taskRepository.GetAsync(
             task => task.Id == claim.Task.Id,

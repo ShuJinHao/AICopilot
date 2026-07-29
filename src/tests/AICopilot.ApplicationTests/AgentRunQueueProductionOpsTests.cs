@@ -268,6 +268,67 @@ public sealed class AgentRunQueueProductionOpsTests
     }
 
     [Fact]
+    public async Task DurableWorker_ShouldRoutePreClaimFinalizationConflictToReconciliation()
+    {
+        var task = CreateRunningTask();
+        var now = DateTimeOffset.UtcNow;
+        var attempt = new AgentTaskRunAttempt(
+            task.Id,
+            1,
+            AgentTaskRunTriggerType.ApprovalResume,
+            "finalization-conflict-worker",
+            now,
+            TimeSpan.FromMinutes(5));
+        task.BeginRunAttempt(
+            attempt.Id,
+            attempt.AttemptNo,
+            attempt.LeaseId!.Value,
+            attempt.LeaseOwner!,
+            attempt.LeaseExpiresAt!.Value,
+            now);
+        attempt.BindTaskFencingToken(task.RunFencingToken);
+        var queueItem = new AgentTaskRunQueueItem(
+            task.Id,
+            AgentTaskRunTriggerType.ApprovalResume,
+            task.UserId,
+            now,
+            sourceApprovalRequestId: ApprovalRequestId.New());
+        queueItem.AcquireLease(
+            attempt.LeaseId.Value,
+            attempt.LeaseOwner!,
+            now,
+            TimeSpan.FromMinutes(5),
+            task.RunFencingToken);
+        queueItem.LinkRunAttempt(attempt.Id, now);
+        var claim = new DurableTaskClaim(
+            queueItem,
+            task,
+            attempt,
+            task.RunFencingToken,
+            attempt.LeaseId.Value,
+            attempt.LeaseExpiresAt.Value);
+        var queueStore = new InMemoryAgentTaskRunQueueStore(queueItem);
+        var durableStore = new RecordingDurableTaskClaimStore();
+        var coordinator = new AgentTaskRunQueueWorkerCoordinator(
+            queueStore,
+            new InMemoryRepository<AgentTask>(task),
+            new InMemoryAgentTaskRunAttemptStore(attempt),
+            new AgentTaskRunQueue(
+                queueStore,
+                AgentPlanV2TestData.CreateMatchingFreshReadGate()),
+            new ThrowingRuntime(new ApiProblemDescriptor(
+                AppProblemCodes.AgentFinalizationStateConflict,
+                "Approved final-output source bytes drifted before NodeRun claim.")),
+            durableTaskClaimCoordinator: new DurableTaskClaimCoordinator(durableStore));
+
+        await coordinator.ExecuteClaimAsync(claim, CancellationToken.None);
+
+        queueItem.Status.Should().Be(AgentTaskRunQueueStatus.Started);
+        durableStore.FinalizationReconciliationCallCount.Should().Be(1);
+        durableStore.CompleteCallCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task DataWorker_ShouldFailStaleStartedLeaseAndAudit()
     {
         var task = CreateFailedTask();
@@ -537,6 +598,7 @@ public sealed class AgentRunQueueProductionOpsTests
     private sealed class RecordingDurableTaskClaimStore : IAgentDurableTaskClaimStore
     {
         public int CompleteCallCount { get; private set; }
+        public int FinalizationReconciliationCallCount { get; private set; }
 
         public Task<DurableTaskClaim?> TryClaimNextAsync(
             string leaseOwner,
@@ -550,6 +612,16 @@ public sealed class AgentRunQueueProductionOpsTests
             CancellationToken cancellationToken = default)
         {
             claim.QueueItem.MarkStarted(claim.RunAttempt.Id, startedAtUtc);
+            return Task.FromResult(AgentFencedWriteResult.Succeeded);
+        }
+
+        public Task<AgentFencedWriteResult> TryRequireFinalizationReconciliationAsync(
+            DurableTaskClaim claim,
+            string safeMessage,
+            DateTimeOffset detectedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            FinalizationReconciliationCallCount++;
             return Task.FromResult(AgentFencedWriteResult.Succeeded);
         }
 

@@ -33,6 +33,32 @@ internal sealed class DurableTaskClaimCoordinator(
         return MapFencedWrite(result, "Durable task claim could not enter Started state.");
     }
 
+    public async Task<Result> RequireFinalizationReconciliationAsync(
+        DurableTaskClaim claim,
+        string safeMessage,
+        DateTimeOffset detectedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var normalizedMessage = string.IsNullOrWhiteSpace(safeMessage)
+            ? "Approved final-output authority drift requires manual reconciliation."
+            : safeMessage.Trim();
+        if (normalizedMessage.Length > 2000)
+        {
+            normalizedMessage = normalizedMessage[..2000];
+        }
+
+        var result = await claimStore.TryRequireFinalizationReconciliationAsync(
+            claim,
+            normalizedMessage,
+            detectedAtUtc,
+            cancellationToken);
+        return result == AgentFencedWriteResult.Duplicate
+            ? Result.Success()
+            : MapFencedWrite(
+                result,
+                "Approved final-output authority could not enter reconciliation state.");
+    }
+
     public async Task<Result> CompleteAsync(
         DurableTaskClaim claim,
         AgentTaskRunQueueStatus terminalStatus,

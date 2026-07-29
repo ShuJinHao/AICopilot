@@ -278,6 +278,101 @@ internal sealed class AgentDurableTaskClaimStore(
             cancellationToken);
     }
 
+    public Task<AgentFencedWriteResult> TryRequireFinalizationReconciliationAsync(
+        DurableTaskClaim claim,
+        string safeMessage,
+        DateTimeOffset detectedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(safeMessage);
+        if (safeMessage.Length > 2000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(safeMessage));
+        }
+
+        return transactionRunner.ExecuteAsync(
+            "Agent.FinalizationPreClaimReconciliation",
+            async (context, token) =>
+            {
+                var queueItem = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunQueueItem>(
+                    context, claim.QueueItem.Id.Value, token);
+                if (queueItem is null ||
+                    queueItem.TriggerType != AgentTaskRunTriggerType.ApprovalResume ||
+                    queueItem.SourceApprovalRequestId is null ||
+                    queueItem.TaskId != claim.Task.Id ||
+                    queueItem.RunAttemptId != claim.RunAttempt.Id ||
+                    queueItem.TaskFencingToken != claim.TaskFencingToken ||
+                    queueItem.LeaseId != claim.LeaseId ||
+                    queueItem.Status != AgentTaskRunQueueStatus.Started)
+                {
+                    return Attempt(AgentFencedWriteResult.StaleFence);
+                }
+
+                var task = await AgentExecutionRowLock.ByIdAsync<AgentTask>(
+                    context, claim.Task.Id.Value, token);
+                var attempt = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunAttempt>(
+                    context, claim.RunAttempt.Id.Value, token);
+                if (task is not null &&
+                    attempt is not null &&
+                    task.ActiveRunAttemptId == claim.RunAttempt.Id &&
+                    task.RunFencingToken == claim.TaskFencingToken &&
+                    attempt.TaskId == claim.Task.Id &&
+                    attempt.TaskFencingToken == claim.TaskFencingToken &&
+                    task.Status == AgentTaskStatus.ReconciliationRequired &&
+                    attempt.Status == AgentTaskRunAttemptStatus.ReconciliationRequired)
+                {
+                    return Attempt(AgentFencedWriteResult.Duplicate);
+                }
+
+                if (task is null ||
+                    attempt is null ||
+                    task.ActiveRunAttemptId != claim.RunAttempt.Id ||
+                    task.RunFencingToken != claim.TaskFencingToken ||
+                    task.RunLeaseId != claim.LeaseId ||
+                    task.RunLeaseExpiresAt is null ||
+                    task.RunLeaseExpiresAt <= detectedAtUtc ||
+                    task.Status != AgentTaskStatus.WaitingFinalApproval ||
+                    attempt.TaskId != claim.Task.Id ||
+                    attempt.TaskFencingToken != claim.TaskFencingToken ||
+                    attempt.LeaseId != claim.LeaseId ||
+                    attempt.LeaseExpiresAt is null ||
+                    attempt.LeaseExpiresAt <= detectedAtUtc ||
+                    attempt.Status != AgentTaskRunAttemptStatus.Running)
+                {
+                    return Attempt(AgentFencedWriteResult.StaleFence);
+                }
+
+                var approval = await context.ApprovalRequests
+                    .FromSqlInterpolated($$"""
+                        SELECT approval.*, approval.xmin
+                        FROM aigateway.approval_requests AS approval
+                        WHERE id = {{queueItem.SourceApprovalRequestId.Value.Value}}
+                        FOR UPDATE
+                        """)
+                    .SingleOrDefaultAsync(token);
+                if (approval is null ||
+                    approval.TaskId != task.Id ||
+                    approval.ApprovalType !=
+                    AICopilot.Core.AiGateway.Aggregates.Approvals.AgentApprovalType.FinalOutput)
+                {
+                    return Attempt(AgentFencedWriteResult.StateConflict);
+                }
+
+                task.RequireReconciliation(detectedAtUtc);
+                attempt.RequireReconciliation(detectedAtUtc, safeMessage);
+                return Attempt(
+                    AgentFencedWriteResult.Succeeded,
+                    CreatePreClaimFinalizationReconciliationAudit(
+                        queueItem,
+                        task,
+                        attempt,
+                        approval.Id,
+                        safeMessage,
+                        detectedAtUtc));
+            },
+            cancellationToken);
+    }
+
     private static async Task<bool> ClaimFenceMatchesAsync(
         AiGatewayDbContext context,
         DurableTaskClaim claim,
@@ -494,7 +589,9 @@ internal sealed class AgentDurableTaskClaimStore(
                         .Where(node => node.RunAttemptId == queueItem.RunAttemptId.Value)
                         .ToListAsync(token);
                     var hasUnexpiredExecution = false;
-                    var requiresReconciliation = nodes.Any(node => node.Status == AgentNodeRunStatus.OutcomeUnknown);
+                    var requiresReconciliation =
+                        attempt.Status == AgentTaskRunAttemptStatus.ReconciliationRequired ||
+                        nodes.Any(node => node.Status == AgentNodeRunStatus.OutcomeUnknown);
                     foreach (var node in nodes.Where(node =>
                                  node.Status is AgentNodeRunStatus.Claimed or AgentNodeRunStatus.Running))
                     {
@@ -593,4 +690,45 @@ internal sealed class AgentDurableTaskClaimStore(
         new(
             value,
             AuditEntries: auditEntry is null ? null : [auditEntry]);
+
+    private static AuditLogEntry CreatePreClaimFinalizationReconciliationAudit(
+        AgentTaskRunQueueItem queueItem,
+        AgentTask task,
+        AgentTaskRunAttempt attempt,
+        AICopilot.Core.AiGateway.Ids.ApprovalRequestId approvalRequestId,
+        string safeMessage,
+        DateTimeOffset detectedAtUtc)
+    {
+        return new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            ActionGroup = AuditActionGroups.AiGateway,
+            ActionCode = "Agent.FinalizationReconciliationRequired",
+            TargetType = "ApprovalRequest",
+            TargetId = approvalRequestId.Value.ToString(),
+            TargetName = "FinalOutput",
+            OperatorUserId = null,
+            OperatorUserName = "System",
+            OperatorRoleName = null,
+            Result = AuditResults.Rejected,
+            Summary = safeMessage,
+            ChangedFields = AuditMetadataCodec.Combine(
+                changedFields: null,
+                new Dictionary<string, string>
+                {
+                    ["taskId"] = task.Id.Value.ToString(),
+                    ["taskCode"] = task.TaskCode,
+                    ["runAttemptId"] = attempt.Id.Value.ToString(),
+                    ["queueItemId"] = queueItem.Id.Value.ToString(),
+                    ["taskFencingToken"] = queueItem.TaskFencingToken.ToString(),
+                    ["reconciliationPolicy"] =
+                        "manual-final-output-authority-conflict-pre-claim-v1",
+                    ["lastConfirmedStage"] =
+                        "approval-decision-committed-finalization-node-not-claimed",
+                    ["integrityStatus"] = "authority-conflict",
+                    ["failureReason"] = AppProblemCodes.AgentFinalizationStateConflict
+                }),
+            CreatedAt = detectedAtUtc.UtcDateTime
+        };
+    }
 }

@@ -276,6 +276,12 @@ public interface IAgentDurableTaskClaimStore
         DateTimeOffset startedAtUtc,
         CancellationToken cancellationToken = default);
 
+    Task<AgentFencedWriteResult> TryRequireFinalizationReconciliationAsync(
+        DurableTaskClaim claim,
+        string safeMessage,
+        DateTimeOffset detectedAtUtc,
+        CancellationToken cancellationToken = default);
+
     Task<AgentFencedWriteResult> TryCompleteAsync(
         DurableTaskClaim claim,
         AgentTaskRunQueueStatus terminalStatus,

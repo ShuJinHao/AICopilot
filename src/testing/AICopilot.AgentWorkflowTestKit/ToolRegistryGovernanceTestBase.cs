@@ -534,6 +534,17 @@ public abstract class ToolRegistryGovernanceTestBase
             return Task.FromResult(AgentFencedWriteResult.Succeeded);
         }
 
+        public Task<AgentFencedWriteResult> TryRequireFinalizationReconciliationAsync(
+            DurableTaskClaim claim,
+            string safeMessage,
+            DateTimeOffset detectedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            claim.Task.RequireReconciliation(detectedAtUtc);
+            claim.RunAttempt.RequireReconciliation(detectedAtUtc, safeMessage);
+            return Task.FromResult(AgentFencedWriteResult.Succeeded);
+        }
+
         public Task<AgentFencedWriteResult> TryCompleteAsync(
             DurableTaskClaim claim,
             AgentTaskRunQueueStatus terminalStatus,

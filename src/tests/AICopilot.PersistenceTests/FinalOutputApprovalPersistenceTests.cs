@@ -570,6 +570,200 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
     }
 
     [Fact]
+    public async Task ApprovalResumeRuntime_ShouldReconcileSourceDriftBeforeFinalNodeClaim()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before source drift",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        DurableTaskClaim claim;
+        using (var claimScope = host.Services.CreateScope())
+        {
+            claim = (await claimScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .TryClaimNextAsync(
+                    "final-output-pre-claim-drift-test",
+                    TimeSpan.FromMinutes(5)))!;
+            claim.Should().NotBeNull();
+        }
+
+        await ApplyDriftAsync(
+            database.ConnectionString,
+            fileStore,
+            seeded,
+            "source-file",
+            apply: true);
+        using (var verificationScope = host.Services.CreateScope())
+        {
+            var context = verificationScope.ServiceProvider
+                .GetRequiredService<AiGatewayDbContext>();
+            var task = await context.AgentTasks
+                .Include(item => item.Steps)
+                .SingleAsync(item => item.Id == seeded.TaskId);
+            var workspace = await context.ArtifactWorkspaces
+                .Include(item => item.Artifacts)
+                .SingleAsync(item => item.Id == seeded.WorkspaceId);
+            var approval = await context.ApprovalRequests
+                .SingleAsync(item => item.Id == seeded.ApprovalId);
+            var verified = await verificationScope.ServiceProvider
+                .GetRequiredService<FinalOutputApprovalCoordinator>()
+                .VerifyCheckpointAsync(
+                    task,
+                    workspace,
+                    approval,
+                    allowApprovedCheckpoint: true,
+                    CancellationToken.None);
+            verified.IsSuccess.Should().BeFalse();
+            verified.Errors!
+                .OfType<ApiProblemDescriptor>()
+                .Should()
+                .ContainSingle(problem =>
+                    problem.Code == AppProblemCodes.AgentFinalizationStateConflict);
+        }
+
+        using (var workerScope = host.Services.CreateScope())
+        {
+            await CreateFinalizationConflictWorker(workerScope.ServiceProvider)
+                .ExecuteClaimAsync(claim, CancellationToken.None);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.AgentTasks.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.TaskId))
+            .Should()
+            .Match<AgentTask>(task =>
+                task.Status == AgentTaskStatus.ReconciliationRequired &&
+                task.ActiveRunAttemptId == seeded.RunAttemptId);
+        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.RunAttemptId))
+            .Status.Should().Be(AgentTaskRunAttemptStatus.ReconciliationRequired);
+        var queue = await verification.AgentTaskRunQueueItems
+            .AsNoTracking()
+            .SingleAsync(item => item.SourceApprovalRequestId == seeded.ApprovalId);
+        queue.Status.Should().Be(AgentTaskRunQueueStatus.Started);
+        queue.CompletedAt.Should().BeNull();
+        queue.FailureCode.Should().BeNull();
+        var finalNode = await verification.Set<AgentNodeRun>()
+            .AsNoTracking()
+            .SingleAsync(node => node.Id == seeded.FinalNodeRunId);
+        finalNode.Status.Should().Be(AgentNodeRunStatus.WaitingApproval);
+        (await verification.ArtifactFileSetOperations.CountAsync()).Should().Be(0);
+        (await verification.ArtifactWorkspaces.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.WorkspaceId))
+            .Status.Should().Be(ArtifactWorkspaceStatus.Active);
+
+        using (var duplicateScope = host.Services.CreateScope())
+        {
+            (await duplicateScope.ServiceProvider
+                    .GetRequiredService<IAgentDurableTaskClaimStore>()
+                    .TryRequireFinalizationReconciliationAsync(
+                        claim,
+                        "Approved final-output source bytes drifted before NodeRun claim.",
+                        DateTimeOffset.UtcNow))
+                .Should()
+                .Be(AgentFencedWriteResult.Duplicate);
+        }
+
+        using (var recoveryScope = host.Services.CreateScope())
+        {
+            (await recoveryScope.ServiceProvider
+                    .GetRequiredService<IAgentDurableTaskClaimStore>()
+                    .RecoverExpiredStartedAsync(
+                        DateTimeOffset.UtcNow.AddHours(1),
+                        maxItems: 32))
+                .Should()
+                .Be(0);
+        }
+
+        await using var audit = new AuditDbContext(
+            PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString));
+        (await audit.AuditLogs.AsNoTracking().CountAsync(entry =>
+                entry.ActionCode == "Agent.FinalizationReconciliationRequired" &&
+                entry.TargetType == "ApprovalRequest" &&
+                entry.TargetId == seeded.ApprovalId.Value.ToString()))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ApprovalResumeRuntime_ShouldNotFailClaimWhenReconciliationAuditRollsBack()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before reconciliation audit rollback",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        DurableTaskClaim claim;
+        using (var claimScope = host.Services.CreateScope())
+        {
+            claim = (await claimScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .TryClaimNextAsync(
+                    "final-output-pre-claim-audit-test",
+                    TimeSpan.FromMinutes(5)))!;
+            claim.Should().NotBeNull();
+        }
+
+        await ApplyDriftAsync(
+            database.ConnectionString,
+            fileStore,
+            seeded,
+            "source-file",
+            apply: true);
+        await InstallRejectFinalizationAuditTriggerAsync(database.ConnectionString);
+        using (var workerScope = host.Services.CreateScope())
+        {
+            await CreateFinalizationConflictWorker(workerScope.ServiceProvider)
+                .ExecuteClaimAsync(claim, CancellationToken.None);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.AgentTasks.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.TaskId))
+            .Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.RunAttemptId))
+            .Status.Should().Be(AgentTaskRunAttemptStatus.Running);
+        var queue = await verification.AgentTaskRunQueueItems
+            .AsNoTracking()
+            .SingleAsync(item => item.SourceApprovalRequestId == seeded.ApprovalId);
+        queue.Status.Should().Be(AgentTaskRunQueueStatus.Started);
+        queue.CompletedAt.Should().BeNull();
+        queue.FailureCode.Should().BeNull();
+        await using var audit = new AuditDbContext(
+            PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString));
+        (await audit.AuditLogs.AsNoTracking().CountAsync(entry =>
+                entry.ActionCode == "Agent.FinalizationReconciliationRequired"))
+            .Should().Be(0);
+    }
+
+    [Fact]
     public async Task ApprovalResumeClaim_ShouldRollbackRetirementWhenReconciliationAuditFails()
     {
         await using var database = await CreateMigratedDatabaseAsync();
@@ -1313,6 +1507,30 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             """);
     }
 
+    private static async Task InstallRejectFinalizationAuditTriggerAsync(
+        string connectionString)
+    {
+        await using var context = CreateAiGatewayContext(connectionString);
+        await context.Database.ExecuteSqlRawAsync(
+            """
+            CREATE FUNCTION public.reject_runtime_finalization_reconciliation_audit()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $function$
+            BEGIN
+                RAISE EXCEPTION 'simulated non-transient runtime reconciliation audit failure'
+                    USING ERRCODE = '23514';
+            END;
+            $function$;
+
+            CREATE TRIGGER reject_runtime_finalization_reconciliation_audit
+            BEFORE INSERT ON public.audit_logs
+            FOR EACH ROW
+            WHEN (NEW.action_code = 'Agent.FinalizationReconciliationRequired')
+            EXECUTE FUNCTION public.reject_runtime_finalization_reconciliation_audit();
+            """);
+    }
+
     private static async Task<SeededFinalOutput> SeedAndPrepareAsync(
         string connectionString,
         ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore fileStore)
@@ -1505,6 +1723,19 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
         return builder.Build();
     }
 
+    private static AgentTaskRunQueueWorkerCoordinator CreateFinalizationConflictWorker(
+        IServiceProvider services)
+    {
+        return new AgentTaskRunQueueWorkerCoordinator(
+            services.GetRequiredService<IAgentTaskRunQueueStore>(),
+            services.GetRequiredService<IRepository<AgentTask>>(),
+            services.GetRequiredService<IAgentTaskRunAttemptStore>(),
+            services.GetRequiredService<IAgentTaskRunQueue>(),
+            new FinalizationConflictRuntime(),
+            durableTaskClaimCoordinator:
+                services.GetRequiredService<DurableTaskClaimCoordinator>());
+    }
+
     private static AgentPlanNodeDocument CreateFinalizationNodeContract(
         AgentNodeRun finalNode,
         IReadOnlyCollection<AgentEvidenceRecord> parentEvidence)
@@ -1681,6 +1912,22 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
         byte[] SourceBytes,
         FinalOutputApprovalProof Proof,
         ApprovalRequestId ApprovalId);
+
+    private sealed class FinalizationConflictRuntime : IAgentTaskRuntime
+    {
+        public Task<Result<AgentTask>> RunAsync(
+            AgentTask task,
+            CancellationToken cancellationToken = default) =>
+            RunAsync(task, AgentTaskRunTriggerType.ApprovalResume, cancellationToken);
+
+        public Task<Result<AgentTask>> RunAsync(
+            AgentTask task,
+            AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<Result<AgentTask>>(Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentFinalizationStateConflict,
+                "Approved final-output source bytes drifted before NodeRun claim.")));
+    }
 
     private sealed class ExpiringArtifactFileSetStore(
         string connectionString,
