@@ -1,5 +1,6 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,6 +20,7 @@ internal static class AgentExecutionRowLock
             var type when type == typeof(AgentTaskRunAttempt) => ("agent_task_run_attempts", "attempt"),
             var type when type == typeof(AgentTaskRunQueueItem) => ("agent_task_run_queue_items", "queue_item"),
             var type when type == typeof(AgentNodeRun) => ("agent_node_runs", "node"),
+            var type when type == typeof(Session) => ("sessions", "session"),
             _ => throw new InvalidOperationException($"Unsupported agent execution row lock type '{typeof(TEntity).FullName}'.")
         };
         var sql = $"SELECT {alias}.*, {alias}.xmin FROM aigateway.{table} AS {alias} WHERE id = {{0}} FOR UPDATE";

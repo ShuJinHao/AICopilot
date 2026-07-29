@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.Services.Contracts;
 using Microsoft.EntityFrameworkCore;
 
@@ -6,7 +7,8 @@ namespace AICopilot.EntityFrameworkCore.Transactions;
 
 internal readonly record struct AgentExecutionTransactionAttempt<TResult>(
     TResult Result,
-    int DirectAffectedRows = 0);
+    int DirectAffectedRows = 0,
+    IReadOnlyCollection<AuditLogEntry>? AuditEntries = null);
 
 internal sealed class AgentExecutionTransactionRunner(
     AiGatewayDbContext dbContext,
@@ -55,6 +57,13 @@ internal sealed class AgentExecutionTransactionRunner(
             var affectedRows = await dbContext.SaveChangesAsync(
                 acceptAllChangesOnSuccess: false,
                 cancellationToken);
+            if (attempt.AuditEntries is { Count: > 0 })
+            {
+                await using var auditDbContext =
+                    await context.CreateAuditDbContextAsync(cancellationToken);
+                auditDbContext.AuditLogs.AddRange(attempt.AuditEntries);
+                affectedRows += await auditDbContext.SaveChangesAsync(cancellationToken);
+            }
 
             var hasAgentTaskWrites = dbContext.ChangeTracker
                 .Entries()

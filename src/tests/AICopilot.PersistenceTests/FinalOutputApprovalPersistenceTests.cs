@@ -9,6 +9,7 @@ using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.SharedKernel.Result;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +53,13 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
         var approval = await verification.ApprovalRequests.AsNoTracking().SingleAsync();
         approval.HasValidFinalOutputProof().Should().BeTrue();
         approval.Status.Should().Be(AgentApprovalStatus.Pending);
+        var requestedProjection = await verification.MessageEvents
+            .AsNoTracking()
+            .SingleAsync(messageEvent =>
+                messageEvent.ApprovalRequestId == approval.Id &&
+                messageEvent.EventType == MessageEventType.ApprovalRequested);
+        requestedProjection.AgentTaskId.Should().Be(seeded.TaskId);
+        requestedProjection.ArtifactWorkspaceId.Should().Be(seeded.WorkspaceId);
         (await verification.AgentTaskRunQueueItems.CountAsync(item =>
             item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)).Should().Be(0);
         var task = await verification.AgentTasks
@@ -63,6 +71,12 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             .Status.Should().Be(AgentStepStatus.WaitingApproval);
         var attempt = await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync();
         attempt.Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
+        await using var audit = new AuditDbContext(
+            PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString));
+        (await audit.AuditLogs.AsNoTracking().CountAsync(entry =>
+                entry.ActionCode == "Agent.FinalReviewSubmitted" &&
+                entry.TargetId == approval.Id.Value.ToString()))
+            .Should().Be(1);
     }
 
     [Fact]
@@ -103,6 +117,10 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
         var approval = await verification.ApprovalRequests.AsNoTracking().SingleAsync();
         approval.Status.Should().Be(AgentApprovalStatus.Approved);
         approval.HasValidFinalOutputDecisionProof().Should().BeTrue();
+        (await verification.MessageEvents.AsNoTracking().CountAsync(messageEvent =>
+                messageEvent.ApprovalRequestId == approval.Id &&
+                messageEvent.EventType == MessageEventType.ApprovalDecided))
+            .Should().Be(1);
         var resume = await verification.AgentTaskRunQueueItems
             .AsNoTracking()
             .Where(item => item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)
@@ -124,6 +142,12 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
         finalNode.Status.Should().Be(AgentNodeRunStatus.WaitingApproval);
         (await verification.ArtifactWorkspaces.AsNoTracking().SingleAsync())
             .Status.Should().Be(ArtifactWorkspaceStatus.Active);
+        await using var audit = new AuditDbContext(
+            PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString));
+        (await audit.AuditLogs.AsNoTracking().CountAsync(entry =>
+                entry.ActionCode == "Agent.ApprovalDecision" &&
+                entry.TargetId == approval.Id.Value.ToString()))
+            .Should().Be(1);
     }
 
     [Theory]
@@ -169,7 +193,7 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
                 "available-at" => await mutation.Database.ExecuteSqlRawAsync(
                     """
                     UPDATE aigateway.agent_task_run_queue_items
-                    SET available_at = available_at + INTERVAL '1 second'
+                    SET available_at = available_at - INTERVAL '1 second'
                     WHERE source_approval_request_id IS NOT NULL
                     """),
                 _ => throw new ArgumentOutOfRangeException(nameof(drift), drift, null)
@@ -177,6 +201,9 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             affected.Should().Be(1);
         }
 
+        var laterTaskId = await SeedQueuedTaskAsync(
+            database.ConnectionString,
+            seeded.UserId);
         using (var claimScope = host.Services.CreateScope())
         {
             var claim = await claimScope.ServiceProvider
@@ -188,13 +215,26 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
         }
 
         await using var verification = CreateAiGatewayContext(database.ConnectionString);
-        (await verification.AgentTasks.AsNoTracking().SingleAsync())
-            .Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
-        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync())
-            .Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
-        (await verification.AgentTaskRunQueueItems.AsNoTracking().SingleAsync(item =>
-                item.SourceApprovalRequestId == seeded.ApprovalId))
-            .Status.Should().Be(AgentTaskRunQueueStatus.Queued);
+        (await verification.AgentTasks.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.TaskId))
+            .Status.Should().Be(AgentTaskStatus.ReconciliationRequired);
+        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.RunAttemptId))
+            .Status.Should().Be(AgentTaskRunAttemptStatus.ReconciliationRequired);
+        var poison = await verification.AgentTaskRunQueueItems
+            .AsNoTracking()
+            .SingleAsync(item => item.SourceApprovalRequestId == seeded.ApprovalId);
+        poison.Status.Should().Be(AgentTaskRunQueueStatus.DeadLetter);
+        poison.FailureCode.Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+
+        using var nextClaimScope = host.Services.CreateScope();
+        var nextClaim = await nextClaimScope.ServiceProvider
+            .GetRequiredService<IAgentDurableTaskClaimStore>()
+            .TryClaimNextAsync(
+                "final-output-next-queue-test",
+                TimeSpan.FromMinutes(5));
+        nextClaim.Should().NotBeNull();
+        nextClaim!.Task.Id.Should().Be(laterTaskId);
     }
 
     [Fact]
@@ -794,6 +834,56 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             sourceBytes,
             authority.Proof,
             ApprovalId: default);
+    }
+
+    private static async Task<AgentTaskId> SeedQueuedTaskAsync(
+        string connectionString,
+        Guid userId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var session = new Session(userId, ConversationTemplateId.New());
+        var planJson = AgentPlanV2TestData.Create(
+            [
+                new AgentPlanV2TestStep(
+                    "Generate governed report",
+                    "Generate a governed report artifact.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_markdown_report")
+            ],
+            executable: true,
+            taskType: AgentTaskType.ReportGeneration,
+            knowledgeBaseIds: null);
+        var task = new AgentTask(
+            session.Id,
+            userId,
+            "Later durable task",
+            "Prove a poison approval queue cannot block later tasks.",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
+            null,
+            planJson,
+            now);
+        var steps = AgentPlanV2TestData.AddTrackedPlanSteps(task, planJson, now);
+        task.ConfirmExecutablePlan(
+            task.PlanJson,
+            steps.Where(step => step.RequiresApproval)
+                .Select(step => step.StepIndex)
+                .ToArray(),
+            now);
+        task.ApprovePlan(now);
+        task.MarkQueued(now);
+        var queue = new AgentTaskRunQueueItem(
+            task.Id,
+            AgentTaskRunTriggerType.Manual,
+            userId,
+            now);
+
+        await using var context = CreateAiGatewayContext(connectionString);
+        context.Sessions.Add(session);
+        context.AgentTasks.Add(task);
+        context.AgentTaskRunQueueItems.Add(queue);
+        await context.SaveChangesAsync();
+        return task.Id;
     }
 
     private static IHost CreateStoreHost(

@@ -126,6 +126,12 @@ public sealed class MessageEventConfiguration : IEntityTypeConfiguration<Message
         builder.HasIndex(item => item.ApprovalRequestId)
             .HasDatabaseName("ix_message_events_approval_request_id");
 
+        builder.HasIndex(item => new { item.ApprovalRequestId, item.EventType })
+            .IsUnique()
+            .HasFilter(
+                "approval_request_id IS NOT NULL AND event_type IN ('ApprovalRequested', 'ApprovalDecided')")
+            .HasDatabaseName("ux_message_events_approval_lifecycle_event");
+
         builder.HasIndex(item => item.ArtifactWorkspaceId)
             .HasDatabaseName("ix_message_events_artifact_workspace_id");
 

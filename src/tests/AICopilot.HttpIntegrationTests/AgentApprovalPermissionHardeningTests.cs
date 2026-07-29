@@ -5,6 +5,7 @@ using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.EntityFrameworkCore;
@@ -136,8 +137,9 @@ public sealed class AgentApprovalPermissionHardeningTests
             executable: true,
             taskType: AgentTaskType.DataAnalysis,
             knowledgeBaseIds: null);
+        var session = new Session(ownerId, ConversationTemplateId.New());
         var task = new AgentTask(
-            new SessionId(Guid.NewGuid()),
+            session.Id,
             ownerId,
             "Tool approval permission hardening",
             "Tool approval permission hardening",
@@ -160,6 +162,7 @@ public sealed class AgentApprovalPermissionHardeningTests
             ownerId,
             now);
 
+        dbContext.Sessions.Add(session);
         dbContext.AgentTasks.Add(task);
         dbContext.ApprovalRequests.Add(approval);
         await dbContext.SaveChangesAsync();
@@ -221,8 +224,9 @@ public sealed class AgentApprovalPermissionHardeningTests
             executable: true,
             taskType: AgentTaskType.ReportGeneration,
             knowledgeBaseIds: null);
+        var session = new Session(ownerId, ConversationTemplateId.New());
         var task = new AgentTask(
-            new SessionId(Guid.NewGuid()),
+            session.Id,
             ownerId,
             "Approval permission final output",
             "Approval permission final output",
@@ -327,6 +331,7 @@ public sealed class AgentApprovalPermissionHardeningTests
             dbContext.ApprovalRequests.Add(finalApproval);
         }
 
+        dbContext.Sessions.Add(session);
         dbContext.AgentTasks.Add(task);
         dbContext.ArtifactWorkspaces.Add(workspace);
         dbContext.AgentTaskRunAttempts.Add(authority.RunAttempt);

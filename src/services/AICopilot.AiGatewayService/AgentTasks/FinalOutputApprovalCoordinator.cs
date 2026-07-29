@@ -90,24 +90,6 @@ public sealed class FinalOutputApprovalCoordinator(
         var approval = prepared.Approval!;
         var preparedTask = prepared.Task!;
         var preparedWorkspace = prepared.Workspace!;
-        if (prepared.StateChanged)
-        {
-            await auditRecorder.RecordFinalReviewSubmittedAsync(
-                preparedTask,
-                preparedWorkspace,
-                approval,
-                cancellationToken);
-            if (timelineProjectionWriter is not null)
-            {
-                await timelineProjectionWriter.StageApprovalRequestedAsync(
-                    preparedTask,
-                    approval,
-                    cancellationToken);
-            }
-
-            await approvalRepository.SaveChangesAsync(cancellationToken);
-        }
-
         return Result.Success(new FinalOutputApprovalPreparationOutcome(
             approval,
             preparedTask,
@@ -272,6 +254,13 @@ public sealed class FinalOutputApprovalCoordinator(
         bool? isApproved,
         CancellationToken cancellationToken)
     {
+        if (command.StateChanged &&
+            command.Status is FinalOutputApprovalCommandStatus.Approved
+                or FinalOutputApprovalCommandStatus.Rejected)
+        {
+            return;
+        }
+
         if (command.Approval is not null && command.Task is not null)
         {
             var auditResult = command.Status switch

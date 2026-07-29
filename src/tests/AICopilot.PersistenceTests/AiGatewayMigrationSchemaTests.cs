@@ -106,6 +106,17 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
                 "ux_agent_task_run_queue_items_source_approval",
                 StringComparison.OrdinalIgnoreCase) &&
             definition.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase));
+        var messageEventIndexes = await QueryIndexDefinitionsAsync(
+            connection,
+            "aigateway",
+            "message_events");
+        messageEventIndexes.Should().Contain(definition =>
+            definition.Contains(
+                "ux_message_events_approval_lifecycle_event",
+                StringComparison.OrdinalIgnoreCase) &&
+            definition.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase) &&
+            definition.Contains("approval_request_id", StringComparison.OrdinalIgnoreCase) &&
+            definition.Contains("event_type", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]

@@ -3,6 +3,7 @@ using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Result;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore.Repository;
@@ -76,6 +77,7 @@ internal sealed class AgentDurableTaskClaimStore(
                     (queueItem.TriggerType != AgentTaskRunTriggerType.ApprovalResume ||
                      attempt is null))
                 {
+                    RetireInvalidApprovalResume(queueItem, task, attempt, now);
                     return Attempt<DurableTaskClaim?>(null);
                 }
 
@@ -113,6 +115,7 @@ internal sealed class AgentDurableTaskClaimStore(
                     if (queueItem.SourceApprovalRequestId is not null &&
                         !preserveFinalOutputFence)
                     {
+                        RetireInvalidApprovalResume(queueItem, task, attempt, now);
                         return Attempt<DurableTaskClaim?>(null);
                     }
 
@@ -182,6 +185,34 @@ internal sealed class AgentDurableTaskClaimStore(
                queueItem.RequestedBy == approval.ApprovedBy &&
                queueItem.CreatedAt == approval.ApprovedAt &&
                queueItem.AvailableAt == approval.ApprovedAt;
+    }
+
+    private static void RetireInvalidApprovalResume(
+        AgentTaskRunQueueItem queueItem,
+        AgentTask task,
+        AgentTaskRunAttempt? attempt,
+        DateTimeOffset nowUtc)
+    {
+        const string safeMessage =
+            "Approval resume authority is inconsistent and requires reconciliation.";
+        queueItem.MarkDeadLetter(
+            AppProblemCodes.AgentFinalizationStateConflict,
+            safeMessage,
+            nowUtc);
+        if (task.Status is AgentTaskStatus.Running
+            or AgentTaskStatus.GeneratingArtifacts
+            or AgentTaskStatus.WaitingToolApproval
+            or AgentTaskStatus.WaitingFinalApproval)
+        {
+            task.RequireReconciliation(nowUtc);
+        }
+
+        if (attempt is not null &&
+            !attempt.IsTerminal &&
+            attempt.Status != AgentTaskRunAttemptStatus.ReconciliationRequired)
+        {
+            attempt.RequireReconciliation(nowUtc, safeMessage);
+        }
     }
 
     public Task<AgentFencedWriteResult> TryMarkStartedAsync(

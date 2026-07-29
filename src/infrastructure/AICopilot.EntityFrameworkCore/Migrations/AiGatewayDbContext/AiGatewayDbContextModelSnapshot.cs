@@ -2137,6 +2137,11 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                     b.HasIndex("ApprovalRequestId")
                         .HasDatabaseName("ix_message_events_approval_request_id");
 
+                    b.HasIndex("ApprovalRequestId", "EventType")
+                        .IsUnique()
+                        .HasDatabaseName("ux_message_events_approval_lifecycle_event")
+                        .HasFilter("approval_request_id IS NOT NULL AND event_type IN ('ApprovalRequested', 'ApprovalDecided')");
+
                     b.HasIndex("ArtifactId")
                         .HasDatabaseName("ix_message_events_artifact_id");
 

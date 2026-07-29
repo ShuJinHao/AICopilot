@@ -4,8 +4,10 @@ using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
+using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
@@ -16,7 +18,8 @@ namespace AICopilot.EntityFrameworkCore.Repository;
 
 internal sealed class FinalOutputApprovalStore(
     AgentExecutionTransactionRunner transactionRunner,
-    IArtifactWorkspaceFileStore fileStore)
+    IArtifactWorkspaceFileStore fileStore,
+    ICurrentUser? currentUser = null)
     : IFinalOutputApprovalStore
 {
     public Task<FinalOutputApprovalCommandResult> PrepareAsync(
@@ -69,6 +72,18 @@ internal sealed class FinalOutputApprovalStore(
                         return Attempt(Conflict(authority, existing));
                     }
 
+                    if (existing.Status == AgentApprovalStatus.Pending &&
+                        IsPaused(authority) &&
+                        !await EnsureApprovalTimelineProjectionAsync(
+                            context,
+                            authority,
+                            existing,
+                            MessageEventType.ApprovalRequested,
+                            token))
+                    {
+                        return Attempt(Conflict(authority, existing));
+                    }
+
                     return existing.Status switch
                     {
                         AgentApprovalStatus.Pending when IsPaused(authority) =>
@@ -107,6 +122,17 @@ internal sealed class FinalOutputApprovalStore(
                     preparation.CreatedAtUtc,
                     preparation.Proof);
                 context.ApprovalRequests.Add(approval);
+                if (!await EnsureApprovalTimelineProjectionAsync(
+                        context,
+                        authority,
+                        approval,
+                        MessageEventType.ApprovalRequested,
+                        token))
+                {
+                    throw new InvalidOperationException(
+                        "Final-output approval timeline authority is missing or inconsistent.");
+                }
+
                 if (authority.Task.Status != AgentTaskStatus.WorkspaceReady)
                 {
                     authority.Task.MarkWorkspaceReady(preparation.CreatedAtUtc);
@@ -119,12 +145,21 @@ internal sealed class FinalOutputApprovalStore(
                 authority.Task.ReleaseRunLease(
                     preparation.CreatedAtUtc,
                     clearActiveAttempt: false);
-                return Attempt(Result(
-                    FinalOutputApprovalCommandStatus.Created,
-                    authority,
-                    approval,
-                    queueItem: null,
-                    stateChanged: true));
+                return Attempt(
+                    Result(
+                        FinalOutputApprovalCommandStatus.Created,
+                        authority,
+                        approval,
+                        queueItem: null,
+                        stateChanged: true),
+                    CreateAuditEntry(
+                        approval,
+                        authority,
+                        preparation.RequestedBy,
+                        AuditResults.Succeeded,
+                        "Agent.FinalReviewSubmitted",
+                        "Workspace final review submitted and is waiting for approval.",
+                        preparation.CreatedAtUtc));
             },
             cancellationToken);
     }
@@ -229,6 +264,17 @@ internal sealed class FinalOutputApprovalStore(
                         decision.Comment,
                         decision.DecidedAtUtc);
                     authority.FinalStep.Approve();
+                    if (!await EnsureApprovalTimelineProjectionAsync(
+                            context,
+                            authority,
+                            approval,
+                            MessageEventType.ApprovalDecided,
+                            token))
+                    {
+                        throw new InvalidOperationException(
+                            "Final-output approval decision timeline authority is missing or inconsistent.");
+                    }
+
                     var queueItem = new AgentTaskRunQueueItem(
                         task.Id,
                         AgentTaskRunTriggerType.ApprovalResume,
@@ -236,18 +282,38 @@ internal sealed class FinalOutputApprovalStore(
                         decision.DecidedAtUtc,
                         sourceApprovalRequestId: approval.Id);
                     context.AgentTaskRunQueueItems.Add(queueItem);
-                    return Attempt(Result(
-                        FinalOutputApprovalCommandStatus.Approved,
-                        authority,
-                        approval,
-                        queueItem,
-                        stateChanged: true));
+                    return Attempt(
+                        Result(
+                            FinalOutputApprovalCommandStatus.Approved,
+                            authority,
+                            approval,
+                            queueItem,
+                            stateChanged: true),
+                        CreateAuditEntry(
+                            approval,
+                            authority,
+                            decision.DecidedBy,
+                            AuditResults.Succeeded,
+                            "Agent.ApprovalDecision",
+                            "Final-output approval decision committed with one durable resume queue item.",
+                            decision.DecidedAtUtc));
                 }
 
                 approval.Reject(
                     decision.DecidedBy,
                     decision.Comment,
                     decision.DecidedAtUtc);
+                if (!await EnsureApprovalTimelineProjectionAsync(
+                        context,
+                        authority,
+                        approval,
+                        MessageEventType.ApprovalDecided,
+                        token))
+                {
+                    throw new InvalidOperationException(
+                        "Final-output approval decision timeline authority is missing or inconsistent.");
+                }
+
                 const string rejection = "Final output approval was rejected.";
                 authority.FinalStep.Fail(rejection, decision.DecidedAtUtc);
                 authority.FinalNode.CancelBeforeExecution(rejection, decision.DecidedAtUtc);
@@ -256,14 +322,124 @@ internal sealed class FinalOutputApprovalStore(
                     rejection,
                     decision.DecidedAtUtc);
                 task.Reject(rejection, decision.DecidedAtUtc);
-                return Attempt(Result(
-                    FinalOutputApprovalCommandStatus.Rejected,
-                    authority,
-                    approval,
-                    queueItem: null,
-                    stateChanged: true));
+                return Attempt(
+                    Result(
+                        FinalOutputApprovalCommandStatus.Rejected,
+                        authority,
+                        approval,
+                        queueItem: null,
+                        stateChanged: true),
+                    CreateAuditEntry(
+                        approval,
+                        authority,
+                        decision.DecidedBy,
+                        AuditResults.Rejected,
+                        "Agent.ApprovalDecision",
+                        "Final-output rejection committed and terminal task state recorded.",
+                        decision.DecidedAtUtc));
             },
             cancellationToken);
+    }
+
+    private async Task<bool> EnsureApprovalTimelineProjectionAsync(
+        AiGatewayDbContext context,
+        LockedAuthority authority,
+        ApprovalRequest approval,
+        MessageEventType eventType,
+        CancellationToken cancellationToken)
+    {
+        var existing = await context.MessageEvents
+            .Where(messageEvent =>
+                messageEvent.ApprovalRequestId == approval.Id &&
+                messageEvent.EventType == eventType)
+            .OrderBy(messageEvent => messageEvent.Sequence)
+            .ToArrayAsync(cancellationToken);
+        if (existing.Length > 1)
+        {
+            return false;
+        }
+
+        var expectedCreatedAt = eventType == MessageEventType.ApprovalRequested
+            ? approval.CreatedAt
+            : approval.ApprovedAt;
+        if (expectedCreatedAt is null)
+        {
+            return false;
+        }
+
+        if (existing.Length == 1)
+        {
+            var projection = existing[0];
+            return projection.SessionId == authority.Task.SessionId &&
+                   projection.AgentTaskId == authority.Task.Id &&
+                   projection.ApprovalRequestId == approval.Id &&
+                   projection.ArtifactWorkspaceId == authority.Workspace.Id &&
+                   projection.CreatedAt == expectedCreatedAt.Value;
+        }
+
+        var session = await AgentExecutionRowLock.ByIdAsync<Session>(
+            context,
+            authority.Task.SessionId.Value,
+            cancellationToken);
+        if (session is null)
+        {
+            return false;
+        }
+
+        var nextSequence = await context.MessageEvents
+            .Where(messageEvent => messageEvent.SessionId == session.Id)
+            .Select(messageEvent => (int?)messageEvent.Sequence)
+            .MaxAsync(cancellationToken) ?? 0;
+        context.MessageEvents.Add(MessageEvent.FromProjection(
+            session.Id,
+            checked(nextSequence + 1),
+            eventType,
+            expectedCreatedAt.Value,
+            authority.Task.Id,
+            approvalRequestId: approval.Id,
+            artifactWorkspaceId: authority.Workspace.Id));
+        return true;
+    }
+
+    private AuditLogEntry CreateAuditEntry(
+        ApprovalRequest approval,
+        LockedAuthority authority,
+        Guid actorId,
+        string result,
+        string actionCode,
+        string summary,
+        DateTimeOffset createdAtUtc)
+    {
+        var operatorId = currentUser?.Id ?? actorId;
+        var operatorName = string.IsNullOrWhiteSpace(currentUser?.UserName)
+            ? "System"
+            : currentUser.UserName;
+        return new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            ActionGroup = AuditActionGroups.AiGateway,
+            ActionCode = actionCode,
+            TargetType = "ApprovalRequest",
+            TargetId = approval.Id.Value.ToString(),
+            TargetName = approval.ApprovalType.ToString(),
+            OperatorUserId = operatorId.ToString(),
+            OperatorUserName = operatorName!,
+            OperatorRoleName = currentUser?.Role,
+            Result = result,
+            Summary = summary,
+            ChangedFields = AuditMetadataCodec.Combine(
+                changedFields: null,
+                new Dictionary<string, string>
+                {
+                    ["taskId"] = authority.Task.Id.Value.ToString(),
+                    ["taskCode"] = authority.Task.TaskCode,
+                    ["workspaceCode"] = authority.Workspace.WorkspaceCode,
+                    ["approvalType"] = approval.ApprovalType.ToString(),
+                    ["targetId"] = approval.TargetId,
+                    ["approvalStatus"] = approval.Status.ToString()
+                }),
+            CreatedAt = createdAtUtc.UtcDateTime
+        };
     }
 
     private static FinalOutputApprovalCommandResult ResolveExistingDecision(
@@ -740,7 +916,11 @@ internal sealed class FinalOutputApprovalStore(
             .ToArrayAsync(cancellationToken);
 
     private static AgentExecutionTransactionAttempt<FinalOutputApprovalCommandResult> Attempt(
-        FinalOutputApprovalCommandResult result) => new(result);
+        FinalOutputApprovalCommandResult result,
+        AuditLogEntry? auditEntry = null) =>
+        new(
+            result,
+            AuditEntries: auditEntry is null ? null : [auditEntry]);
 
     private static FinalOutputApprovalCommandResult Result(
         FinalOutputApprovalCommandStatus status,

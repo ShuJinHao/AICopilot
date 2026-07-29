@@ -42,6 +42,19 @@ public partial class AddFinalOutputApprovalClosure : Migration
                         ERRCODE = '23514',
                         MESSAGE = 'B03 migration blocked: non-terminal approval, active task, or orphaned proofless final-output data exists.';
                 END IF;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM aigateway.message_events AS event
+                    WHERE event.approval_request_id IS NOT NULL
+                      AND event.event_type IN ('ApprovalRequested', 'ApprovalDecided')
+                    GROUP BY event.approval_request_id, event.event_type
+                    HAVING COUNT(*) > 1
+                ) THEN
+                    RAISE EXCEPTION USING
+                        ERRCODE = '23514',
+                        MESSAGE = 'B03 migration blocked: duplicate approval lifecycle projections require explicit repair.';
+                END IF;
             END
             $b03$;
             """);
@@ -258,6 +271,15 @@ public partial class AddFinalOutputApprovalClosure : Migration
             filter: "approval_type = 'FinalOutput'");
 
         migrationBuilder.CreateIndex(
+            name: "ux_message_events_approval_lifecycle_event",
+            schema: "aigateway",
+            table: "message_events",
+            columns: new[] { "approval_request_id", "event_type" },
+            unique: true,
+            filter:
+            "approval_request_id IS NOT NULL AND event_type IN ('ApprovalRequested', 'ApprovalDecided')");
+
+        migrationBuilder.CreateIndex(
             name: "ux_agent_task_run_queue_items_source_approval",
             schema: "aigateway",
             table: "agent_task_run_queue_items",
@@ -302,6 +324,11 @@ public partial class AddFinalOutputApprovalClosure : Migration
             name: "ux_approval_requests_final_output_task",
             schema: "aigateway",
             table: "approval_requests");
+
+        migrationBuilder.DropIndex(
+            name: "ux_message_events_approval_lifecycle_event",
+            schema: "aigateway",
+            table: "message_events");
 
         migrationBuilder.DropColumn(
             name: "source_approval_request_id",
