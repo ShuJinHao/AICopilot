@@ -147,7 +147,7 @@ Cloud AiRead 设备契约：
 - 产物生成完成只允许进入 `WorkspaceReady → WaitingFinalApproval`；此时草稿、workspace、最终步骤和运行 attempt 均未关单，前端不得显示为完成。
 - 每个任务只能有一个 FinalOutput 审批；不可变 approval proof 必须绑定任务、workspace、唯一末步、活动 attempt、最终 NodeRun、task/node fencing token、`EvidenceSetDigest`、源 manifest digest，以及每个 Artifact 的 producer、版本、路径、MIME、长度和文件 SHA-256。审批后任一权威字段或源文件字节漂移都必须返回 `agent_finalization_state_conflict`。
 - `Approved` / `Rejected` 必须封存绑定 approval proof、创建时间、目标 workspace、决策、决策人、决策时间和安全 comment 的 decision proof。相同决定重复提交幂等返回既有结果；相反或竞争决定返回 `agent_approval_state_conflict`。`Approved` 与唯一、source-bound 的 `ApprovalResume` 队列项必须在同一数据库事务中提交，任务仍保持 `WaitingFinalApproval`；`Rejected` 必须在同一事务中终止最终步骤、最终 NodeRun、活动 attempt 和任务，不得产生恢复队列，后续稳定返回 `agent_approval_rejected`。
-- durable Worker 只有在任务仍为 `WaitingFinalApproval`、唯一最终审批已批准、最终步骤是唯一末步、前置步骤和 Artifact binding 完整、attempt/lease/fencing 与 file-set stage 全部匹配时，才可在同一权威 checkpoint 中完成 Artifact、Workspace、最终步骤、attempt 和任务。`Finalized` 只是该原子关单中的内部过渡，用户可见成功只认 `Completed` 且 `CompletedAt`、最终摘要、manifest/digest 和 final 文件集一致。
+- durable Worker 只有在任务仍为 `WaitingFinalApproval`、唯一最终审批已批准、最终步骤是唯一末步、前置步骤和 Artifact binding 完整、attempt/lease/fencing 与 file-set stage 全部匹配时，才可在同一权威 checkpoint 中完成 Artifact、Workspace、最终步骤、attempt、任务、最终结果 timeline 投影和结构化成功审计。投影或审计写入失败必须回滚关单，禁止先标记 `Completed` 再 best-effort 补写。`Finalized` 只是该原子关单中的内部过渡，用户可见成功只认 `Completed` 且 `CompletedAt`、最终摘要、manifest/digest 和 final 文件集一致。
 - 审批竞争、状态漂移、checkpoint 损坏、文件提交结果未知或恢复证据不完整时不得猜测完成；必须返回稳定冲突/结果未知语义并进入对账或人工处置。旧同步 finalize 入口不再创建队列、复制文件或写终态：已完整关单时只读返回既有结果，其余状态均验证后 fail-closed，由审批事务产生的唯一 durable queue 和 Worker 负责发布。
 - 历史 FinalOutput 终态记录保持只读；缺少 proof 的旧非终态、孤立或重复记录不得自动恢复、补 proof 或猜测绑定。迁移必须在写入新约束前阻断并报告这些脏数据。
 
