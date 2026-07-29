@@ -2835,6 +2835,68 @@ public sealed class AICopilotArchitectureAnalyzerTests
     }
 
     [Fact]
+    public async Task AIARCH006_ShouldRejectFakeDbContextOptionsAssemblyForFormalRunner()
+    {
+        var fakeEntityFrameworkReference = new FixtureAssemblyReference(
+            "Fixture.FakeEntityFrameworkCore",
+            """
+            namespace Microsoft.EntityFrameworkCore
+            {
+                public sealed class DbContextOptions<TContext> { }
+            }
+            """);
+        const string source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            namespace AICopilot.EntityFrameworkCore
+            {
+                public sealed class AiGatewayDbContext { }
+            }
+            namespace AICopilot.EntityFrameworkCore.Transactions
+            {
+                public sealed class AgentExecutionTransactionRunner(
+                    Microsoft.EntityFrameworkCore.DbContextOptions<
+                        AICopilot.EntityFrameworkCore.AiGatewayDbContext> options) { }
+            }
+            namespace AICopilot.EntityFrameworkCore.Repository
+            {
+                public sealed class PostgresModelQuotaReservationStore(
+                    AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner runner)
+                    : AICopilot.Services.Contracts.IModelQuotaReservationStore
+                {
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationOutcome> TryReserveAsync(
+                        AICopilot.Services.Contracts.ModelQuotaReservationRequest request,
+                        CancellationToken cancellationToken = default) =>
+                        Task.FromResult(new AICopilot.Services.Contracts.ModelQuotaReservationOutcome());
+
+                    public Task<AICopilot.Services.Contracts.ModelQuotaReservationResult> SettleAsync(
+                        AICopilot.Services.Contracts.ModelQuotaSettlement settlement,
+                        CancellationToken cancellationToken = default) =>
+                        Task.FromResult(AICopilot.Services.Contracts.ModelQuotaReservationResult.Granted);
+
+                    public Task<int> ReclaimExpiredAsync(
+                        DateTimeOffset nowUtc,
+                        int maxItems,
+                        CancellationToken cancellationToken = default) =>
+                        Task.FromResult(0);
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
+            "AICopilot.EntityFrameworkCore",
+            [source],
+            [fakeEntityFrameworkReference, ServicesContractsReference]);
+
+        diagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId &&
+            diagnostic.GetMessage().Contains(
+                "PostgresModelQuotaReservationStore",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AIARCH006_ShouldRejectCommandAndMcpWriteDispatchFromCloudReadOnlyWorkflows()
     {
         const string source = """

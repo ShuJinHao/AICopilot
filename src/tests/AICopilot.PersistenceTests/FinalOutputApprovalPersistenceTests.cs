@@ -935,6 +935,86 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             .Should().Be(1);
     }
 
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("retargeted")]
+    [InlineData("non-final-output")]
+    public async Task ApprovalResumeRuntime_ShouldReconcileCorruptedSourceApprovalAuthority(
+        string corruption)
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before source authority corruption",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        DurableTaskClaim claim;
+        using (var claimScope = host.Services.CreateScope())
+        {
+            claim = (await claimScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .TryClaimNextAsync(
+                    $"final-output-source-authority-{corruption}",
+                    TimeSpan.FromMinutes(5)))!;
+            claim.Should().NotBeNull();
+        }
+
+        await CorruptClaimedSourceApprovalAsync(
+            database.ConnectionString,
+            seeded.ApprovalId,
+            corruption);
+        using (var workerScope = host.Services.CreateScope())
+        {
+            await CreateFinalizationConflictWorker(workerScope.ServiceProvider)
+                .ExecuteClaimAsync(claim, CancellationToken.None);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.AgentTasks.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.TaskId))
+            .Status.Should().Be(AgentTaskStatus.ReconciliationRequired);
+        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.RunAttemptId))
+            .Status.Should().Be(AgentTaskRunAttemptStatus.ReconciliationRequired);
+        var queue = await verification.AgentTaskRunQueueItems
+            .AsNoTracking()
+            .SingleAsync(item => item.SourceApprovalRequestId == seeded.ApprovalId);
+        queue.Status.Should().Be(AgentTaskRunQueueStatus.Started);
+        queue.CompletedAt.Should().BeNull();
+        queue.FailureCode.Should().BeNull();
+
+        using (var recoveryScope = host.Services.CreateScope())
+        {
+            (await recoveryScope.ServiceProvider
+                    .GetRequiredService<IAgentDurableTaskClaimStore>()
+                    .RecoverExpiredStartedAsync(
+                        DateTimeOffset.UtcNow.AddHours(1),
+                        maxItems: 32))
+                .Should()
+                .Be(0);
+        }
+
+        await using var audit = new AuditDbContext(
+            PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString));
+        (await audit.AuditLogs.AsNoTracking().CountAsync(entry =>
+                entry.ActionCode == "Agent.FinalizationReconciliationRequired" &&
+                entry.TargetType == "ApprovalRequest" &&
+                entry.TargetId == seeded.ApprovalId.Value.ToString()))
+            .Should().Be(1);
+    }
+
     [Fact]
     public async Task ApprovalResumeRuntime_ShouldNotFailClaimWhenReconciliationAuditRollsBack()
     {
@@ -2130,6 +2210,58 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(drift));
+        }
+    }
+
+    private static async Task CorruptClaimedSourceApprovalAsync(
+        string connectionString,
+        ApprovalRequestId approvalRequestId,
+        string corruption)
+    {
+        await using var context = CreateAiGatewayContext(connectionString);
+        switch (corruption)
+        {
+            case "missing":
+                await context.Database.ExecuteSqlRawAsync(
+                    """
+                    ALTER TABLE aigateway.agent_task_run_queue_items
+                    DROP CONSTRAINT fk_agent_task_run_queue_items_source_approval
+                    """);
+                (await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     DELETE FROM aigateway.approval_requests
+                     WHERE id = {approvalRequestId.Value}
+                     """))
+                    .Should()
+                    .Be(1);
+                break;
+            case "retargeted":
+                (await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.approval_requests
+                     SET task_id = {Guid.NewGuid()}
+                     WHERE id = {approvalRequestId.Value}
+                     """))
+                    .Should()
+                    .Be(1);
+                break;
+            case "non-final-output":
+                await context.Database.ExecuteSqlRawAsync(
+                    """
+                    ALTER TABLE aigateway.approval_requests
+                    DROP CONSTRAINT ck_approval_requests_final_output_proof_shape
+                    """);
+                (await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.approval_requests
+                     SET approval_type = 'Artifact'
+                     WHERE id = {approvalRequestId.Value}
+                     """))
+                    .Should()
+                    .Be(1);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(corruption));
         }
     }
 

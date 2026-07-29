@@ -3734,6 +3734,11 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             return "Microsoft.Extensions.DependencyInjection.Abstractions";
         }
 
+        if (fullyQualifiedTypeName is FormalQuotaTypes.DbContextOptions)
+        {
+            return "Microsoft.EntityFrameworkCore";
+        }
+
         if (fullyQualifiedTypeName is "Microsoft.AspNetCore.Identity.UserManager" or
             "Microsoft.AspNetCore.Identity.RoleManager")
         {

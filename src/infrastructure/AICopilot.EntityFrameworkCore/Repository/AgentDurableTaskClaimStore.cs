@@ -342,7 +342,7 @@ internal sealed class AgentDurableTaskClaimStore(
                     return Attempt(AgentFencedWriteResult.StaleFence);
                 }
 
-                var approval = await context.ApprovalRequests
+                _ = await context.ApprovalRequests
                     .FromSqlInterpolated($$"""
                         SELECT approval.*, approval.xmin
                         FROM aigateway.approval_requests AS approval
@@ -350,13 +350,6 @@ internal sealed class AgentDurableTaskClaimStore(
                         FOR UPDATE
                         """)
                     .SingleOrDefaultAsync(token);
-                if (approval is null ||
-                    approval.TaskId != task.Id ||
-                    approval.ApprovalType !=
-                    AICopilot.Core.AiGateway.Aggregates.Approvals.AgentApprovalType.FinalOutput)
-                {
-                    return Attempt(AgentFencedWriteResult.StateConflict);
-                }
 
                 task.RequireReconciliation(detectedAtUtc);
                 attempt.RequireReconciliation(detectedAtUtc, safeMessage);
@@ -366,7 +359,7 @@ internal sealed class AgentDurableTaskClaimStore(
                         queueItem,
                         task,
                         attempt,
-                        approval.Id,
+                        queueItem.SourceApprovalRequestId.Value,
                         safeMessage,
                         detectedAtUtc));
             },
