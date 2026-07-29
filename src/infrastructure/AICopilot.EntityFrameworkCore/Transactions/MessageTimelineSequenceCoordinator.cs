@@ -33,26 +33,38 @@ internal static class MessageTimelineSequenceCoordinator
             .ToArray();
         foreach (var sessionId in sessionIds)
         {
-            var session = await AgentExecutionRowLock.ByIdAsync<Session>(
-                dbContext,
-                sessionId.Value,
-                cancellationToken);
-            if (session is null)
+            var isNewSession = dbContext.ChangeTracker
+                .Entries<Session>()
+                .Any(entry =>
+                    entry.State == EntityState.Added &&
+                    entry.Entity.Id == sessionId);
+            if (!isNewSession)
             {
-                throw new InvalidOperationException(
-                    $"Message timeline session '{sessionId.Value}' no longer exists.");
+                var session = await AgentExecutionRowLock.ByIdAsync<Session>(
+                    dbContext,
+                    sessionId.Value,
+                    cancellationToken);
+                if (session is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Message timeline session '{sessionId.Value}' no longer exists.");
+                }
             }
 
-            var maxEventSequence = await dbContext.MessageEvents
-                .AsNoTracking()
-                .Where(messageEvent => messageEvent.SessionId == sessionId)
-                .Select(messageEvent => (int?)messageEvent.Sequence)
-                .MaxAsync(cancellationToken) ?? 0;
-            var maxMessageSequence = await dbContext.Messages
-                .AsNoTracking()
-                .Where(message => message.SessionId == sessionId)
-                .Select(message => (int?)message.Sequence)
-                .MaxAsync(cancellationToken) ?? 0;
+            var maxEventSequence = isNewSession
+                ? 0
+                : await dbContext.MessageEvents
+                    .AsNoTracking()
+                    .Where(messageEvent => messageEvent.SessionId == sessionId)
+                    .Select(messageEvent => (int?)messageEvent.Sequence)
+                    .MaxAsync(cancellationToken) ?? 0;
+            var maxMessageSequence = isNewSession
+                ? 0
+                : await dbContext.Messages
+                    .AsNoTracking()
+                    .Where(message => message.SessionId == sessionId)
+                    .Select(message => (int?)message.Sequence)
+                    .MaxAsync(cancellationToken) ?? 0;
             var nextSequence = Math.Max(maxEventSequence, maxMessageSequence);
             var assignedMessages = new HashSet<Message>(ReferenceEqualityComparer.Instance);
 
