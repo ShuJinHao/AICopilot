@@ -25,6 +25,68 @@ namespace AICopilot.PersistenceTests;
 public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixture fixture)
 {
     [Fact]
+    public async Task AgentExecutionRetry_ShouldKeepScopedRuntimeAggregateTrackingIsolated()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before execution retry isolation test",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        DurableTaskClaim claim;
+        using (var claimScope = host.Services.CreateScope())
+        {
+            claim = (await claimScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .TryClaimNextAsync(
+                    "final-output-retry-isolation-test",
+                    TimeSpan.FromMinutes(5)))!;
+            claim.Should().NotBeNull();
+            (await claimScope.ServiceProvider
+                    .GetRequiredService<IAgentDurableTaskClaimStore>()
+                    .TryMarkStartedAsync(
+                        claim,
+                        DateTimeOffset.UtcNow))
+                .Should()
+                .Be(AgentFencedWriteResult.Succeeded);
+        }
+
+        await InstallFailFirstFinalizationAuditTriggerAsync(database.ConnectionString);
+        using var scope = host.Services.CreateScope();
+        var scopedContext = scope.ServiceProvider.GetRequiredService<AiGatewayDbContext>();
+        var runtimeTask = await scopedContext.AgentTasks
+            .Include(item => item.Steps)
+            .SingleAsync(item => item.Id == seeded.TaskId);
+
+        var result = await scope.ServiceProvider
+            .GetRequiredService<IAgentDurableTaskClaimStore>()
+            .TryRequireFinalizationReconciliationAsync(
+                claim,
+                "Transient audit retry must not replace scoped runtime aggregate tracking.",
+                DateTimeOffset.UtcNow);
+
+        result.Should().Be(AgentFencedWriteResult.Succeeded);
+        scopedContext.ChangeTracker
+            .Entries<AgentTask>()
+            .Should()
+            .ContainSingle(entry => ReferenceEquals(entry.Entity, runtimeTask));
+        var update = () => scopedContext.Update(runtimeTask);
+        update.Should().NotThrow();
+    }
+
+    [Fact]
     public async Task TimelineSequence_ShouldSerializeConcurrentRepositoryWriters()
     {
         await using var database = await CreateMigratedDatabaseAsync();

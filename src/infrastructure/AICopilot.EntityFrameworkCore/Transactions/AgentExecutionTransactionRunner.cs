@@ -11,7 +11,7 @@ internal readonly record struct AgentExecutionTransactionAttempt<TResult>(
     IReadOnlyCollection<AuditLogEntry>? AuditEntries = null);
 
 internal sealed class AgentExecutionTransactionRunner(
-    AiGatewayDbContext dbContext,
+    DbContextOptions<AiGatewayDbContext> dbContextOptions,
     PersistenceCommitEngine commitEngine,
     IPersistenceCommitScope commitScope,
     IEnumerable<IRepositoryPersistenceAttemptValidator> attemptValidators)
@@ -24,9 +24,13 @@ internal sealed class AgentExecutionTransactionRunner(
         var reservedCommitId = commitScope.CurrentCommitId;
         try
         {
+            await using var isolatedDbContext = new AiGatewayDbContext(dbContextOptions);
             return await commitEngine.CommitAsync(
                 operationName,
-                new Participant<TResult>(dbContext, action, attemptValidators.ToArray()),
+                new Participant<TResult>(
+                    isolatedDbContext,
+                    action,
+                    attemptValidators.ToArray()),
                 cancellationToken,
                 reservedCommitId);
         }
