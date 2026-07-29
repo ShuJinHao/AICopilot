@@ -54,7 +54,8 @@ public abstract class ToolRegistryGovernanceTestBase
         IAuditLogWriter? auditLogWriter = null,
         IBusinessDataSourceProfileRegistry? businessDataSourceProfileRegistry = null,
         IBusinessQueryProviderRegistry? businessQueryProviderRegistry = null,
-        IBusinessQueryContextStore? businessQueryContextStore = null)
+        IBusinessQueryContextStore? businessQueryContextStore = null,
+        FinalOutputApprovalCoordinator? finalOutputApprovalCoordinator = null)
     {
         return new AgentTaskRuntime(
             taskRepository,
@@ -78,7 +79,8 @@ public abstract class ToolRegistryGovernanceTestBase
             freshReadGate ?? AgentPlanV2TestData.CreateMatchingFreshReadGate(),
             businessDataSourceProfileRegistry ?? new FixedBusinessDataSourceProfileRegistry(),
             businessQueryProviderRegistry ?? new ThrowingBusinessQueryProviderRegistry(),
-            businessQueryContextStore ?? new PassthroughBusinessQueryContextStore());
+            businessQueryContextStore ?? new PassthroughBusinessQueryContextStore(),
+            finalOutputApprovalCoordinator);
     }
 
     private sealed class MatchingAgentPlanRuntimeSnapshotVerifier : IAgentPlanRuntimeSnapshotVerifier
@@ -899,6 +901,8 @@ public abstract class ToolRegistryGovernanceTestBase
     {
         public List<T> Items { get; } = [.. initialItems];
 
+        public Action? OnSaveChanges { get; set; }
+
         public T Add(T entity)
         {
             Items.Add(entity);
@@ -916,6 +920,7 @@ public abstract class ToolRegistryGovernanceTestBase
 
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
+            OnSaveChanges?.Invoke();
             return Task.FromResult(1);
         }
 

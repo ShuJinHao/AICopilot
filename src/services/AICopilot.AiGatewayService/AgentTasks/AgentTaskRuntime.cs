@@ -465,6 +465,11 @@ internal sealed class AgentTaskRuntime(
                             "Final-output approval coordinator is unavailable."));
                     }
 
+                    // Final-output preparation re-reads its authority in an isolated
+                    // database transaction. Persist every completed predecessor and
+                    // the approval-waiting final step before asking that transaction
+                    // to seal the immutable proof.
+                    await SaveAsync(task, workspace, attempt, cancellationToken);
                     var finalApprovalResolution = await finalOutputApprovalCoordinator.EnsurePendingAsync(
                         task,
                         workspace,

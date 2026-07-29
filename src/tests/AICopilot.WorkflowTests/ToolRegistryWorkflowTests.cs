@@ -21,6 +21,7 @@ using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Domain;
@@ -153,6 +154,87 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
         approvalRepository.Items.Should().BeEmpty(
             "the non-durable runtime must not recreate the retired final-output approval path");
     }
+
+    [Fact]
+    public async Task AgentTaskRuntime_ShouldPersistCompletedStepsImmediatelyBeforeFinalApprovalPreparation()
+    {
+        var (task, workspace) = CreateApprovedTask("generate_chart_data");
+        var taskRepository = new InMemoryRepository<AgentTask>(task);
+        var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
+        var approvalRepository = new InMemoryRepository<ApprovalRequest>();
+        var runAttemptRepository = new InMemoryAgentTaskRunAttemptStore();
+        var saveSnapshots = new List<(AgentStepStatus Producer, AgentStepStatus Final)>();
+        taskRepository.OnSaveChanges = () =>
+        {
+            var ordered = task.Steps.OrderBy(step => step.StepIndex).ToArray();
+            saveSnapshots.Add((ordered[0].Status, ordered[^1].Status));
+        };
+        var auditWriter = new CapturingAuditLogWriter();
+        var finalOutputApprovalCoordinator = new FinalOutputApprovalCoordinator(
+            new NeverCalledFinalOutputApprovalStore(),
+            new FinalOutputApprovalProofFactory(
+                runAttemptRepository,
+                new EmptyAgentNodeRunStore(),
+                new InMemoryArtifactWorkspaceFileStore()),
+            approvalRepository,
+            workspaceRepository,
+            new InMemoryAgentTaskRunQueueStore(),
+            new AgentAuditRecorder(auditWriter),
+            auditWriter);
+        var runtime = CreateRuntime(
+            taskRepository,
+            workspaceRepository,
+            approvalRepository,
+            new InMemoryToolExecutionAuditStore(),
+            CreateGuard(
+                CreateTool("generate_chart_data", ToolProviderType.Artifact),
+                CreateTool(
+                    "finalize_artifacts",
+                    ToolProviderType.Artifact,
+                    requiresApproval: true,
+                    riskLevel: AiToolRiskLevel.RequiresApproval)),
+            toolExecutors:
+            [
+                new ContextResultAgentToolExecutor(
+                    "generate_chart_data",
+                    context =>
+                    {
+                        var artifact = context.Workspace.AddDraftArtifact(
+                            ArtifactType.Chart,
+                            "chart.json",
+                            "draft/chart.json",
+                            1,
+                            "application/json",
+                            context.Step.Id,
+                            DateTimeOffset.UtcNow);
+                        return AgentToolExecutionResult.From(new
+                        {
+                            status = "completed",
+                            resultType = "artifact",
+                            artifactType = "chart",
+                            artifactId = artifact.Id.Value
+                        });
+                    })
+            ],
+            runAttemptRepository: runAttemptRepository,
+            freshReadGate: AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate(),
+            auditLogWriter: auditWriter,
+            finalOutputApprovalCoordinator: finalOutputApprovalCoordinator);
+
+        await runtime.RunAsync(task, CancellationToken.None);
+
+        saveSnapshots.Count(snapshot =>
+                snapshot.Producer == AgentStepStatus.Completed &&
+                snapshot.Final == AgentStepStatus.WaitingApproval)
+            .Should()
+            .BeGreaterThanOrEqualTo(
+                2,
+                "the final-step lease refresh and the explicit pre-approval checkpoint must both persist");
+        task.Status.Should().Be(
+            AgentTaskStatus.Failed,
+            "the empty NodeRun fixture deliberately makes proof creation fail after the checkpoint");
+    }
+
     [Fact]
     public async Task RetryAgentTaskCommand_ShouldResetFailedStep_AndEnqueueRetry()
     {
@@ -1557,5 +1639,53 @@ public sealed class ToolRegistryWorkflowTests : ToolRegistryGovernanceTestBase
             InvocationCount++;
             return Task.FromResult(AgentToolExecutionResult.From(new { unexpected = true }));
         }
+    }
+
+    private sealed class NeverCalledFinalOutputApprovalStore : IFinalOutputApprovalStore
+    {
+        public Task<FinalOutputApprovalCommandResult> PrepareAsync(
+            FinalOutputApprovalPreparation preparation,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(
+                "The empty NodeRun fixture must fail proof creation before store preparation.");
+
+        public Task<FinalOutputApprovalCommandResult> DecideAsync(
+            FinalOutputApprovalDecision decision,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class EmptyAgentNodeRunStore : IAgentNodeRunStore
+    {
+        public Task<IReadOnlyCollection<AgentNodeRun>> EnsureMaterializedAsync(
+            DurableTaskClaim claim,
+            AgentRunBudgetLimits taskBudget,
+            IReadOnlyCollection<AgentNodeRunSeed> seeds,
+            DateTimeOffset nowUtc,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyCollection<AgentNodeRun>> ListByAttemptAsync(
+            AgentTaskRunAttemptId runAttemptId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<AgentNodeRun>>([]);
+
+        public Task<IReadOnlyCollection<AgentEvidenceRecord>> ListEvidenceByAttemptAsync(
+            AgentTaskRunAttemptId runAttemptId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<AgentEvidenceRecord>>([]);
+
+        public Task<IReadOnlyCollection<AgentRunUsageLedgerEntry>> ListUsageByAttemptAsync(
+            AgentTaskRunAttemptId runAttemptId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<AgentRunUsageLedgerEntry>>([]);
+
+        public Task<AgentFencedWriteResult> TryReleaseApprovalAsync(
+            AgentNodeRunId nodeRunId,
+            AgentTaskRunAttemptId runAttemptId,
+            long taskFencingToken,
+            DateTimeOffset nowUtc,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }
