@@ -169,6 +169,96 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         approval.HasValidFinalOutputProof().Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("evidence")]
+    [InlineData("manifest")]
+    [InlineData("artifact-bindings")]
+    [InlineData("artifact-binding")]
+    [InlineData("proof")]
+    [InlineData("decision")]
+    [InlineData("approved-at")]
+    public async Task FinalOutputProofConstraint_ShouldRejectNullRequiredProofOrDecisionMaterial(
+        string missingMaterial)
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_b03_proof_shape");
+        await MigrateAiGatewayAsync(database.ConnectionString);
+
+        var taskId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var createdAt = DateTimeOffset.UtcNow;
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using (var task = connection.CreateCommand())
+        {
+            task.CommandText =
+                """
+                INSERT INTO aigateway.agent_tasks (
+                    id, task_code, session_id, user_id, title, goal, task_type, status,
+                    risk_level, run_attempt_count, run_fencing_token, plan_json,
+                    created_at, updated_at)
+                VALUES (
+                    @id, @taskCode, @sessionId, @userId, 'B03 proof shape',
+                    'B03 proof shape', 'ReportGeneration', 'Completed', 'Low', 0, 0,
+                    '{"version":1}', @now, @now);
+                """;
+            task.Parameters.AddWithValue("id", taskId);
+            task.Parameters.AddWithValue("taskCode", $"TASK-B03-{Guid.NewGuid():N}");
+            task.Parameters.AddWithValue("sessionId", Guid.NewGuid());
+            task.Parameters.AddWithValue("userId", userId);
+            task.Parameters.AddWithValue("now", createdAt);
+            await task.ExecuteNonQueryAsync();
+        }
+
+        var decided = missingMaterial is "decision" or "approved-at";
+        var evidence = missingMaterial == "evidence" ? "NULL" : "repeat('a', 64)";
+        var manifest = missingMaterial == "manifest" ? "NULL" : "repeat('b', 64)";
+        var bindings = missingMaterial == "artifact-bindings" ? "NULL" : "'[{}]'::jsonb";
+        var bindingDigest = missingMaterial == "artifact-binding" ? "NULL" : "repeat('c', 64)";
+        var proofDigest = missingMaterial == "proof" ? "NULL" : "repeat('d', 64)";
+        var approvedAt = missingMaterial == "approved-at" ? "NULL" : "@createdAt";
+        var decisionDigest = missingMaterial == "decision" ? "NULL" : "repeat('e', 64)";
+        await using var approval = connection.CreateCommand();
+        approval.CommandText =
+            $$"""
+            INSERT INTO aigateway.approval_requests (
+                id, task_id, approval_type, target_id, status, requested_by,
+                approved_by, approved_at, created_at,
+                final_output_proof_version, final_output_workspace_id,
+                final_output_final_step_id, final_output_run_attempt_id,
+                final_output_node_run_id, final_output_task_fencing_token,
+                final_output_node_fencing_token, final_output_evidence_set_digest,
+                final_output_manifest_digest, final_output_artifact_bindings_json,
+                final_output_artifact_binding_digest, final_output_proof_digest,
+                final_output_decision_proof_digest)
+            VALUES (
+                @id, @taskId, 'FinalOutput', 'ws_b03_proof_shape',
+                '{{(decided ? "Approved" : "Pending")}}', @requestedBy,
+                {{(decided ? "@requestedBy" : "NULL")}},
+                {{(decided ? approvedAt : "NULL")}}, @createdAt,
+                'final-output-approval-v1', @workspaceId, @finalStepId, @runAttemptId,
+                @nodeRunId, 1, 1, {{evidence}}, {{manifest}}, {{bindings}},
+                {{bindingDigest}}, {{proofDigest}},
+                {{(decided ? decisionDigest : "NULL")}});
+            """;
+        approval.Parameters.AddWithValue("id", Guid.NewGuid());
+        approval.Parameters.AddWithValue("taskId", taskId);
+        approval.Parameters.AddWithValue("requestedBy", userId);
+        approval.Parameters.AddWithValue("createdAt", createdAt);
+        approval.Parameters.AddWithValue("workspaceId", Guid.NewGuid());
+        approval.Parameters.AddWithValue("finalStepId", Guid.NewGuid());
+        approval.Parameters.AddWithValue("runAttemptId", Guid.NewGuid());
+        approval.Parameters.AddWithValue("nodeRunId", Guid.NewGuid());
+
+        Func<Task> insert = async () => await approval.ExecuteNonQueryAsync();
+        var failure = await insert.Should().ThrowAsync<PostgresException>();
+
+        failure.Which.SqlState.Should().Be(PostgresErrorCodes.CheckViolation);
+        failure.Which.ConstraintName.Should().Be(
+            "ck_approval_requests_final_output_proof_shape");
+    }
+
     [Fact]
     public async Task FreshMigration_ShouldCreateDynamicRoutingSchemaAndSingleActiveIndex()
     {

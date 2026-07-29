@@ -32,6 +32,10 @@ internal sealed class FinalOutputApprovalStore(
             "Agent.FinalOutputApprovalPrepare",
             async (context, token) =>
             {
+                // The coordinator performs scoped proof reads before entering this store.
+                // Final authority must be reloaded after the transaction starts rather
+                // than reusing any tracked snapshot from those reads.
+                context.ChangeTracker.Clear();
                 var authority = await LockAuthorityAsync(
                     context,
                     preparation.TaskId.Value,
@@ -173,6 +177,9 @@ internal sealed class FinalOutputApprovalStore(
             "Agent.FinalOutputApprovalDecision",
             async (context, token) =>
             {
+                // Approval decisions must lock and validate fresh database authority,
+                // even when the scoped coordinator previously loaded the same rows.
+                context.ChangeTracker.Clear();
                 var identity = await context.ApprovalRequests
                     .AsNoTracking()
                     .Where(approval => approval.Id == decision.ApprovalRequestId)

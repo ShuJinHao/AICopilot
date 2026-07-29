@@ -453,6 +453,92 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
     }
 
     [Fact]
+    public async Task PrepareAndDecide_ShouldReloadTrackedAuthorityBeforeProofValidation()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedPreApprovalAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+
+        using (var stalePrepareScope = host.Services.CreateScope())
+        {
+            var scopedContext = stalePrepareScope.ServiceProvider
+                .GetRequiredService<AiGatewayDbContext>();
+            (await scopedContext.Set<Artifact>().SingleAsync(item =>
+                    item.Id == seeded.ArtifactId))
+                .Version.Should().Be(1);
+            await ApplyDriftAsync(
+                database.ConnectionString,
+                fileStore,
+                seeded,
+                "artifact-metadata",
+                apply: true);
+
+            var result = await stalePrepareScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .PrepareAsync(new FinalOutputApprovalPreparation(
+                    seeded.TaskId,
+                    seeded.UserId,
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+
+            result.Status.Should().Be(FinalOutputApprovalCommandStatus.FinalizationConflict);
+        }
+
+        await ApplyDriftAsync(
+            database.ConnectionString,
+            fileStore,
+            seeded,
+            "artifact-metadata",
+            apply: false);
+        FinalOutputApprovalCommandResult prepared;
+        using (var prepareScope = host.Services.CreateScope())
+        {
+            prepared = await prepareScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .PrepareAsync(new FinalOutputApprovalPreparation(
+                    seeded.TaskId,
+                    seeded.UserId,
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+        }
+
+        prepared.Status.Should().Be(FinalOutputApprovalCommandStatus.Created);
+        using (var staleDecisionScope = host.Services.CreateScope())
+        {
+            var scopedContext = staleDecisionScope.ServiceProvider
+                .GetRequiredService<AiGatewayDbContext>();
+            (await scopedContext.Set<Artifact>().SingleAsync(item =>
+                    item.Id == seeded.ArtifactId))
+                .Version.Should().Be(1);
+            await ApplyDriftAsync(
+                database.ConnectionString,
+                fileStore,
+                seeded,
+                "artifact-metadata",
+                apply: true);
+
+            var result = await staleDecisionScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    prepared.Approval!.Id,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "must reject stale tracked authority",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+
+            result.Status.Should().Be(FinalOutputApprovalCommandStatus.FinalizationConflict);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.ApprovalRequests.AsNoTracking().SingleAsync())
+            .Status.Should().Be(AgentApprovalStatus.Pending);
+        (await verification.AgentTaskRunQueueItems.CountAsync(item =>
+            item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)).Should().Be(0);
+    }
+
+    [Fact]
     public Task FinalCheckpoint_ShouldFreshReadAndRejectEvidenceExpiredAfterStaging() =>
         AssertFinalCheckpointAsync(expireEvidenceAfterStaging: true);
 

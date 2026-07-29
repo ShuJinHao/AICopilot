@@ -195,6 +195,7 @@ public partial class AddFinalOutputApprovalClosure : Migration
             OR
             (
                 approval_type = 'FinalOutput' AND
+                final_output_proof_version IS NOT NULL AND
                 (
                     (
                         final_output_proof_version = 'legacy-read-only-v0' AND
@@ -219,13 +220,20 @@ public partial class AddFinalOutputApprovalClosure : Migration
                         final_output_final_step_id IS NOT NULL AND
                         final_output_run_attempt_id IS NOT NULL AND
                         final_output_node_run_id IS NOT NULL AND
+                        final_output_task_fencing_token IS NOT NULL AND
                         final_output_task_fencing_token > 0 AND
+                        final_output_node_fencing_token IS NOT NULL AND
                         final_output_node_fencing_token > 0 AND
+                        final_output_evidence_set_digest IS NOT NULL AND
                         final_output_evidence_set_digest ~ '^[0-9a-f]{64}$' AND
+                        final_output_manifest_digest IS NOT NULL AND
                         final_output_manifest_digest ~ '^[0-9a-f]{64}$' AND
+                        final_output_artifact_bindings_json IS NOT NULL AND
                         jsonb_typeof(final_output_artifact_bindings_json) = 'array' AND
                         jsonb_array_length(final_output_artifact_bindings_json) > 0 AND
+                        final_output_artifact_binding_digest IS NOT NULL AND
                         final_output_artifact_binding_digest ~ '^[0-9a-f]{64}$' AND
+                        final_output_proof_digest IS NOT NULL AND
                         final_output_proof_digest ~ '^[0-9a-f]{64}$' AND
                         (
                             (
@@ -239,7 +247,9 @@ public partial class AddFinalOutputApprovalClosure : Migration
                             (
                                 status IN ('Approved', 'Rejected') AND
                                 approved_by IS NOT NULL AND
+                                approved_at IS NOT NULL AND
                                 approved_at >= created_at AND
+                                final_output_decision_proof_digest IS NOT NULL AND
                                 final_output_decision_proof_digest ~ '^[0-9a-f]{64}$'
                             )
                             OR
@@ -247,6 +257,7 @@ public partial class AddFinalOutputApprovalClosure : Migration
                                 status IN ('Cancelled', 'Expired') AND
                                 approved_by IS NULL AND
                                 approval_comment IS NULL AND
+                                approved_at IS NOT NULL AND
                                 approved_at >= created_at AND
                                 final_output_decision_proof_digest IS NULL
                             )
