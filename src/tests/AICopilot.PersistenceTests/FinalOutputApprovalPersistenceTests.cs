@@ -77,6 +77,111 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
                 entry.ActionCode == "Agent.FinalReviewSubmitted" &&
                 entry.TargetId == approval.Id.Value.ToString()))
             .Should().Be(1);
+        var originatingQueue = await verification.AgentTaskRunQueueItems
+            .AsNoTracking()
+            .SingleAsync(item => item.SourceApprovalRequestId == null);
+        originatingQueue.Status.Should().Be(AgentTaskRunQueueStatus.Succeeded);
+        originatingQueue.CompletedAt.Should().NotBeNull();
+        originatingQueue.LeaseId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Prepare_ShouldRetireOriginatingQueueBeforeWorkerCompletionOrLeaseRecovery()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedPreApprovalAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        DurableTaskClaim originalClaim;
+        using (var claimSnapshotScope = host.Services.CreateScope())
+        {
+            var context = claimSnapshotScope.ServiceProvider
+                .GetRequiredService<AiGatewayDbContext>();
+            var task = await context.AgentTasks
+                .Include(item => item.Steps)
+                .AsNoTracking()
+                .SingleAsync();
+            var attempt = await context.AgentTaskRunAttempts
+                .AsNoTracking()
+                .SingleAsync();
+            var queue = await context.AgentTaskRunQueueItems
+                .AsNoTracking()
+                .SingleAsync();
+            originalClaim = new DurableTaskClaim(
+                queue,
+                task,
+                attempt,
+                task.RunFencingToken,
+                task.RunLeaseId!.Value,
+                task.RunLeaseExpiresAt!.Value);
+        }
+
+        using (var prepareScope = host.Services.CreateScope())
+        {
+            var prepared = await prepareScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .PrepareAsync(new FinalOutputApprovalPreparation(
+                    seeded.TaskId,
+                    seeded.UserId,
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            prepared.Status.Should().Be(FinalOutputApprovalCommandStatus.Created);
+        }
+
+        using (var lateCompletionScope = host.Services.CreateScope())
+        {
+            var completed = await lateCompletionScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .TryCompleteAsync(
+                    originalClaim,
+                    AgentTaskRunQueueStatus.Succeeded,
+                    failureCode: null,
+                    "late worker completion after atomic approval pause",
+                    DateTimeOffset.UtcNow);
+            completed.Should().Be(AgentFencedWriteResult.Succeeded);
+        }
+
+        using (var recoveryScope = host.Services.CreateScope())
+        {
+            var recovered = await recoveryScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .RecoverExpiredStartedAsync(
+                    DateTimeOffset.UtcNow.AddHours(1),
+                    maxItems: 32);
+            recovered.Should().Be(0);
+        }
+
+        using (var decisionScope = host.Services.CreateScope())
+        {
+            var approval = await decisionScope.ServiceProvider
+                .GetRequiredService<AiGatewayDbContext>()
+                .ApprovalRequests
+                .AsNoTracking()
+                .SingleAsync();
+            var decided = await decisionScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    approval.Id,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve after simulated worker exit",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            decided.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        var queues = await verification.AgentTaskRunQueueItems
+            .AsNoTracking()
+            .ToArrayAsync();
+        queues.Should().HaveCount(2);
+        var originatingQueue = queues.Single(item => item.SourceApprovalRequestId is null);
+        originatingQueue.Status.Should().Be(AgentTaskRunQueueStatus.Succeeded);
+        originatingQueue.TaskFencingToken.Should().Be(seeded.Proof.TaskFencingToken);
+        var resumeQueue = queues.Single(item => item.SourceApprovalRequestId is not null);
+        resumeQueue.Status.Should().Be(AgentTaskRunQueueStatus.Queued);
+        (await verification.AgentTasks.AsNoTracking().SingleAsync())
+            .RunFencingToken.Should().Be(seeded.Proof.TaskFencingToken);
     }
 
     [Fact]
@@ -888,7 +993,8 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             {
                 [artifact.Id.Value] = sourceBytes
             },
-            now.AddSeconds(4));
+            now.AddSeconds(4),
+            completeOriginalQueue: false);
         fileStore.AddFile(
             workspace.WorkspaceCode,
             artifact.RelativePath,

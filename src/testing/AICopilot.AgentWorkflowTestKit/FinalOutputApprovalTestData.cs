@@ -25,6 +25,7 @@ public static class FinalOutputApprovalTestData
         ArtifactWorkspace workspace,
         IReadOnlyDictionary<Guid, byte[]> artifactContents,
         DateTimeOffset nowUtc,
+        bool completeOriginalQueue = true,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(task);
@@ -71,7 +72,7 @@ public static class FinalOutputApprovalTestData
             task.UserId,
             nowUtc);
         queueItem.AcquireLease(
-            Guid.NewGuid(),
+            attempt.LeaseId!.Value,
             "final-output-test-authority",
             nowUtc,
             TimeSpan.FromMinutes(10),
@@ -248,7 +249,11 @@ public static class FinalOutputApprovalTestData
             joinPolicy: "AllRequired",
             nowUtc);
         nodeRuns.Add(finalNode);
-        queueItem.MarkSucceeded(nowUtc);
+        if (completeOriginalQueue)
+        {
+            queueItem.MarkSucceeded(nowUtc);
+        }
+
         task.MarkWorkspaceReady(nowUtc);
 
         var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();

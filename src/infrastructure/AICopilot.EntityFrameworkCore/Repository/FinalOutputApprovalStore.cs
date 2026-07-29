@@ -120,6 +120,15 @@ internal sealed class FinalOutputApprovalStore(
                     return Attempt(Conflict(authority));
                 }
 
+                if (!await RetireOriginatingQueueAsync(
+                        context,
+                        authority,
+                        preparation.CreatedAtUtc,
+                        token))
+                {
+                    return Attempt(Conflict(authority));
+                }
+
                 var approval = ApprovalRequest.CreateFinalOutput(
                     authority.Task.Id,
                     preparation.RequestedBy,
@@ -894,6 +903,61 @@ internal sealed class FinalOutputApprovalStore(
                  item.Status == AgentTaskRunQueueStatus.Claimed ||
                  item.Status == AgentTaskRunQueueStatus.Started),
             cancellationToken);
+
+    private static async Task<bool> RetireOriginatingQueueAsync(
+        AiGatewayDbContext context,
+        LockedAuthority authority,
+        DateTimeOffset pausedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var queues = await context.AgentTaskRunQueueItems
+            .FromSqlInterpolated($$"""
+                SELECT queue_item.*, queue_item.xmin
+                FROM aigateway.agent_task_run_queue_items AS queue_item
+                WHERE task_id = {{authority.Task.Id.Value}}
+                  AND run_attempt_id = {{authority.Attempt.Id.Value}}
+                  AND task_fencing_token = {{authority.Task.RunFencingToken}}
+                  AND source_approval_request_id IS NULL
+                ORDER BY created_at, id
+                FOR UPDATE
+                """)
+            .ToArrayAsync(cancellationToken);
+        if (queues.Length != 1)
+        {
+            return false;
+        }
+
+        var queue = queues[0];
+        if (queue.TriggerType == AgentTaskRunTriggerType.ApprovalResume ||
+            queue.StartedAt is null)
+        {
+            return false;
+        }
+
+        if (queue.Status == AgentTaskRunQueueStatus.Succeeded)
+        {
+            return queue.CompletedAt is not null &&
+                   queue.LeaseId is null &&
+                   queue.LeaseOwner is null &&
+                   queue.LeaseExpiresAt is null;
+        }
+
+        if (queue.Status != AgentTaskRunQueueStatus.Started ||
+            queue.LeaseId != authority.Task.RunLeaseId ||
+            queue.LeaseId != authority.Attempt.LeaseId ||
+            queue.LeaseOwner != authority.Task.RunLeaseOwner ||
+            queue.LeaseOwner != authority.Attempt.LeaseOwner ||
+            queue.LeaseExpiresAt != authority.Task.RunLeaseExpiresAt ||
+            queue.LeaseExpiresAt != authority.Attempt.LeaseExpiresAt)
+        {
+            return false;
+        }
+
+        queue.MarkSucceeded(
+            pausedAtUtc,
+            "Agent task run paused at the proof-bound final-output approval checkpoint.");
+        return true;
+    }
 
     private static Task<ApprovalRequest?> LockApprovalAsync(
         AiGatewayDbContext context,

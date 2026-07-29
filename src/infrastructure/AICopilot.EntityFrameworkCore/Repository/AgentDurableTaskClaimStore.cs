@@ -297,8 +297,7 @@ internal sealed class AgentDurableTaskClaimStore(
                 var queueItem = await AgentExecutionRowLock.ByIdAsync<AgentTaskRunQueueItem>(
                     context, claim.QueueItem.Id.Value, token);
                 if (queueItem is null || queueItem.RunAttemptId != claim.RunAttempt.Id ||
-                    queueItem.TaskFencingToken != claim.TaskFencingToken ||
-                    queueItem.Status != AgentTaskRunQueueStatus.Started)
+                    queueItem.TaskFencingToken != claim.TaskFencingToken)
                 {
                     return Attempt(AgentFencedWriteResult.StaleFence);
                 }
@@ -308,6 +307,21 @@ internal sealed class AgentDurableTaskClaimStore(
                 if (attempt is null || attempt.TaskId != claim.Task.Id ||
                     attempt.TaskFencingToken != claim.TaskFencingToken ||
                     attempt.Status == AgentTaskRunAttemptStatus.ReconciliationRequired)
+                {
+                    return Attempt(AgentFencedWriteResult.StaleFence);
+                }
+
+                if (terminalStatus == AgentTaskRunQueueStatus.Succeeded &&
+                    queueItem.Status == AgentTaskRunQueueStatus.Succeeded &&
+                    queueItem.SourceApprovalRequestId is null &&
+                    queueItem.CompletedAt is not null &&
+                    task.Status == AgentTaskStatus.WaitingFinalApproval &&
+                    attempt.Status == AgentTaskRunAttemptStatus.WaitingApproval)
+                {
+                    return Attempt(AgentFencedWriteResult.Succeeded);
+                }
+
+                if (queueItem.Status != AgentTaskRunQueueStatus.Started)
                 {
                     return Attempt(AgentFencedWriteResult.StaleFence);
                 }
