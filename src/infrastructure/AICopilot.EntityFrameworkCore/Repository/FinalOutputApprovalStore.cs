@@ -482,20 +482,7 @@ internal sealed class FinalOutputApprovalStore(
                     stateChanged: false);
             }
 
-            var completed = authority.Task.Status == AgentTaskStatus.Completed &&
-                            authority.Workspace.Status == ArtifactWorkspaceStatus.Finalized &&
-                            authority.Attempt.Status == AgentTaskRunAttemptStatus.Succeeded &&
-                            authority.FinalStep.Status == AgentStepStatus.Completed &&
-                            authority.FinalNode.Status == AgentNodeRunStatus.Succeeded;
-            var waiting = authority.Task.Status == AgentTaskStatus.WaitingFinalApproval &&
-                          authority.Workspace.Status == ArtifactWorkspaceStatus.Active &&
-                          authority.Attempt.Status is AgentTaskRunAttemptStatus.WaitingApproval or AgentTaskRunAttemptStatus.Running &&
-                          authority.FinalStep.Status == AgentStepStatus.Approved &&
-                          authority.FinalNode.Status is AgentNodeRunStatus.WaitingApproval
-                              or AgentNodeRunStatus.Runnable
-                              or AgentNodeRunStatus.Claimed
-                              or AgentNodeRunStatus.Running;
-            return completed || waiting
+            return IsApprovedDecisionOutcome(authority, queueItem!)
                 ? Result(
                     FinalOutputApprovalCommandStatus.DuplicateDecision,
                     authority,
@@ -540,6 +527,69 @@ internal sealed class FinalOutputApprovalStore(
         return Conflict(authority, approval);
     }
 
+    private static bool IsApprovedDecisionOutcome(
+        LockedAuthority authority,
+        AgentTaskRunQueueItem queueItem)
+    {
+        var waiting = authority.Task.Status == AgentTaskStatus.WaitingFinalApproval &&
+                      authority.Workspace.Status == ArtifactWorkspaceStatus.Active &&
+                      authority.Attempt.Status is AgentTaskRunAttemptStatus.WaitingApproval or AgentTaskRunAttemptStatus.Running &&
+                      authority.FinalStep.Status == AgentStepStatus.Approved &&
+                      authority.FinalNode.Status is AgentNodeRunStatus.WaitingApproval
+                          or AgentNodeRunStatus.Runnable
+                          or AgentNodeRunStatus.Claimed
+                          or AgentNodeRunStatus.Running;
+        if (queueItem.Status is AgentTaskRunQueueStatus.Queued
+            or AgentTaskRunQueueStatus.Claimed
+            or AgentTaskRunQueueStatus.Started)
+        {
+            return waiting;
+        }
+
+        if (queueItem.Status == AgentTaskRunQueueStatus.Succeeded)
+        {
+            return authority.Task.Status == AgentTaskStatus.Completed &&
+                   authority.Workspace.Status == ArtifactWorkspaceStatus.Finalized &&
+                   authority.Attempt.Status == AgentTaskRunAttemptStatus.Succeeded &&
+                   authority.FinalStep.Status == AgentStepStatus.Completed &&
+                   authority.FinalNode.Status == AgentNodeRunStatus.Succeeded;
+        }
+
+        if (!HasReleasedTerminalAuthority(authority, queueItem))
+        {
+            return false;
+        }
+
+        return queueItem.Status switch
+        {
+            AgentTaskRunQueueStatus.Failed =>
+                authority.Task.Status == AgentTaskStatus.Failed &&
+                authority.Attempt.Status == AgentTaskRunAttemptStatus.Failed,
+            AgentTaskRunQueueStatus.Cancelled =>
+                authority.Task.Status == AgentTaskStatus.Cancelled &&
+                authority.Attempt.Status == AgentTaskRunAttemptStatus.Cancelled,
+            _ => false
+        };
+    }
+
+    private static bool HasReleasedTerminalAuthority(
+        LockedAuthority authority,
+        AgentTaskRunQueueItem queueItem) =>
+        authority.Workspace.Status == ArtifactWorkspaceStatus.Active &&
+        authority.Task.ActiveRunAttemptId is null &&
+        authority.Task.CompletedAt is not null &&
+        authority.Task.RunLeaseId is null &&
+        authority.Task.RunLeaseOwner is null &&
+        authority.Task.RunLeaseExpiresAt is null &&
+        authority.Attempt.CompletedAt is not null &&
+        authority.Attempt.LeaseId is null &&
+        authority.Attempt.LeaseOwner is null &&
+        authority.Attempt.LeaseExpiresAt is null &&
+        queueItem.CompletedAt is not null &&
+        queueItem.LeaseId is null &&
+        queueItem.LeaseOwner is null &&
+        queueItem.LeaseExpiresAt is null;
+
     private static bool MatchesApprovedResumeQueue(
         LockedAuthority authority,
         ApprovalRequest approval,
@@ -566,7 +616,9 @@ internal sealed class FinalOutputApprovalStore(
                 queueItem.TaskFencingToken == 0,
             AgentTaskRunQueueStatus.Claimed or
             AgentTaskRunQueueStatus.Started or
-            AgentTaskRunQueueStatus.Succeeded =>
+            AgentTaskRunQueueStatus.Succeeded or
+            AgentTaskRunQueueStatus.Failed or
+            AgentTaskRunQueueStatus.Cancelled =>
                 queueItem.RunAttemptId == proof.ActiveRunAttemptId &&
                 queueItem.TaskFencingToken == proof.TaskFencingToken,
             _ => false
@@ -645,9 +697,7 @@ internal sealed class FinalOutputApprovalStore(
         if (task.Id != attempt.TaskId ||
             task.Id != workspace.TaskId ||
             task.WorkspaceId != workspace.Id ||
-            (task.ActiveRunAttemptId != attempt.Id &&
-             task.Status != AgentTaskStatus.Completed &&
-             task.Status != AgentTaskStatus.Rejected) ||
+            !MatchesProofAttemptAuthority(task, attempt) ||
             attempt.Id != proof.ActiveRunAttemptId ||
             node.TaskId != task.Id ||
             node.RunAttemptId != attempt.Id ||
@@ -690,6 +740,16 @@ internal sealed class FinalOutputApprovalStore(
                    .SequenceEqual(Enumerable.Range(1, orderedSteps.Length)) &&
                orderedSteps[..^1].All(step => step.Status == AgentStepStatus.Completed);
     }
+
+    private static bool MatchesProofAttemptAuthority(
+        AgentTask task,
+        AgentTaskRunAttempt attempt) =>
+        task.ActiveRunAttemptId == attempt.Id ||
+        task.ActiveRunAttemptId is null &&
+        task.Status is AgentTaskStatus.Completed
+            or AgentTaskStatus.Rejected
+            or AgentTaskStatus.Failed
+            or AgentTaskStatus.Cancelled;
 
     private static bool MatchesArtifactBindings(
         IReadOnlyCollection<Artifact> artifacts,

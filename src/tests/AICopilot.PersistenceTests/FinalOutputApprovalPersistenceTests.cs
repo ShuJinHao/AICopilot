@@ -709,6 +709,107 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
     }
 
     [Theory]
+    [InlineData(
+        AgentTaskRunQueueStatus.Failed,
+        AgentTaskStatus.Failed,
+        AgentTaskRunAttemptStatus.Failed)]
+    [InlineData(
+        AgentTaskRunQueueStatus.Cancelled,
+        AgentTaskStatus.Cancelled,
+        AgentTaskRunAttemptStatus.Cancelled)]
+    public async Task Decide_ShouldKeepApprovedDecisionIdempotentAfterTerminalResumeOutcome(
+        AgentTaskRunQueueStatus terminalQueueStatus,
+        AgentTaskStatus expectedTaskStatus,
+        AgentTaskRunAttemptStatus expectedAttemptStatus)
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        var decidedAt = DateTimeOffset.UtcNow;
+
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before downstream terminal outcome",
+                    seeded.Proof,
+                    decidedAt));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        using (var workerScope = host.Services.CreateScope())
+        {
+            var claimStore = workerScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>();
+            var claim = await claimStore.TryClaimNextAsync(
+                "final-output-terminal-decision-test",
+                TimeSpan.FromMinutes(5));
+            claim.Should().NotBeNull();
+            var startedAt = decidedAt.AddSeconds(1);
+            (await claimStore.TryMarkStartedAsync(claim!, startedAt))
+                .Should().Be(AgentFencedWriteResult.Succeeded);
+            (await claimStore.TryCompleteAsync(
+                    claim!,
+                    terminalQueueStatus,
+                    terminalQueueStatus == AgentTaskRunQueueStatus.Failed
+                        ? "final_output_downstream_failed"
+                        : null,
+                    "Final-output resume reached a downstream terminal outcome.",
+                    startedAt.AddSeconds(1)))
+                .Should().Be(AgentFencedWriteResult.Succeeded);
+        }
+
+        using (var duplicateScope = host.Services.CreateScope())
+        {
+            var duplicate = await duplicateScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "late duplicate approve",
+                    seeded.Proof,
+                    decidedAt.AddSeconds(3)));
+            duplicate.Status.Should().Be(FinalOutputApprovalCommandStatus.DuplicateDecision);
+            duplicate.Task!.Status.Should().Be(expectedTaskStatus);
+            duplicate.QueueItem!.Status.Should().Be(terminalQueueStatus);
+        }
+
+        using (var oppositeScope = host.Services.CreateScope())
+        {
+            var opposite = await oppositeScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: false,
+                    "late opposite reject",
+                    seeded.Proof,
+                    decidedAt.AddSeconds(4)));
+            opposite.Status.Should().Be(FinalOutputApprovalCommandStatus.DecisionConflict);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.ApprovalRequests.AsNoTracking().SingleAsync())
+            .Status.Should().Be(AgentApprovalStatus.Approved);
+        (await verification.AgentTasks.AsNoTracking().SingleAsync())
+            .Status.Should().Be(expectedTaskStatus);
+        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync())
+            .Status.Should().Be(expectedAttemptStatus);
+        (await verification.AgentTaskRunQueueItems
+                .AsNoTracking()
+                .SingleAsync(item => item.SourceApprovalRequestId == seeded.ApprovalId))
+            .Status.Should().Be(terminalQueueStatus);
+        (await verification.AgentTaskRunQueueItems.CountAsync(item =>
+            item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)).Should().Be(1);
+    }
+
+    [Theory]
     [InlineData("requested-by")]
     [InlineData("created-at")]
     [InlineData("available-at")]
