@@ -6,7 +6,7 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Persistence</AICopilotTestKind>
-    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.PersistenceTests.IdentityEnabledAdminInvariantTests|FullyQualifiedName~AICopilot.PersistenceTests.CloudOidcBindingConcurrencyTests</AICopilotCiSecurityFilter>
+    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.PersistenceTests.IdentityEnabledAdminInvariantTests|FullyQualifiedName~AICopilot.PersistenceTests.CloudOidcBindingConcurrencyTests|FullyQualifiedName~AICopilot.PersistenceTests.FinalOutputApprovalPersistenceTests|FullyQualifiedName~AICopilot.PersistenceTests.FinalOutputFileSetRecoveryTests|FullyQualifiedName~B03Migration|FullyQualifiedName~FreshMigration_ShouldCreateOnsiteAttestationAndFinalOutputClosureSchema</AICopilotCiSecurityFilter>
     <AICopilotTestRuntime>Postgres</AICopilotTestRuntime>
     <AICopilotTestOwner>IdentityPersistence</AICopilotTestOwner>
   </PropertyGroup>

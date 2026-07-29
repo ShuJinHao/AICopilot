@@ -1,6 +1,8 @@
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 
 namespace AICopilot.PersistenceTests;
@@ -9,7 +11,7 @@ namespace AICopilot.PersistenceTests;
 public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fixture)
 {
     [Fact]
-    public async Task FreshMigration_ShouldCreateOnsiteAttestationAndRunQueueSchema()
+    public async Task FreshMigration_ShouldCreateOnsiteAttestationAndFinalOutputClosureSchema()
     {
         await using var database = await PostgresScratchDatabase.CreateAsync(
             fixture.ConnectionString,
@@ -48,6 +50,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
                 "status",
                 "requested_by",
                 "run_attempt_id",
+                "source_approval_request_id",
                 "lease_expires_at",
                 "available_at"
             ]);
@@ -56,8 +59,103 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         queueColumns["status"].Should().Be("character varying");
         queueColumns["requested_by"].Should().Be("uuid");
         queueColumns["run_attempt_id"].Should().Be("uuid");
+        queueColumns["source_approval_request_id"].Should().Be("uuid");
         queueColumns["lease_expires_at"].Should().Be("timestamp with time zone");
         queueColumns["available_at"].Should().Be("timestamp with time zone");
+
+        var approvalColumns = await QueryColumnMetadataAsync(
+            connection,
+            "aigateway",
+            "approval_requests",
+            [
+                "final_output_proof_version",
+                "final_output_workspace_id",
+                "final_output_final_step_id",
+                "final_output_run_attempt_id",
+                "final_output_node_run_id",
+                "final_output_task_fencing_token",
+                "final_output_node_fencing_token",
+                "final_output_evidence_set_digest",
+                "final_output_manifest_digest",
+                "final_output_artifact_bindings_json",
+                "final_output_artifact_binding_digest",
+                "final_output_proof_digest",
+                "final_output_decision_proof_digest"
+            ]);
+        approvalColumns.Should().HaveCount(13);
+        approvalColumns["final_output_artifact_bindings_json"].Should().Be("jsonb");
+
+        var approvalIndexes = await QueryIndexDefinitionsAsync(
+            connection,
+            "aigateway",
+            "approval_requests");
+        approvalIndexes.Should().Contain(definition =>
+            definition.Contains(
+                "ux_approval_requests_final_output_task",
+                StringComparison.OrdinalIgnoreCase) &&
+            definition.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase) &&
+            definition.Contains("task_id", StringComparison.OrdinalIgnoreCase) &&
+            definition.Contains("approval_type", StringComparison.OrdinalIgnoreCase) &&
+            !definition.Contains("target_id", StringComparison.OrdinalIgnoreCase));
+        var queueIndexes = await QueryIndexDefinitionsAsync(
+            connection,
+            "aigateway",
+            "agent_task_run_queue_items");
+        queueIndexes.Should().Contain(definition =>
+            definition.Contains(
+                "ux_agent_task_run_queue_items_source_approval",
+                StringComparison.OrdinalIgnoreCase) &&
+            definition.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("active")]
+    [InlineData("duplicate")]
+    [InlineData("non-terminal")]
+    public async Task B03Migration_ShouldBlockProoflessNonTerminalActiveOrDuplicateFinalOutputData(
+        string dirtyState)
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_b03_guard");
+        await MigrateAiGatewayAsync(
+            database.ConnectionString,
+            "20260722170000_AddArtifactEvidenceSetDigest");
+        await SeedLegacyFinalOutputAsync(database.ConnectionString, dirtyState);
+
+        Func<Task> migrate = () => MigrateAiGatewayAsync(database.ConnectionString);
+
+        var failure = await migrate.Should().ThrowAsync<PostgresException>();
+        failure.Which.SqlState.Should().Be(PostgresErrorCodes.CheckViolation);
+        failure.Which.MessageText.Should().Contain(
+            dirtyState == "duplicate"
+                ? "duplicate final-output approvals"
+                : "non-terminal approval, active task, or orphaned proofless final-output data");
+    }
+
+    [Fact]
+    public async Task B03Migration_ShouldKeepTerminalLegacyApprovalReadOnlyWithoutInventingProof()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_b03_legacy");
+        await MigrateAiGatewayAsync(
+            database.ConnectionString,
+            "20260722170000_AddArtifactEvidenceSetDigest");
+        await SeedLegacyFinalOutputAsync(database.ConnectionString, "terminal");
+
+        await MigrateAiGatewayAsync(database.ConnectionString);
+
+        await using var dbContext = new AiGatewayDbContext(
+            new DbContextOptionsBuilder<AiGatewayDbContext>()
+                .UseNpgsqlWithMigrationHistory(
+                    database.ConnectionString,
+                    MigrationHistoryTables.AiGateway)
+                .Options);
+        var approval = await dbContext.ApprovalRequests.AsNoTracking().SingleAsync();
+        approval.FinalOutputProofVersion.Should().Be("legacy-read-only-v0");
+        approval.FinalOutputProofDigest.Should().BeNull();
+        approval.HasValidFinalOutputProof().Should().BeFalse();
     }
 
     [Fact]
@@ -132,7 +230,9 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             definition.Contains("WHERE is_active", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static async Task MigrateAiGatewayAsync(string connectionString)
+    private static async Task MigrateAiGatewayAsync(
+        string connectionString,
+        string? targetMigration = null)
     {
         var options = new DbContextOptionsBuilder<AiGatewayDbContext>()
             .UseNpgsqlWithMigrationHistory(
@@ -140,7 +240,70 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
                 MigrationHistoryTables.AiGateway)
             .Options;
         await using var dbContext = new AiGatewayDbContext(options);
-        await dbContext.Database.MigrateAsync();
+        await dbContext.GetService<IMigrator>().MigrateAsync(targetMigration);
+    }
+
+    private static async Task SeedLegacyFinalOutputAsync(
+        string connectionString,
+        string dirtyState)
+    {
+        var taskId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using (var task = connection.CreateCommand())
+        {
+            task.CommandText =
+                """
+                INSERT INTO aigateway.agent_tasks (
+                    id, task_code, session_id, user_id, title, goal, task_type, status,
+                    risk_level, run_attempt_count, run_fencing_token, plan_json,
+                    created_at, updated_at)
+                VALUES (
+                    @id, @taskCode, @sessionId, @userId, 'B03 legacy guard',
+                    'B03 legacy guard', 'ReportGeneration', @status, 'Low', 0, 0,
+                    '{"version":1}', @now, @now);
+                """;
+            task.Parameters.AddWithValue("id", taskId);
+            task.Parameters.AddWithValue("taskCode", $"TASK-B03-{Guid.NewGuid():N}");
+            task.Parameters.AddWithValue("sessionId", Guid.NewGuid());
+            task.Parameters.AddWithValue("userId", userId);
+            task.Parameters.AddWithValue(
+                "status",
+                dirtyState == "active" ? "WaitingFinalApproval" : "Completed");
+            task.Parameters.AddWithValue("now", DateTimeOffset.UtcNow);
+            await task.ExecuteNonQueryAsync();
+        }
+
+        var approvalCount = dirtyState == "duplicate" ? 2 : 1;
+        for (var index = 0; index < approvalCount; index++)
+        {
+            await using var approval = connection.CreateCommand();
+            var approvalStatus = dirtyState == "terminal" ? "Approved" : "Pending";
+            approval.CommandText =
+                """
+                INSERT INTO aigateway.approval_requests (
+                    id, task_id, approval_type, target_id, status, requested_by,
+                    approved_by, approved_at, created_at)
+                VALUES (
+                    @id, @taskId, 'FinalOutput', @targetId,
+                    @status, @requestedBy,
+                    CASE WHEN @status = 'Approved' THEN @requestedBy ELSE NULL END,
+                    CASE WHEN @status = 'Approved' THEN @createdAt ELSE NULL END,
+                    @createdAt);
+                """;
+            approval.Parameters.AddWithValue("id", Guid.NewGuid());
+            approval.Parameters.AddWithValue("taskId", taskId);
+            approval.Parameters.AddWithValue(
+                "targetId",
+                dirtyState == "duplicate"
+                    ? $"ws_legacy_guard_{index}"
+                    : "ws_legacy_guard");
+            approval.Parameters.AddWithValue("status", approvalStatus);
+            approval.Parameters.AddWithValue("requestedBy", userId);
+            approval.Parameters.AddWithValue("createdAt", DateTimeOffset.UtcNow);
+            await approval.ExecuteNonQueryAsync();
+        }
     }
 
     private static async Task<Dictionary<string, string>> QueryColumnMetadataAsync(

@@ -3,8 +3,6 @@ using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
-using AICopilot.Core.AiGateway.Runtime.AgentExecution;
-using AICopilot.Core.AiGateway.Specifications.Approvals;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
@@ -17,6 +15,7 @@ public sealed class ArtifactWorkspaceP9Coordinator(
     IRepository<ApprovalRequest> approvalRepository,
     IArtifactWorkspaceFileStore fileStore,
     ArtifactVersioningCommandCoordinator versioningCoordinator,
+    FinalOutputApprovalCoordinator finalOutputApprovalCoordinator,
     AgentAuditRecorder auditRecorder,
     IAuditLogWriter auditLogWriter,
     ICurrentUser currentUser,
@@ -205,46 +204,20 @@ public sealed class ArtifactWorkspaceP9Coordinator(
             return Result.Invalid("Only workspace-ready tasks can submit final review.");
         }
 
-        var approvals = await approvalRepository.ListAsync(
-            new ApprovalRequestsByTaskSpec(task.Id),
+        var prepared = await finalOutputApprovalCoordinator.EnsurePendingAsync(
+            task,
+            workspace,
+            currentUser.Id!.Value,
             cancellationToken);
-        var finalApproval = approvals.FirstOrDefault(item =>
-            item.ApprovalType == AgentApprovalType.FinalOutput &&
-            string.Equals(item.TargetId, workspace.WorkspaceCode, StringComparison.Ordinal));
-
-        if (finalApproval?.Status == AgentApprovalStatus.Rejected)
+        if (!prepared.IsSuccess)
         {
-            return Result.Invalid("Workspace final output approval was rejected.");
+            return Result.From(prepared);
         }
-
-        if (finalApproval?.Status == AgentApprovalStatus.Approved)
-        {
-            return Result.Invalid("Workspace final output is already approved; call finalize to publish final artifacts.");
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        if (finalApproval is null)
-        {
-            finalApproval = new ApprovalRequest(
-                task.Id,
-                AgentApprovalType.FinalOutput,
-                workspace.WorkspaceCode,
-                currentUser.Id!.Value,
-                now);
-            approvalRepository.Add(finalApproval);
-            await auditRecorder.RecordFinalReviewSubmittedAsync(task, workspace, finalApproval, cancellationToken);
-        }
-
-        if (task.Status == AgentTaskStatus.WorkspaceReady)
-        {
-            task.WaitForFinalApproval(now);
-        }
-
-        taskRepository.Update(task);
-        workspaceRepository.Update(workspace);
-        await workspaceRepository.SaveChangesAsync(cancellationToken);
 
         var files = await fileStore.ListAsync(workspace.WorkspaceCode, cancellationToken);
-        return Result.Success(ArtifactWorkspaceMapper.Map(workspace, task, files));
+        return Result.Success(ArtifactWorkspaceMapper.Map(
+            prepared.Value!.Workspace,
+            prepared.Value.Task,
+            files));
     }
 }

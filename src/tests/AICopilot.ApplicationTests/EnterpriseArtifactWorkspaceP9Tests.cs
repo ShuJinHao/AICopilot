@@ -1,10 +1,13 @@
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AICopilot.AiGatewayService.Workspaces;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.ApplicationTests;
 
@@ -100,12 +103,36 @@ public sealed class EnterpriseArtifactWorkspaceP9Tests
             artifact,
             new CurrentUserAccess(task.UserId, "owner", "User", ["AiGateway.EditArtifact"]),
             IsOwner: true);
-        var pendingFinalApproval = new ApprovalRequest(
+        var bindingJson = AgentCanonicalJsonV1.Canonicalize(JsonSerializer.Serialize(
+            new[]
+            {
+                new FinalOutputApprovalArtifactBinding(
+                    artifact.Id.Value,
+                    artifact.CreatedByStepId!.Value.Value,
+                    artifact.Version,
+                    artifact.RelativePath,
+                    artifact.FileSize,
+                    artifact.MimeType,
+                    Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant())
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var pendingFinalApproval = ApprovalRequest.CreateFinalOutput(
             task.Id,
-            AgentApprovalType.FinalOutput,
-            workspace.WorkspaceCode,
             task.UserId,
-            now);
+            now,
+            new FinalOutputApprovalProof(
+                workspace.Id,
+                workspace.WorkspaceCode,
+                AgentStepId.New(),
+                AgentTaskRunAttemptId.New(),
+                AgentNodeRunId.New(),
+                TaskFencingToken: 1,
+                NodeFencingToken: 1,
+                EvidenceSetDigest: new string('a', 64),
+                ManifestDigest: new string('b', 64),
+                bindingJson,
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(bindingJson)))
+                    .ToLowerInvariant()));
         var lockedByApproval = await ArtifactWorkspaceP9Policy.ValidateDraftMutationAsync(
             new InMemoryReadRepository<ApprovalRequest>([pendingFinalApproval]),
             context,

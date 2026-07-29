@@ -6,6 +6,7 @@ using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -31,7 +32,8 @@ public sealed class AgentApprovalPermissionHardeningTests
     {
         await AuthenticateAsAdminAsync();
         var owner = await CreateUserAsync($"approval-owner-{Guid.NewGuid():N}", "User");
-        var seeded = await SeedWorkspaceReadyTaskAsync(Guid.Parse(owner.UserId), includeToolApproval: true);
+        var seeded = await SeedWorkspaceReadyTaskAsync(Guid.Parse(owner.UserId), includeToolApproval: false);
+        var toolTask = await SeedWaitingToolApprovalTaskAsync(Guid.Parse(owner.UserId));
 
         await AuthenticateAsync(owner.UserName, "Password123!");
 
@@ -46,11 +48,11 @@ public sealed class AgentApprovalPermissionHardeningTests
 
         var finalApprovalId = await GetApprovalIdAsync(seeded.TaskId, AgentApprovalType.FinalOutput);
         await AssertApprovalForbiddenAsync(
-            seeded.ToolApprovalId!.Value,
+            toolTask.ToolApprovalId!.Value,
             approve: true,
             "AiGateway.ApproveAgentToolCall");
         await AssertApprovalForbiddenAsync(
-            seeded.ToolApprovalId.Value,
+            toolTask.ToolApprovalId.Value,
             approve: false,
             "AiGateway.ApproveAgentToolCall");
         await AssertApprovalForbiddenAsync(
@@ -176,7 +178,9 @@ public sealed class AgentApprovalPermissionHardeningTests
         bool includeToolApproval,
         IReadOnlyCollection<SeedArtifactInput>? artifactInputs = null)
     {
-        var now = DateTimeOffset.UtcNow;
+        // Keep the fixture's synthetic multi-step timeline behind wall-clock time so an
+        // immediate HTTP decision never predates the immutable approval proof.
+        var now = DateTimeOffset.UtcNow.AddMinutes(-1);
         var workspaceCode = $"ws_approval_{Guid.NewGuid():N}"[..38];
         var workspaceRoot = Path.Combine(GetWorkspaceRoot(), workspaceCode);
         var artifacts = artifactInputs ?? (includeToolApproval
@@ -248,28 +252,7 @@ public sealed class AgentApprovalPermissionHardeningTests
                 .ToArray(),
             now);
         task.ApprovePlan(now);
-        var runStartedAt = now.AddSeconds(1);
-        task.Start(runStartedAt);
-
-        AgentTaskRunAttempt? runAttempt = null;
-        if (markWaitingFinalApproval)
-        {
-            runAttempt = new AgentTaskRunAttempt(
-                task.Id,
-                1,
-                AgentTaskRunTriggerType.Manual,
-                "http-finalization-fixture",
-                runStartedAt,
-                TimeSpan.FromMinutes(5));
-            task.BeginRunAttempt(
-                runAttempt.Id,
-                runAttempt.AttemptNo,
-                runAttempt.LeaseId!.Value,
-                runAttempt.LeaseOwner!,
-                runAttempt.LeaseExpiresAt!.Value,
-                runStartedAt);
-            runAttempt.BindTaskFencingToken(task.RunFencingToken);
-        }
+        var artifactContents = new Dictionary<Guid, byte[]>();
 
         for (var index = 0; index < artifactFiles.Count; index++)
         {
@@ -301,14 +284,23 @@ public sealed class AgentApprovalPermissionHardeningTests
                     }, JsonOptions),
                     stepStartedAt.AddSeconds(2));
             }
+
+            artifactContents[created.Id.Value] =
+                await File.ReadAllBytesAsync(input.FullPath);
         }
 
         var checkpointAt = now.AddSeconds(3 + artifactFiles.Count * 3);
-        task.MarkWorkspaceReady(checkpointAt);
+        var authority = await FinalOutputApprovalTestData.CreatePreApprovalAuthorityAsync(
+            task,
+            workspace,
+            artifactContents,
+            checkpointAt);
         if (markWaitingFinalApproval)
         {
             task.WaitForFinalApproval(checkpointAt);
-            runAttempt!.WaitForApproval(checkpointAt, "Waiting for final output approval.");
+            authority.RunAttempt.WaitForApproval(
+                checkpointAt,
+                "Waiting for final output approval.");
             task.ReleaseRunLease(checkpointAt, clearActiveAttempt: false);
         }
 
@@ -327,21 +319,20 @@ public sealed class AgentApprovalPermissionHardeningTests
         ApprovalRequest? finalApproval = null;
         if (markWaitingFinalApproval)
         {
-            finalApproval = new ApprovalRequest(
+            finalApproval = ApprovalRequest.CreateFinalOutput(
                 task.Id,
-                AgentApprovalType.FinalOutput,
-                workspace.WorkspaceCode,
                 ownerId,
-                checkpointAt);
+                checkpointAt,
+                authority.Proof);
             dbContext.ApprovalRequests.Add(finalApproval);
         }
 
         dbContext.AgentTasks.Add(task);
         dbContext.ArtifactWorkspaces.Add(workspace);
-        if (runAttempt is not null)
-        {
-            dbContext.AgentTaskRunAttempts.Add(runAttempt);
-        }
+        dbContext.AgentTaskRunAttempts.Add(authority.RunAttempt);
+        dbContext.AgentTaskRunQueueItems.Add(authority.OriginalQueueItem);
+        dbContext.Set<AgentNodeRun>().AddRange(authority.NodeRuns);
+        dbContext.Set<AgentEvidenceRecord>().AddRange(authority.Evidence);
         await dbContext.SaveChangesAsync();
 
         return new SeededAgentTask(

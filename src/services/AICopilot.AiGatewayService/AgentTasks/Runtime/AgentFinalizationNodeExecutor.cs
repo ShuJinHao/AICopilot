@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
@@ -118,6 +120,19 @@ internal sealed class AgentFinalizationNodeExecutor(
             return Conflict("Final artifact paths conflict after canonical path normalization.");
         }
 
+        var approvalAuthority = ValidateApprovalAuthority(
+            taskClaim,
+            nodeClaim,
+            workspace,
+            finalStep,
+            approval,
+            parentEvidence,
+            staged);
+        if (!approvalAuthority.IsSuccess)
+        {
+            return Result.From(approvalAuthority);
+        }
+
         if (staged.Count > nodeClaim.NodeRun.ReservedArtifactCount ||
             totalBytes > nodeClaim.NodeRun.ReservedArtifactBytes)
         {
@@ -157,7 +172,8 @@ internal sealed class AgentFinalizationNodeExecutor(
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
         {
             return Conflict("Final artifact file set could not be staged under the active NodeRun authority.");
         }
@@ -229,6 +245,11 @@ internal sealed class AgentFinalizationNodeExecutor(
                                 workspace.Id,
                                 approval.Id,
                                 finalStep.Id,
+                                approval.FinalOutputProofDigest!,
+                                approval.FinalOutputDecisionProofDigest!,
+                                approvalAuthority.Value!,
+                                approval.FinalOutputManifestDigest!,
+                                approval.FinalOutputArtifactBindingDigest!,
                                 stage,
                                 bindings,
                                 durableOutputJson,
@@ -260,11 +281,6 @@ internal sealed class AgentFinalizationNodeExecutor(
         {
             throw;
         }
-        catch (Exception)
-        {
-            return Conflict("Final-output NodeRun checkpoint could not be committed.");
-        }
-
         await StageProjectionsBestEffortAsync(
             taskClaim.Task,
             workspace,
@@ -288,6 +304,110 @@ internal sealed class AgentFinalizationNodeExecutor(
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return relativePaths.Any(path => !seen.Add(ArtifactPathGuard.NormalizeRelativePath(path)));
+    }
+
+    private static Result<string> ValidateApprovalAuthority(
+        DurableTaskClaim taskClaim,
+        AgentNodeRunClaim nodeClaim,
+        ArtifactWorkspace workspace,
+        AgentStep finalStep,
+        ApprovalRequest approval,
+        IReadOnlyCollection<AgentEvidenceRecord> parentEvidence,
+        IReadOnlyCollection<(Artifact Artifact, string SourcePath, ArtifactFileSetWriteRequest Write)> staged)
+    {
+        if (!approval.HasValidFinalOutputProof() ||
+            !approval.HasValidFinalOutputDecisionProof())
+        {
+            return Conflict<string>(
+                "Final-output NodeRun requires immutable approval and decision proofs.");
+        }
+
+        var proof = approval.GetFinalOutputProof();
+        if (proof.WorkspaceId != workspace.Id ||
+            !string.Equals(proof.WorkspaceCode, workspace.WorkspaceCode, StringComparison.Ordinal) ||
+            proof.FinalStepId != finalStep.Id ||
+            proof.ActiveRunAttemptId != taskClaim.RunAttempt.Id ||
+            proof.FinalNodeRunId != nodeClaim.NodeRun.Id ||
+            proof.TaskFencingToken != taskClaim.TaskFencingToken ||
+            proof.TaskFencingToken != nodeClaim.TaskFencingToken ||
+            proof.NodeFencingToken != nodeClaim.NodeFencingToken)
+        {
+            return Conflict<string>(
+                "Final-output NodeRun task, workspace, step, attempt, node, or fence differs from approval.");
+        }
+
+        if (!AgentEvidenceSetDigestAuthority.TryComputeEffective(
+                parentEvidence,
+                out var evidenceSetDigest) ||
+            evidenceSetDigest is null ||
+            !string.Equals(
+                proof.EvidenceSetDigest,
+                evidenceSetDigest,
+                StringComparison.Ordinal))
+        {
+            return Conflict<string>(
+                "Final-output NodeRun Evidence set differs from the approved Evidence set.");
+        }
+
+        FinalOutputApprovalArtifactBinding[] expectedBindings;
+        try
+        {
+            expectedBindings = JsonSerializer.Deserialize<FinalOutputApprovalArtifactBinding[]>(
+                                   proof.ArtifactBindingsJson,
+                                   CanonicalJson.SerializerOptions)
+                               ?? [];
+        }
+        catch (JsonException)
+        {
+            return Conflict<string>(
+                "Final-output approval artifact bindings are unreadable.");
+        }
+
+        var actualBindings = staged
+            .OrderBy(item => item.Artifact.Id.Value)
+            .Select(item => new FinalOutputApprovalArtifactBinding(
+                item.Artifact.Id.Value,
+                item.Artifact.CreatedByStepId!.Value.Value,
+                item.Artifact.Version,
+                item.SourcePath,
+                item.Write.Content.LongLength,
+                item.Write.MimeType,
+                Convert.ToHexString(SHA256.HashData(item.Write.Content)).ToLowerInvariant()))
+            .ToArray();
+        var bindingJson = CanonicalJson.Serialize(actualBindings);
+        var bindingDigest = CanonicalJson.ComputeSha256(bindingJson);
+        if (!actualBindings.SequenceEqual(expectedBindings) ||
+            !string.Equals(
+                bindingDigest,
+                proof.ArtifactBindingDigest,
+                StringComparison.Ordinal))
+        {
+            return Conflict<string>(
+                "Final-output source file bytes or artifact bindings drifted after approval.");
+        }
+
+        var manifestDigest = CanonicalJson.ComputeSha256(CanonicalJson.Serialize(new
+        {
+            version = "final-output-source-manifest-v1",
+            taskId = taskClaim.Task.Id.Value,
+            workspaceId = workspace.Id.Value,
+            workspaceCode = workspace.WorkspaceCode,
+            finalStepId = finalStep.Id.Value,
+            activeRunAttemptId = taskClaim.RunAttempt.Id.Value,
+            finalNodeRunId = nodeClaim.NodeRun.Id.Value,
+            taskFencingToken = taskClaim.TaskFencingToken,
+            nodeFencingToken = nodeClaim.NodeFencingToken,
+            evidenceSetDigest,
+            artifactBindingDigest = bindingDigest,
+            artifacts = actualBindings
+        }));
+        return string.Equals(
+            manifestDigest,
+            proof.ManifestDigest,
+            StringComparison.Ordinal)
+            ? Result.Success(evidenceSetDigest)
+            : Conflict<string>(
+                "Final-output source manifest differs from the approved manifest.");
     }
 
     private async Task StageProjectionsBestEffortAsync(
@@ -452,6 +572,11 @@ internal sealed class AgentFinalizationNodeExecutor(
     }
 
     private static Result<AgentFinalizationNodeExecutionResult> Conflict(string detail) =>
+        Result.Failure(new ApiProblemDescriptor(
+            AppProblemCodes.AgentFinalizationStateConflict,
+            detail));
+
+    private static Result<T> Conflict<T>(string detail) =>
         Result.Failure(new ApiProblemDescriptor(
             AppProblemCodes.AgentFinalizationStateConflict,
             detail));

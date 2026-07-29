@@ -6,7 +6,9 @@ using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.AgentWorkflowTestKit;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.WorkflowTests;
 
@@ -42,7 +44,7 @@ public sealed class AgentFinalizationWorkflowTests : ToolRegistryGovernanceTestB
     }
 
     [Fact]
-    public async Task FinalizeAsync_ShouldEnqueueApprovedPausedCheckpointWithoutSynchronousPublication()
+    public async Task FinalizeAsync_ShouldFailClosedUntilDurableWorkerPublishes()
     {
         var now = DateTimeOffset.UtcNow;
         var planJson = AgentPlanV2TestData.Create(
@@ -84,24 +86,6 @@ public sealed class AgentFinalizationWorkflowTests : ToolRegistryGovernanceTestB
             now);
         task.ApprovePlan(now);
 
-        var runStartedAt = now.AddSeconds(1);
-        task.Start(runStartedAt);
-        var attempt = new AgentTaskRunAttempt(
-            task.Id,
-            1,
-            AgentTaskRunTriggerType.Manual,
-            "workflow-finalization",
-            runStartedAt,
-            TimeSpan.FromMinutes(5));
-        task.BeginRunAttempt(
-            attempt.Id,
-            attempt.AttemptNo,
-            attempt.LeaseId!.Value,
-            attempt.LeaseOwner!,
-            attempt.LeaseExpiresAt!.Value,
-            runStartedAt);
-        attempt.BindTaskFencingToken(task.RunFencingToken);
-
         var stepStartedAt = now.AddSeconds(2);
         generationStep.Start(stepStartedAt);
         var artifact = workspace.AddDraftArtifact(
@@ -123,42 +107,66 @@ public sealed class AgentFinalizationWorkflowTests : ToolRegistryGovernanceTestB
             stepStartedAt.AddSeconds(2));
 
         var checkpointAt = now.AddSeconds(5);
-        task.MarkWorkspaceReady(checkpointAt);
+        var sourceBytes = Encoding.UTF8.GetBytes("report");
+        var authority = await FinalOutputApprovalTestData.CreatePreApprovalAuthorityAsync(
+            task,
+            workspace,
+            new Dictionary<Guid, byte[]>
+            {
+                [artifact.Id.Value] = sourceBytes
+            },
+            checkpointAt);
         task.WaitForFinalApproval(checkpointAt);
-        attempt.WaitForApproval(checkpointAt, "Waiting for final output approval.");
+        authority.RunAttempt.WaitForApproval(
+            checkpointAt,
+            "Waiting for final output approval.");
         task.ReleaseRunLease(checkpointAt, clearActiveAttempt: false);
 
-        var approval = new ApprovalRequest(
+        var approval = ApprovalRequest.CreateFinalOutput(
             task.Id,
-            AgentApprovalType.FinalOutput,
-            workspace.WorkspaceCode,
             task.UserId,
-            checkpointAt);
+            checkpointAt,
+            authority.Proof);
         var approvedAt = checkpointAt.AddSeconds(1);
         approval.Approve(UserId, "approved", approvedAt);
         finalStep.Approve();
+        var resumeQueue = new AgentTaskRunQueueItem(
+            task.Id,
+            AgentTaskRunTriggerType.ApprovalResume,
+            UserId,
+            approvedAt,
+            sourceApprovalRequestId: approval.Id);
 
         var taskRepository = new InMemoryRepository<AgentTask>(task);
         var workspaceRepository = new InMemoryRepository<ArtifactWorkspace>(workspace);
         var approvalRepository = new InMemoryRepository<ApprovalRequest>(approval);
-        var attemptStore = new InMemoryAgentTaskRunAttemptStore(attempt);
-        var queueStore = new InMemoryAgentTaskRunQueueStore();
+        var attemptStore = new InMemoryAgentTaskRunAttemptStore(authority.RunAttempt);
+        var queueStore = new InMemoryAgentTaskRunQueueStore(
+            authority.OriginalQueueItem,
+            resumeQueue);
         var fileStore = new InMemoryArtifactWorkspaceFileStore();
         fileStore.AddFile(
             workspace.WorkspaceCode,
             artifact.RelativePath,
-            Encoding.UTF8.GetBytes("report"),
+            sourceBytes,
             artifact.MimeType);
+        var auditWriter = new CapturingAuditLogWriter();
+        var finalOutputApprovalCoordinator = new FinalOutputApprovalCoordinator(
+            new ThrowingFinalOutputApprovalStore(),
+            new FinalOutputApprovalProofFactory(
+                attemptStore,
+                authority.NodeRunStore,
+                fileStore),
+            approvalRepository,
+            workspaceRepository,
+            queueStore,
+            new AgentAuditRecorder(auditWriter),
+            auditWriter);
         var coordinator = new ArtifactWorkspaceLifecycleCoordinator(
             workspaceRepository,
             taskRepository,
-            approvalRepository,
-            attemptStore,
             fileStore,
-            new AgentTaskRunQueue(
-                queueStore,
-                AgentPlanV2TestData.CreateDownstreamRuntimeHarnessFreshReadGate()),
-            new AgentAuditRecorder(new CapturingAuditLogWriter()),
+            finalOutputApprovalCoordinator,
             new TestCurrentUser(UserId),
             new StubIdentityAccessService([AgentApprovalPermissions.FinalizeWorkspace]));
 
@@ -166,13 +174,42 @@ public sealed class AgentFinalizationWorkflowTests : ToolRegistryGovernanceTestB
             workspace.WorkspaceCode,
             CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.Status.Should().Be(ArtifactWorkspaceStatus.Active.ToString());
-        result.Value.Artifacts.Should().ContainSingle(item =>
-            item.Status == ArtifactStatus.Draft.ToString() &&
-            item.RelativePath == "draft/report.md");
-        var queued = queueStore.Items.Should().ContainSingle().Which;
-        queued.TriggerType.Should().Be(AgentTaskRunTriggerType.ApprovalResume);
-        queued.Status.Should().Be(AgentTaskRunQueueStatus.Queued);
+        result.IsSuccess.Should().BeFalse();
+        result.Errors!
+            .OfType<ApiProblemDescriptor>()
+            .Should()
+            .ContainSingle(problem =>
+                problem.Code == AppProblemCodes.AgentFinalizationStateConflict);
+        queueStore.Items
+            .Where(item => item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)
+            .Should()
+            .ContainSingle()
+            .Which.Id.Should().Be(resumeQueue.Id);
+
+        queueStore.Items.Remove(resumeQueue);
+        var missingResume = await coordinator.FinalizeAsync(
+            workspace.WorkspaceCode,
+            CancellationToken.None);
+        missingResume.IsSuccess.Should().BeFalse();
+        missingResume.Errors!
+            .OfType<ApiProblemDescriptor>()
+            .Should()
+            .ContainSingle(problem =>
+                problem.Code == AppProblemCodes.AgentFinalizationStateConflict);
+        workspace.Status.Should().Be(ArtifactWorkspaceStatus.Active);
+        artifact.Status.Should().Be(ArtifactStatus.Draft);
+    }
+
+    private sealed class ThrowingFinalOutputApprovalStore : IFinalOutputApprovalStore
+    {
+        public Task<FinalOutputApprovalCommandResult> PrepareAsync(
+            FinalOutputApprovalPreparation preparation,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Legacy finalize must not create an approval.");
+
+        public Task<FinalOutputApprovalCommandResult> DecideAsync(
+            FinalOutputApprovalDecision decision,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Legacy finalize must not decide an approval.");
     }
 }

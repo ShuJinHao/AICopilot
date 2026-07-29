@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
@@ -5,6 +8,7 @@ using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Uploads;
+using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AggregateTests;
 
@@ -160,6 +164,110 @@ public sealed class AgentArtifactDomainTests
     }
 
     [Fact]
+    public void FinalOutputApproval_ShouldRequireAndSealImmutableAuthorityAndDecisionProofs()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var taskId = AgentTaskId.New();
+        var proof = CreateFinalOutputProof();
+
+        var unbound = () => new ApprovalRequest(
+            taskId,
+            AgentApprovalType.FinalOutput,
+            proof.WorkspaceCode,
+            Guid.NewGuid(),
+            now);
+        unbound.Should().Throw<ArgumentException>();
+
+        var approval = ApprovalRequest.CreateFinalOutput(
+            taskId,
+            Guid.NewGuid(),
+            now,
+            proof);
+        approval.HasValidFinalOutputProof().Should().BeTrue();
+        approval.FinalOutputProofDigest.Should().MatchRegex("^[0-9a-f]{64}$");
+        approval.FinalOutputDecisionProofDigest.Should().BeNull();
+
+        approval.Approve(
+            Guid.NewGuid(),
+            "immutable final-output decision",
+            now.AddSeconds(1));
+
+        approval.HasValidFinalOutputProof().Should().BeTrue();
+        approval.HasValidFinalOutputDecisionProof().Should().BeTrue();
+        approval.FinalOutputDecisionProofDigest.Should().MatchRegex("^[0-9a-f]{64}$");
+    }
+
+    [Fact]
+    public void FinalOutputApprovalProof_ShouldSurvivePostgresPrecisionAndRejectCreationTimeDrift()
+    {
+        var createdAt = DateTimeOffset.UtcNow.AddTicks(7);
+        var decidedAt = createdAt.AddSeconds(1).AddTicks(3);
+        var approval = ApprovalRequest.CreateFinalOutput(
+            AgentTaskId.New(),
+            Guid.NewGuid(),
+            createdAt,
+            CreateFinalOutputProof());
+        approval.Approve(Guid.NewGuid(), "precision round-trip", decidedAt);
+
+        SetApprovalRequestProperty(
+            approval,
+            nameof(ApprovalRequest.CreatedAt),
+            ToPostgresMicrosecond(createdAt));
+        SetApprovalRequestProperty(
+            approval,
+            nameof(ApprovalRequest.ApprovedAt),
+            (DateTimeOffset?)ToPostgresMicrosecond(decidedAt));
+        approval.HasValidFinalOutputProof().Should().BeTrue();
+        approval.HasValidFinalOutputDecisionProof().Should().BeTrue();
+
+        SetApprovalRequestProperty(
+            approval,
+            nameof(ApprovalRequest.CreatedAt),
+            ToPostgresMicrosecond(createdAt).AddMilliseconds(1));
+        approval.HasValidFinalOutputProof().Should().BeFalse();
+        approval.HasValidFinalOutputDecisionProof().Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("workspace")]
+    [InlineData("workspace-code")]
+    [InlineData("final-step")]
+    [InlineData("attempt")]
+    [InlineData("node")]
+    [InlineData("task-fence")]
+    [InlineData("node-fence")]
+    [InlineData("evidence")]
+    [InlineData("manifest")]
+    [InlineData("artifact-bindings")]
+    public void FinalOutputApproval_ShouldRejectEveryAuthorityTupleDrift(string drift)
+    {
+        var proof = CreateFinalOutputProof();
+        var approval = ApprovalRequest.CreateFinalOutput(
+            AgentTaskId.New(),
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow,
+            proof);
+        var drifted = drift switch
+        {
+            "workspace" => proof with { WorkspaceId = ArtifactWorkspaceId.New() },
+            "workspace-code" => proof with { WorkspaceCode = "ws_drifted" },
+            "final-step" => proof with { FinalStepId = AgentStepId.New() },
+            "attempt" => proof with { ActiveRunAttemptId = AgentTaskRunAttemptId.New() },
+            "node" => proof with { FinalNodeRunId = AgentNodeRunId.New() },
+            "task-fence" => proof with { TaskFencingToken = proof.TaskFencingToken + 1 },
+            "node-fence" => proof with { NodeFencingToken = proof.NodeFencingToken + 1 },
+            "evidence" => proof with { EvidenceSetDigest = new string('c', 64) },
+            "manifest" => proof with { ManifestDigest = new string('d', 64) },
+            "artifact-bindings" => proof with { ArtifactBindingDigest = new string('e', 64) },
+            _ => throw new ArgumentOutOfRangeException(nameof(drift))
+        };
+
+        approval.MatchesFinalOutputProof(drifted).Should().BeFalse();
+        approval.HasValidFinalOutputProof().Should().BeTrue(
+            "a caller-provided drift must never mutate the stored proof");
+    }
+
+    [Fact]
     public void AgentStep_ShouldEscalateRuntimeHighRiskToolToApproval()
     {
         var now = DateTimeOffset.UtcNow;
@@ -186,6 +294,38 @@ public sealed class AgentArtifactDomainTests
 
         step.RequiresApproval.Should().BeTrue();
         step.Status.Should().Be(AgentStepStatus.Approved);
+    }
+
+    private static FinalOutputApprovalProof CreateFinalOutputProof()
+    {
+        var bindingJson = AgentCanonicalJsonV1.Canonicalize(JsonSerializer.Serialize(
+            new[]
+            {
+                new FinalOutputApprovalArtifactBinding(
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    Version: 1,
+                    SourceRelativePath: "draft/report.md",
+                    FileSize: 7,
+                    MimeType: "text/markdown",
+                    Sha256: Convert.ToHexString(
+                            SHA256.HashData("report"u8.ToArray()))
+                        .ToLowerInvariant())
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        return new FinalOutputApprovalProof(
+            ArtifactWorkspaceId.New(),
+            "ws_final_output",
+            AgentStepId.New(),
+            AgentTaskRunAttemptId.New(),
+            AgentNodeRunId.New(),
+            TaskFencingToken: 3,
+            NodeFencingToken: 2,
+            EvidenceSetDigest: new string('a', 64),
+            ManifestDigest: new string('b', 64),
+            bindingJson,
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(bindingJson)))
+                .ToLowerInvariant());
     }
 
     [Fact]
@@ -399,5 +539,21 @@ public sealed class AgentArtifactDomainTests
         var property = typeof(UploadRecord).GetProperty(propertyName);
         property.Should().NotBeNull();
         property!.SetValue(record, value);
+    }
+
+    private static void SetApprovalRequestProperty<T>(
+        ApprovalRequest approval,
+        string propertyName,
+        T value)
+    {
+        var property = typeof(ApprovalRequest).GetProperty(propertyName);
+        property.Should().NotBeNull();
+        property!.SetValue(approval, value);
+    }
+
+    private static DateTimeOffset ToPostgresMicrosecond(DateTimeOffset value)
+    {
+        var utcTicks = value.UtcDateTime.Ticks;
+        return new DateTimeOffset(utcTicks - utcTicks % 10, TimeSpan.Zero);
     }
 }

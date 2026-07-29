@@ -1,4 +1,5 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Ids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -205,6 +206,12 @@ public sealed class AgentTaskRunQueueItemConfiguration : IEntityTypeConfiguratio
             .IsRequired()
             .HasColumnName("trigger_type");
 
+        builder.Property(item => item.SourceApprovalRequestId)
+            .HasConversion(
+                id => id.HasValue ? id.Value.Value : (Guid?)null,
+                value => value.HasValue ? new ApprovalRequestId(value.Value) : null)
+            .HasColumnName("source_approval_request_id");
+
         builder.Property(item => item.Status)
             .HasConversion<string>()
             .HasMaxLength(40)
@@ -262,6 +269,17 @@ public sealed class AgentTaskRunQueueItemConfiguration : IEntityTypeConfiguratio
 
         builder.HasIndex(item => item.RunAttemptId)
             .HasDatabaseName("ix_agent_task_run_queue_items_run_attempt_id");
+
+        builder.HasIndex(item => item.SourceApprovalRequestId)
+            .IsUnique()
+            .HasFilter("source_approval_request_id IS NOT NULL")
+            .HasDatabaseName("ux_agent_task_run_queue_items_source_approval");
+
+        builder.HasOne<ApprovalRequest>()
+            .WithMany()
+            .HasForeignKey(item => item.SourceApprovalRequestId)
+            .HasConstraintName("fk_agent_task_run_queue_items_source_approval")
+            .OnDelete(DeleteBehavior.Restrict);
 
         MapUniqueFilteredIndex(builder, item => item.TaskId, "status IN ('Queued', 'Claimed', 'Started')", "ux_agent_task_run_queue_items_active_task");
     }

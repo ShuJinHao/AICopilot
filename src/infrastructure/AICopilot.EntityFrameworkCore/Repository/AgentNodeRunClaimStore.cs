@@ -286,6 +286,21 @@ internal sealed class AgentNodeRunClaimStore(
         string? expectedStatus,
         CancellationToken cancellationToken)
     {
+        if (expectedStatus is null)
+        {
+            return context.AgentNodeRuns
+                .FromSqlInterpolated($$"""
+                    SELECT node.*, node.xmin FROM aigateway.agent_node_runs AS node
+                    WHERE id = {{claim.NodeRun.Id.Value}}
+                      AND run_attempt_id = {{claim.RunAttemptId.Value}}
+                      AND task_fencing_token = {{claim.TaskFencingToken}}
+                      AND node_fencing_token = {{claim.NodeFencingToken}}
+                      AND lease_id = {{claim.NodeLeaseId}}
+                    FOR UPDATE
+                    """)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+
         return context.AgentNodeRuns
             .FromSqlInterpolated($$"""
                 SELECT node.*, node.xmin FROM aigateway.agent_node_runs AS node
@@ -294,7 +309,7 @@ internal sealed class AgentNodeRunClaimStore(
                   AND task_fencing_token = {{claim.TaskFencingToken}}
                   AND node_fencing_token = {{claim.NodeFencingToken}}
                   AND lease_id = {{claim.NodeLeaseId}}
-                  AND ({{expectedStatus}} IS NULL OR status = {{expectedStatus}})
+                  AND status = {{expectedStatus}}
                 FOR UPDATE
                 """)
             .SingleOrDefaultAsync(cancellationToken);

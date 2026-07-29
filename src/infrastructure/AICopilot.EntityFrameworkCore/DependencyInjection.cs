@@ -147,6 +147,12 @@ public static class DependencyInjection
         return services;
     }
 
+    public static IServiceCollection AddFinalOutputApprovalStore(this IServiceCollection services)
+    {
+        services.AddScoped<IFinalOutputApprovalStore, FinalOutputApprovalStore>();
+        return services;
+    }
+
     private static void AddAgentRuntimeStores(IServiceCollection services)
     {
         (Type Contract, Type Implementation)[] registrations =

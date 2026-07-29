@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
@@ -306,10 +307,15 @@ internal sealed class AgentNodeCheckpointStore(
             approval.TaskId != task.Id ||
             approval.ApprovalType != AgentApprovalType.FinalOutput ||
             approval.Status != AgentApprovalStatus.Approved ||
-            approval.ApprovedBy is null ||
-            approval.ApprovedAt is null ||
-            approval.ApprovedAt < approval.CreatedAt ||
-            !string.Equals(approval.TargetId, workspace.WorkspaceCode, StringComparison.Ordinal) ||
+            !await MatchesFinalOutputApprovalAuthorityAsync(
+                context,
+                task,
+                attempt,
+                node,
+                workspace,
+                approval,
+                checkpoint,
+                cancellationToken) ||
             mutation.ArtifactBindings.Count != artifacts.Count ||
             stage.CommitId == Guid.Empty ||
             !string.Equals(stage.WorkspaceCode, workspace.WorkspaceCode, StringComparison.Ordinal) ||
@@ -324,6 +330,23 @@ internal sealed class AgentNodeCheckpointStore(
             mutation.ArtifactBindings.Select(binding => binding.ArtifactId).Distinct().Count() != artifacts.Count ||
             mutation.ArtifactBindings.Select(binding => binding.FinalRelativePath)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() != artifacts.Count)
+        {
+            return null;
+        }
+
+        FinalOutputApprovalArtifactBinding[] approvedBindings;
+        try
+        {
+            approvedBindings = JsonSerializer.Deserialize<FinalOutputApprovalArtifactBinding[]>(
+                                   approval.FinalOutputArtifactBindingsJson!,
+                                   new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                               ?? [];
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        if (approvedBindings.Length != artifacts.Count)
         {
             return null;
         }
@@ -352,16 +375,26 @@ internal sealed class AgentNodeCheckpointStore(
         foreach (var artifact in artifacts)
         {
             var binding = mutation.ArtifactBindings.SingleOrDefault(candidate => candidate.ArtifactId == artifact.Id);
+            var approvedBinding = approvedBindings.SingleOrDefault(candidate =>
+                candidate.ArtifactId == artifact.Id.Value);
             if (binding is null ||
+                approvedBinding is null ||
                 artifact.TaskId != task.Id ||
                 artifact.WorkspaceId != workspace.Id ||
+                artifact.CreatedByStepId?.Value != approvedBinding.CreatedByStepId ||
+                artifact.Version != approvedBinding.Version ||
                 artifact.Status is not (ArtifactStatus.Draft or ArtifactStatus.Reviewing or ArtifactStatus.Approved) ||
                 artifact.FinalizedAt is not null ||
                 !string.Equals(
                     ArtifactPathGuard.NormalizeRelativePath(artifact.RelativePath),
                     ArtifactPathGuard.NormalizeRelativePath(binding.SourceRelativePath),
                     StringComparison.Ordinal) ||
+                !string.Equals(
+                    ArtifactPathGuard.NormalizeRelativePath(binding.SourceRelativePath),
+                    approvedBinding.SourceRelativePath,
+                    StringComparison.Ordinal) ||
                 artifact.FileSize != binding.FileSize ||
+                binding.FileSize != approvedBinding.FileSize ||
                 !string.Equals(artifact.MimeType, binding.MimeType, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
@@ -383,13 +416,115 @@ internal sealed class AgentNodeCheckpointStore(
 
             if (file.FileSize != binding.FileSize ||
                 !string.Equals(file.MimeType, binding.MimeType, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(file.Sha256, binding.Sha256, StringComparison.Ordinal))
+                !string.Equals(file.Sha256, binding.Sha256, StringComparison.Ordinal) ||
+                !string.Equals(binding.Sha256, approvedBinding.Sha256, StringComparison.Ordinal))
             {
                 return null;
             }
         }
 
         return new FinalizationAuthority(workspace, artifacts, finalStep, approval);
+    }
+
+    private static async Task<bool> MatchesFinalOutputApprovalAuthorityAsync(
+        AiGatewayDbContext context,
+        AgentTask task,
+        AgentTaskRunAttempt attempt,
+        AgentNodeRun node,
+        ArtifactWorkspace workspace,
+        ApprovalRequest approval,
+        AgentNodeSuccessCheckpoint checkpoint,
+        CancellationToken cancellationToken)
+    {
+        var mutation = checkpoint.Finalization!;
+        if (!approval.HasValidFinalOutputProof() ||
+            !approval.HasValidFinalOutputDecisionProof() ||
+            approval.ApprovedBy is null ||
+            approval.ApprovedAt is null ||
+            approval.ApprovedAt > checkpoint.CompletedAtUtc ||
+            !string.Equals(
+                approval.FinalOutputProofDigest,
+                mutation.ApprovalProofDigest,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                approval.FinalOutputDecisionProofDigest,
+                mutation.ApprovalDecisionProofDigest,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                approval.FinalOutputEvidenceSetDigest,
+                mutation.ApprovalEvidenceSetDigest,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                approval.FinalOutputManifestDigest,
+                mutation.ApprovalManifestDigest,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                approval.FinalOutputArtifactBindingDigest,
+                mutation.ApprovalArtifactBindingDigest,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var proof = approval.GetFinalOutputProof();
+        if (proof.WorkspaceId != workspace.Id ||
+            !string.Equals(proof.WorkspaceCode, workspace.WorkspaceCode, StringComparison.Ordinal) ||
+            proof.FinalStepId != mutation.FinalStepId ||
+            proof.ActiveRunAttemptId != attempt.Id ||
+            proof.FinalNodeRunId != node.Id ||
+            proof.TaskFencingToken != checkpoint.TaskFencingToken ||
+            proof.NodeFencingToken != checkpoint.NodeFencingToken)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(checkpoint.Evidence.CanonicalEnvelopeJson);
+            var lineage = document.RootElement.GetProperty("lineage");
+            if (!string.Equals(
+                    lineage.GetProperty("evidenceSetDigest").GetString(),
+                    proof.EvidenceSetDigest,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+        catch (Exception exception) when (
+            exception is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return false;
+        }
+
+        var currentEvidenceSetDigest = await FinalOutputEvidenceSetAuthority.ComputeAsync(
+            context,
+            task,
+            attempt,
+            node,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        if (!string.Equals(
+                currentEvidenceSetDigest,
+                proof.EvidenceSetDigest,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return await context.AgentTaskRunQueueItems.AsNoTracking().AnyAsync(queue =>
+                queue.Id == node.QueueItemId &&
+                queue.TaskId == task.Id &&
+                queue.RunAttemptId == attempt.Id &&
+                queue.TaskFencingToken == checkpoint.TaskFencingToken &&
+                queue.TriggerType == AgentTaskRunTriggerType.ApprovalResume &&
+                queue.SourceApprovalRequestId == approval.Id &&
+                queue.Status == AgentTaskRunQueueStatus.Started &&
+                queue.RequestedBy == approval.ApprovedBy &&
+                queue.CreatedAt == approval.ApprovedAt &&
+                queue.AvailableAt == approval.ApprovedAt &&
+                queue.LeaseId == task.RunLeaseId &&
+                queue.LeaseExpiresAt > checkpoint.CompletedAtUtc,
+            cancellationToken);
     }
 
     private static void ApplyFinalization(

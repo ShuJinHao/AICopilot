@@ -72,6 +72,13 @@ internal sealed class AgentDurableTaskClaimStore(
                     }
                 }
 
+                if (queueItem.SourceApprovalRequestId is not null &&
+                    (queueItem.TriggerType != AgentTaskRunTriggerType.ApprovalResume ||
+                     attempt is null))
+                {
+                    return Attempt<DurableTaskClaim?>(null);
+                }
+
                 if (attempt is null)
                 {
                     attempt = new AgentTaskRunAttempt(
@@ -92,8 +99,29 @@ internal sealed class AgentDurableTaskClaimStore(
                 }
                 else
                 {
+                    var preserveFinalOutputFence =
+                        queueItem.TriggerType == AgentTaskRunTriggerType.ApprovalResume &&
+                        queueItem.SourceApprovalRequestId is not null &&
+                        task.Status == AgentTaskStatus.WaitingFinalApproval &&
+                        attempt.Status == AgentTaskRunAttemptStatus.WaitingApproval &&
+                        await HasApprovedFinalOutputAuthorityAsync(
+                            context,
+                            queueItem,
+                            task,
+                            attempt,
+                            token);
+                    if (queueItem.SourceApprovalRequestId is not null &&
+                        !preserveFinalOutputFence)
+                    {
+                        return Attempt<DurableTaskClaim?>(null);
+                    }
+
                     attempt.AcquireLease(Guid.NewGuid(), leaseOwner, now, leaseDuration);
-                    task.AdvanceRunFencingToken(now);
+                    if (!preserveFinalOutputFence)
+                    {
+                        task.AdvanceRunFencingToken(now);
+                    }
+
                     task.AcquireRunLease(
                         attempt.LeaseId!.Value,
                         leaseOwner,
@@ -120,6 +148,40 @@ internal sealed class AgentDurableTaskClaimStore(
                 return Attempt<DurableTaskClaim?>(claim);
             },
             cancellationToken);
+    }
+
+    private static async Task<bool> HasApprovedFinalOutputAuthorityAsync(
+        AiGatewayDbContext context,
+        AgentTaskRunQueueItem queueItem,
+        AgentTask task,
+        AgentTaskRunAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var approval = await context.ApprovalRequests
+            .FromSqlInterpolated($$"""
+                SELECT approval.*, approval.xmin
+                FROM aigateway.approval_requests AS approval
+                WHERE id = {{queueItem.SourceApprovalRequestId!.Value.Value}}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+        return approval is not null &&
+               queueItem.TriggerType == AgentTaskRunTriggerType.ApprovalResume &&
+               queueItem.TaskId == task.Id &&
+               approval.TaskId == task.Id &&
+               approval.ApprovalType ==
+               AICopilot.Core.AiGateway.Aggregates.Approvals.AgentApprovalType.FinalOutput &&
+               approval.Status ==
+               AICopilot.Core.AiGateway.Aggregates.Approvals.AgentApprovalStatus.Approved &&
+               approval.ApprovedBy is not null &&
+               approval.ApprovedAt is not null &&
+               approval.HasValidFinalOutputProof() &&
+               approval.HasValidFinalOutputDecisionProof() &&
+               approval.FinalOutputRunAttemptId == attempt.Id &&
+               approval.FinalOutputTaskFencingToken == task.RunFencingToken &&
+               queueItem.RequestedBy == approval.ApprovedBy &&
+               queueItem.CreatedAt == approval.ApprovedAt &&
+               queueItem.AvailableAt == approval.ApprovedAt;
     }
 
     public Task<AgentFencedWriteResult> TryMarkStartedAsync(
@@ -222,7 +284,11 @@ internal sealed class AgentDurableTaskClaimStore(
                 switch (terminalStatus)
                 {
                     case AgentTaskRunQueueStatus.Succeeded:
-                        queueItem.MarkSucceeded(completedAtUtc, safeMessage);
+                        queueItem.MarkSucceeded(
+                            completedAtUtc,
+                            task.Status == AgentTaskStatus.Completed
+                                ? "Agent task run reached Completed."
+                                : safeMessage);
                         break;
                     case AgentTaskRunQueueStatus.Failed:
                         queueItem.MarkFailed(

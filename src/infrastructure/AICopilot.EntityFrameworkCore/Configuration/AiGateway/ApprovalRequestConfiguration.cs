@@ -27,6 +27,11 @@ public sealed class ApprovalRequestConfiguration : IEntityTypeConfiguration<Appr
         builder.HasIndex(request => request.TaskId)
             .HasDatabaseName("ix_approval_requests_task_id");
 
+        builder.HasIndex(request => new { request.TaskId, request.ApprovalType })
+            .IsUnique()
+            .HasFilter("approval_type = 'FinalOutput'")
+            .HasDatabaseName("ux_approval_requests_final_output_task");
+
         builder.Property(request => request.ApprovalType)
             .HasConversion<string>()
             .HasMaxLength(40)
@@ -62,5 +67,63 @@ public sealed class ApprovalRequestConfiguration : IEntityTypeConfiguration<Appr
         builder.Property(request => request.ApprovedAt)
             .HasColumnType("timestamp with time zone")
             .HasColumnName("approved_at");
+
+        builder.Property(request => request.FinalOutputProofVersion)
+            .HasMaxLength(80)
+            .HasColumnName("final_output_proof_version");
+
+        builder.Property(request => request.FinalOutputWorkspaceId)
+            .HasConversion(
+                id => id.HasValue ? id.Value.Value : (Guid?)null,
+                value => value.HasValue ? new ArtifactWorkspaceId(value.Value) : null)
+            .HasColumnName("final_output_workspace_id");
+
+        builder.Property(request => request.FinalOutputFinalStepId)
+            .HasConversion(
+                id => id.HasValue ? id.Value.Value : (Guid?)null,
+                value => value.HasValue ? new AgentStepId(value.Value) : null)
+            .HasColumnName("final_output_final_step_id");
+
+        builder.Property(request => request.FinalOutputRunAttemptId)
+            .HasConversion(
+                id => id.HasValue ? id.Value.Value : (Guid?)null,
+                value => value.HasValue ? new AgentTaskRunAttemptId(value.Value) : null)
+            .HasColumnName("final_output_run_attempt_id");
+
+        builder.Property(request => request.FinalOutputNodeRunId)
+            .HasConversion(
+                id => id.HasValue ? id.Value.Value : (Guid?)null,
+                value => value.HasValue ? new AgentNodeRunId(value.Value) : null)
+            .HasColumnName("final_output_node_run_id");
+
+        builder.Property(request => request.FinalOutputTaskFencingToken)
+            .HasColumnName("final_output_task_fencing_token");
+
+        builder.Property(request => request.FinalOutputNodeFencingToken)
+            .HasColumnName("final_output_node_fencing_token");
+
+        builder.Property(request => request.FinalOutputEvidenceSetDigest)
+            .HasMaxLength(64)
+            .HasColumnName("final_output_evidence_set_digest");
+
+        builder.Property(request => request.FinalOutputManifestDigest)
+            .HasMaxLength(64)
+            .HasColumnName("final_output_manifest_digest");
+
+        builder.Property(request => request.FinalOutputArtifactBindingsJson)
+            .HasColumnType("jsonb")
+            .HasColumnName("final_output_artifact_bindings_json");
+
+        builder.Property(request => request.FinalOutputArtifactBindingDigest)
+            .HasMaxLength(64)
+            .HasColumnName("final_output_artifact_binding_digest");
+
+        builder.Property(request => request.FinalOutputProofDigest)
+            .HasMaxLength(64)
+            .HasColumnName("final_output_proof_digest");
+
+        builder.Property(request => request.FinalOutputDecisionProofDigest)
+            .HasMaxLength(64)
+            .HasColumnName("final_output_decision_proof_digest");
     }
 }

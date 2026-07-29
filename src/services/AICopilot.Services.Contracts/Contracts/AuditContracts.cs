@@ -14,6 +14,7 @@ public static class AuditResults
 {
     public const string Succeeded = "Succeeded";
     public const string Rejected = "Rejected";
+    public const string Failed = "Failed";
 }
 
 public sealed record AuditLogWriteRequest(

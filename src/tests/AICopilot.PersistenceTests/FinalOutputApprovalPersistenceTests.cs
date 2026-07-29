@@ -1,0 +1,1118 @@
+using System.Text;
+using AICopilot.AiGatewayService;
+using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
+using AICopilot.Core.AiGateway.Aggregates.Approvals;
+using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
+using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Runtime.AgentExecution;
+using AICopilot.EntityFrameworkCore;
+using AICopilot.EntityFrameworkCore.Persistence;
+using AICopilot.SharedKernel.Result;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+namespace AICopilot.PersistenceTests;
+
+[Collection(PostgresPersistenceTestCollection.Name)]
+public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixture fixture)
+{
+    [Fact]
+    public async Task Prepare_ShouldSerializeConcurrentCreatorsIntoOneProofBoundApproval()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedPreApprovalAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+
+        using var firstScope = host.Services.CreateScope();
+        using var secondScope = host.Services.CreateScope();
+        var first = firstScope.ServiceProvider.GetRequiredService<IFinalOutputApprovalStore>();
+        var second = secondScope.ServiceProvider.GetRequiredService<IFinalOutputApprovalStore>();
+        var preparation = new FinalOutputApprovalPreparation(
+            seeded.TaskId,
+            seeded.UserId,
+            seeded.Proof,
+            DateTimeOffset.UtcNow);
+
+        var results = await Task.WhenAll(
+            first.PrepareAsync(preparation),
+            second.PrepareAsync(preparation));
+
+        results.Select(result => result.Status).Should().BeEquivalentTo(
+            [
+                FinalOutputApprovalCommandStatus.Created,
+                FinalOutputApprovalCommandStatus.ExistingPending
+            ]);
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        var approval = await verification.ApprovalRequests.AsNoTracking().SingleAsync();
+        approval.HasValidFinalOutputProof().Should().BeTrue();
+        approval.Status.Should().Be(AgentApprovalStatus.Pending);
+        (await verification.AgentTaskRunQueueItems.CountAsync(item =>
+            item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)).Should().Be(0);
+        var task = await verification.AgentTasks
+            .Include(item => item.Steps)
+            .AsNoTracking()
+            .SingleAsync();
+        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        task.Steps.Single(step => step.Id == seeded.FinalStepId)
+            .Status.Should().Be(AgentStepStatus.WaitingApproval);
+        var attempt = await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync();
+        attempt.Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
+    }
+
+    [Fact]
+    public async Task Decide_ShouldMakeConcurrentApproveApproveIdempotentWithOneResumeQueue()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using var firstScope = host.Services.CreateScope();
+        using var secondScope = host.Services.CreateScope();
+        var decidedAt = DateTimeOffset.UtcNow;
+
+        var results = await Task.WhenAll(
+            firstScope.ServiceProvider.GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve-a",
+                    seeded.Proof,
+                    decidedAt)),
+            secondScope.ServiceProvider.GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve-b",
+                    seeded.Proof,
+                    decidedAt)));
+
+        results.Select(result => result.Status).Should().BeEquivalentTo(
+            [
+                FinalOutputApprovalCommandStatus.Approved,
+                FinalOutputApprovalCommandStatus.DuplicateDecision
+            ]);
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        var approval = await verification.ApprovalRequests.AsNoTracking().SingleAsync();
+        approval.Status.Should().Be(AgentApprovalStatus.Approved);
+        approval.HasValidFinalOutputDecisionProof().Should().BeTrue();
+        var resume = await verification.AgentTaskRunQueueItems
+            .AsNoTracking()
+            .Where(item => item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)
+            .SingleAsync();
+        resume.SourceApprovalRequestId.Should().Be(approval.Id);
+        resume.RunAttemptId.Should().BeNull(
+            "approval only enqueues; the durable worker owns the later claim");
+
+        var task = await verification.AgentTasks
+            .Include(item => item.Steps)
+            .AsNoTracking()
+            .SingleAsync();
+        task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        task.Steps.Single(step => step.Id == seeded.FinalStepId)
+            .Status.Should().Be(AgentStepStatus.Approved);
+        var finalNode = await verification.Set<AgentNodeRun>()
+            .AsNoTracking()
+            .SingleAsync(node => node.Id == seeded.FinalNodeRunId);
+        finalNode.Status.Should().Be(AgentNodeRunStatus.WaitingApproval);
+        (await verification.ArtifactWorkspaces.AsNoTracking().SingleAsync())
+            .Status.Should().Be(ArtifactWorkspaceStatus.Active);
+    }
+
+    [Theory]
+    [InlineData("requested-by")]
+    [InlineData("created-at")]
+    [InlineData("available-at")]
+    public async Task ApprovalResumeClaim_ShouldFailClosedWhenDecisionQueueTupleDrifts(
+        string drift)
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before queue drift",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        await using (var mutation = CreateAiGatewayContext(database.ConnectionString))
+        {
+            var affected = drift switch
+            {
+                "requested-by" => await mutation.Database.ExecuteSqlInterpolatedAsync($$"""
+                    UPDATE aigateway.agent_task_run_queue_items
+                    SET requested_by = {{Guid.NewGuid()}}
+                    WHERE source_approval_request_id = {{seeded.ApprovalId.Value}}
+                    """),
+                "created-at" => await mutation.Database.ExecuteSqlRawAsync(
+                    """
+                    UPDATE aigateway.agent_task_run_queue_items
+                    SET created_at = created_at + INTERVAL '1 second'
+                    WHERE source_approval_request_id IS NOT NULL
+                    """),
+                "available-at" => await mutation.Database.ExecuteSqlRawAsync(
+                    """
+                    UPDATE aigateway.agent_task_run_queue_items
+                    SET available_at = available_at + INTERVAL '1 second'
+                    WHERE source_approval_request_id IS NOT NULL
+                    """),
+                _ => throw new ArgumentOutOfRangeException(nameof(drift), drift, null)
+            };
+            affected.Should().Be(1);
+        }
+
+        using (var claimScope = host.Services.CreateScope())
+        {
+            var claim = await claimScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .TryClaimNextAsync(
+                    "final-output-queue-drift-test",
+                    TimeSpan.FromMinutes(5));
+            claim.Should().BeNull();
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.AgentTasks.AsNoTracking().SingleAsync())
+            .Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync())
+            .Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
+        (await verification.AgentTaskRunQueueItems.AsNoTracking().SingleAsync(item =>
+                item.SourceApprovalRequestId == seeded.ApprovalId))
+            .Status.Should().Be(AgentTaskRunQueueStatus.Queued);
+    }
+
+    [Fact]
+    public async Task Decide_ShouldGiveExactlyOneWinnerToConcurrentApproveReject()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using var approveScope = host.Services.CreateScope();
+        using var rejectScope = host.Services.CreateScope();
+        var decidedAt = DateTimeOffset.UtcNow;
+
+        var results = await Task.WhenAll(
+            approveScope.ServiceProvider.GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve",
+                    seeded.Proof,
+                    decidedAt)),
+            rejectScope.ServiceProvider.GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: false,
+                    "reject",
+                    seeded.Proof,
+                    decidedAt)));
+
+        results.Should().ContainSingle(result =>
+            result.Status == FinalOutputApprovalCommandStatus.Approved ||
+            result.Status == FinalOutputApprovalCommandStatus.Rejected);
+        results.Should().ContainSingle(result =>
+            result.Status == FinalOutputApprovalCommandStatus.DecisionConflict);
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        var approval = await verification.ApprovalRequests.AsNoTracking().SingleAsync();
+        approval.HasValidFinalOutputDecisionProof().Should().BeTrue();
+        var task = await verification.AgentTasks
+            .Include(item => item.Steps)
+            .AsNoTracking()
+            .SingleAsync();
+        var attempt = await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync();
+        var finalNode = await verification.Set<AgentNodeRun>()
+            .AsNoTracking()
+            .SingleAsync(node => node.Id == seeded.FinalNodeRunId);
+        var resumeCount = await verification.AgentTaskRunQueueItems.CountAsync(item =>
+            item.TriggerType == AgentTaskRunTriggerType.ApprovalResume);
+        if (approval.Status == AgentApprovalStatus.Approved)
+        {
+            task.Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+            attempt.Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
+            finalNode.Status.Should().Be(AgentNodeRunStatus.WaitingApproval);
+            resumeCount.Should().Be(1);
+        }
+        else
+        {
+            approval.Status.Should().Be(AgentApprovalStatus.Rejected);
+            task.Status.Should().Be(AgentTaskStatus.Rejected);
+            task.Steps.Single(step => step.Id == seeded.FinalStepId)
+                .Status.Should().Be(AgentStepStatus.Failed);
+            attempt.Status.Should().Be(AgentTaskRunAttemptStatus.Failed);
+            finalNode.Status.Should().Be(AgentNodeRunStatus.Cancelled);
+            resumeCount.Should().Be(0);
+        }
+    }
+
+    [Fact]
+    public async Task Decide_ShouldMakeRepeatedRejectTerminalAndRejectLateApprovalWithoutResume()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        var decidedAt = DateTimeOffset.UtcNow;
+
+        FinalOutputApprovalCommandResult rejected;
+        using (var scope = host.Services.CreateScope())
+        {
+            rejected = await scope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: false,
+                    "reject",
+                    seeded.Proof,
+                    decidedAt));
+        }
+
+        FinalOutputApprovalCommandResult duplicate;
+        using (var scope = host.Services.CreateScope())
+        {
+            duplicate = await scope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: false,
+                    "late duplicate reject",
+                    seeded.Proof,
+                    decidedAt.AddSeconds(1)));
+        }
+
+        FinalOutputApprovalCommandResult opposite;
+        using (var scope = host.Services.CreateScope())
+        {
+            opposite = await scope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "late approve",
+                    seeded.Proof,
+                    decidedAt.AddSeconds(2)));
+        }
+
+        rejected.Status.Should().Be(FinalOutputApprovalCommandStatus.Rejected);
+        duplicate.Status.Should().Be(FinalOutputApprovalCommandStatus.DuplicateDecision);
+        opposite.Status.Should().Be(FinalOutputApprovalCommandStatus.DecisionConflict);
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        var approval = await verification.ApprovalRequests.AsNoTracking().SingleAsync();
+        approval.Status.Should().Be(AgentApprovalStatus.Rejected);
+        approval.HasValidFinalOutputDecisionProof().Should().BeTrue();
+        var task = await verification.AgentTasks
+            .Include(item => item.Steps)
+            .AsNoTracking()
+            .SingleAsync();
+        task.Status.Should().Be(AgentTaskStatus.Rejected);
+        task.Steps.Single(step => step.Id == seeded.FinalStepId)
+            .Status.Should().Be(AgentStepStatus.Failed);
+        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync())
+            .Status.Should().Be(AgentTaskRunAttemptStatus.Failed);
+        (await verification.Set<AgentNodeRun>()
+                .AsNoTracking()
+                .SingleAsync(node => node.Id == seeded.FinalNodeRunId))
+            .Status.Should().Be(AgentNodeRunStatus.Cancelled);
+        (await verification.AgentTaskRunQueueItems.CountAsync(item =>
+            item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Decide_ShouldFailClosedForEveryPersistedAuthorityOrSourceByteDrift()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        var drifts = new[]
+        {
+            "workspace",
+            "final-step",
+            "attempt",
+            "final-node",
+            "task-fence",
+            "node-fence",
+            "evidence",
+            "evidence-expiry",
+            "artifact-metadata",
+            "source-file"
+        };
+
+        foreach (var drift in drifts)
+        {
+            await ApplyDriftAsync(
+                database.ConnectionString,
+                fileStore,
+                seeded,
+                drift,
+                apply: true);
+            using (var scope = host.Services.CreateScope())
+            {
+                var result = await scope.ServiceProvider
+                    .GetRequiredService<IFinalOutputApprovalStore>()
+                    .DecideAsync(new FinalOutputApprovalDecision(
+                        seeded.ApprovalId,
+                        Guid.NewGuid(),
+                        IsApproved: true,
+                        $"drift-{drift}",
+                        seeded.Proof,
+                        DateTimeOffset.UtcNow));
+                result.Status.Should().Be(
+                    FinalOutputApprovalCommandStatus.FinalizationConflict,
+                    $"'{drift}' drift must never be treated as an approval conflict or infrastructure success");
+            }
+
+            await ApplyDriftAsync(
+                database.ConnectionString,
+                fileStore,
+                seeded,
+                drift,
+                apply: false);
+        }
+
+        using (var finalScope = host.Services.CreateScope())
+        {
+            var result = await finalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "authority restored",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            result.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.AgentTaskRunQueueItems.CountAsync(item =>
+            item.TriggerType == AgentTaskRunTriggerType.ApprovalResume)).Should().Be(1);
+    }
+
+    [Fact]
+    public Task FinalCheckpoint_ShouldFreshReadAndRejectEvidenceExpiredAfterStaging() =>
+        AssertFinalCheckpointAsync(expireEvidenceAfterStaging: true);
+
+    [Fact]
+    public Task FinalCheckpoint_ShouldAtomicallyCompleteAllAuthoritiesAndResumeQueue() =>
+        AssertFinalCheckpointAsync(expireEvidenceAfterStaging: false);
+
+    private async Task AssertFinalCheckpointAsync(bool expireEvidenceAfterStaging)
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        var fileSetStore = new ExpiringArtifactFileSetStore(
+            database.ConnectionString,
+            seeded.EvidenceId,
+            expireEvidenceAfterStaging);
+        using var host = CreateStoreHost(
+            database.ConnectionString,
+            fileStore,
+            fileSetStore);
+
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before worker stage",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        DurableTaskClaim taskClaim;
+        using (var taskClaimScope = host.Services.CreateScope())
+        {
+            var taskClaimStore = taskClaimScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>();
+            taskClaim = (await taskClaimStore.TryClaimNextAsync(
+                "final-output-expiry-test",
+                TimeSpan.FromMinutes(5)))!;
+            taskClaim.Should().NotBeNull();
+            var taskStartedAt = taskClaim.RunAttempt.StartedAt.AddSeconds(1);
+            (await taskClaimStore.TryMarkStartedAsync(
+                    taskClaim,
+                    taskStartedAt))
+                .Should()
+                .Be(AgentFencedWriteResult.Succeeded);
+        }
+
+        var workerNow = taskClaim.RunAttempt.StartedAt.AddSeconds(2);
+        await using (var authorityContext = CreateAiGatewayContext(database.ConnectionString))
+        {
+            var attempt = await authorityContext.AgentTaskRunAttempts.SingleAsync(item =>
+                item.Id == taskClaim.RunAttempt.Id);
+            attempt.InitializeBudget(new AgentRunBudgetLimits(
+                "final-output-expiry-test:v1",
+                MaxNodes: 2,
+                MaxToolCalls: 2,
+                MaxModelCalls: 0,
+                MaxInputTokens: 0,
+                MaxOutputTokens: 0,
+                MaxElapsedSeconds: 600,
+                MaxCostAmount: 0,
+                CostCurrency: "CNY",
+                MaxRetries: 0,
+                MaxArtifactCount: 1,
+                MaxArtifactBytes: 1_048_576));
+            var finalNode = await authorityContext.Set<AgentNodeRun>().SingleAsync(node =>
+                node.Id == seeded.FinalNodeRunId);
+            finalNode.BindTaskClaim(
+                taskClaim.QueueItem.Id,
+                taskClaim.TaskFencingToken,
+                workerNow);
+            await authorityContext.SaveChangesAsync();
+        }
+
+        AgentNodeRunClaim nodeClaim;
+        using (var nodeClaimScope = host.Services.CreateScope())
+        {
+            var nodeRunStore = nodeClaimScope.ServiceProvider
+                .GetRequiredService<IAgentNodeRunStore>();
+            (await nodeRunStore.TryReleaseApprovalAsync(
+                    seeded.FinalNodeRunId,
+                    taskClaim.RunAttempt.Id,
+                    taskClaim.TaskFencingToken,
+                    workerNow))
+                .Should()
+                .Be(AgentFencedWriteResult.Succeeded);
+
+            var claimStore = nodeClaimScope.ServiceProvider
+                .GetRequiredService<IAgentNodeRunClaimStore>();
+            var outcome = await claimStore.TryClaimAsync(
+                seeded.FinalNodeRunId,
+                taskClaim.RunAttempt.Id,
+                taskClaim.TaskFencingToken,
+                "final-output-expiry-test",
+                TimeSpan.FromMinutes(5),
+                workerNow);
+            outcome.Code.Should().Be(AgentNodeRunClaimOutcomeCode.Claimed);
+            nodeClaim = outcome.Claim!;
+            (await claimStore.TryMarkRunningAsync(
+                    nodeClaim,
+                    workerNow.AddSeconds(1)))
+                .Should()
+                .Be(AgentFencedWriteResult.Succeeded);
+        }
+
+        using (var executionScope = host.Services.CreateScope())
+        {
+            var context = executionScope.ServiceProvider
+                .GetRequiredService<AiGatewayDbContext>();
+            var task = await context.AgentTasks
+                .Include(item => item.Steps)
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == seeded.TaskId);
+            var workspace = await context.ArtifactWorkspaces
+                .Include(item => item.Artifacts)
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == seeded.WorkspaceId);
+            var approval = await context.ApprovalRequests
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == seeded.ApprovalId);
+            var parentEvidence = await context.AgentEvidenceRecords
+                .AsNoTracking()
+                .Where(item =>
+                    item.RunAttemptId == taskClaim.RunAttempt.Id &&
+                    !item.IsRevoked)
+                .OrderBy(item => item.NodeId)
+                .ToArrayAsync();
+            var finalStep = task.Steps.Single(step => step.Id == seeded.FinalStepId);
+            var nodeContract = CreateFinalizationNodeContract(
+                nodeClaim.NodeRun,
+                parentEvidence);
+
+            var result = await executionScope.ServiceProvider
+                .GetRequiredService<AgentFinalizationNodeExecutor>()
+                .ExecuteAsync(
+                    taskClaim,
+                    nodeClaim,
+                    nodeContract,
+                    workspace,
+                    finalStep,
+                    approval,
+                    parentEvidence,
+                    workerNow.AddSeconds(2),
+                    CancellationToken.None);
+
+            if (expireEvidenceAfterStaging)
+            {
+                result.IsSuccess.Should().BeFalse();
+                result.Errors!
+                    .OfType<ApiProblemDescriptor>()
+                    .Should()
+                    .ContainSingle(problem =>
+                        problem.Code == AppProblemCodes.AgentNodeRunStateConflict);
+            }
+            else
+            {
+                result.IsSuccess.Should().BeTrue();
+            }
+        }
+
+        if (!expireEvidenceAfterStaging)
+        {
+            using var completionScope = host.Services.CreateScope();
+            var completed = await completionScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .TryCompleteAsync(
+                    taskClaim,
+                    AgentTaskRunQueueStatus.Succeeded,
+                    failureCode: null,
+                    "stale pre-checkpoint task status",
+                    DateTimeOffset.UtcNow);
+            completed.Should().Be(AgentFencedWriteResult.Succeeded);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        if (expireEvidenceAfterStaging)
+        {
+            fileSetStore.RollbackCalled.Should().BeTrue();
+            fileSetStore.ConfirmCalled.Should().BeFalse();
+            (await verification.AgentEvidenceRecords.AsNoTracking().SingleAsync(item =>
+                    item.Id == seeded.EvidenceId))
+                .ExpiresAt.Should().BeOnOrBefore(DateTimeOffset.UtcNow);
+            (await verification.AgentEvidenceRecords.CountAsync()).Should().Be(1);
+            (await verification.ArtifactFileSetOperations.CountAsync()).Should().Be(0);
+            (await verification.AgentTasks.AsNoTracking().SingleAsync(item =>
+                    item.Id == seeded.TaskId))
+                .Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+            (await verification.ArtifactWorkspaces.AsNoTracking().SingleAsync(item =>
+                    item.Id == seeded.WorkspaceId))
+                .Status.Should().Be(ArtifactWorkspaceStatus.Active);
+            (await verification.Set<AgentNodeRun>().AsNoTracking().SingleAsync(item =>
+                    item.Id == seeded.FinalNodeRunId))
+                .Status.Should().Be(AgentNodeRunStatus.Running);
+            return;
+        }
+
+        fileSetStore.ConfirmCalled.Should().BeTrue();
+        fileSetStore.RollbackCalled.Should().BeFalse();
+        (await verification.AgentEvidenceRecords.CountAsync()).Should().Be(2);
+        (await verification.ArtifactFileSetOperations.CountAsync()).Should().Be(1);
+        var completedTask = await verification.AgentTasks
+            .Include(item => item.Steps)
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.TaskId);
+        completedTask.Status.Should().Be(AgentTaskStatus.Completed);
+        completedTask.CompletedAt.Should().NotBeNull();
+        completedTask.ActiveRunAttemptId.Should().BeNull();
+        completedTask.Steps.Single(item => item.Id == seeded.FinalStepId)
+            .Status.Should().Be(AgentStepStatus.Completed);
+        (await verification.ArtifactWorkspaces
+                .Include(item => item.Artifacts)
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == seeded.WorkspaceId))
+            .Should()
+            .Match<ArtifactWorkspace>(workspace =>
+                workspace.Status == ArtifactWorkspaceStatus.Finalized &&
+                workspace.Artifacts.Count == 1 &&
+                workspace.Artifacts.Single().Status == ArtifactStatus.Final &&
+                workspace.Artifacts.Single().RelativePath.StartsWith(
+                    "final/.committed/",
+                    StringComparison.Ordinal));
+        (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.RunAttemptId))
+            .Status.Should().Be(AgentTaskRunAttemptStatus.Succeeded);
+        (await verification.Set<AgentNodeRun>().AsNoTracking().SingleAsync(item =>
+                item.Id == seeded.FinalNodeRunId))
+            .Status.Should().Be(AgentNodeRunStatus.Succeeded);
+        var persistedApproval = await verification.ApprovalRequests.AsNoTracking().SingleAsync(item =>
+            item.Id == seeded.ApprovalId);
+        persistedApproval.HasValidFinalOutputProof().Should().BeTrue();
+        persistedApproval.HasValidFinalOutputDecisionProof().Should().BeTrue();
+        var queue = await verification.AgentTaskRunQueueItems.AsNoTracking().SingleAsync(item =>
+            item.SourceApprovalRequestId == seeded.ApprovalId);
+        queue.Status.Should().Be(AgentTaskRunQueueStatus.Succeeded);
+        queue.SafeMessage.Should().Be("Agent task run reached Completed.");
+    }
+
+    private async Task<PostgresScratchDatabase> CreateMigratedDatabaseAsync()
+    {
+        var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_final_output_approval");
+        try
+        {
+            await using var root = new AiCopilotDbContext(
+                PostgresPersistenceTestOptions.Create<AiCopilotDbContext>(
+                    database.ConnectionString,
+                    MigrationHistoryTables.AiCopilot));
+            await root.Database.MigrateAsync();
+            await using var aiGateway = CreateAiGatewayContext(database.ConnectionString);
+            await aiGateway.Database.MigrateAsync();
+            return database;
+        }
+        catch
+        {
+            await database.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static async Task<SeededFinalOutput> SeedAndPrepareAsync(
+        string connectionString,
+        ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore fileStore)
+    {
+        var seeded = await SeedPreApprovalAsync(connectionString, fileStore);
+        using var host = CreateStoreHost(connectionString, fileStore);
+        using var scope = host.Services.CreateScope();
+        var prepared = await scope.ServiceProvider
+            .GetRequiredService<IFinalOutputApprovalStore>()
+            .PrepareAsync(new FinalOutputApprovalPreparation(
+                seeded.TaskId,
+                seeded.UserId,
+                seeded.Proof,
+                DateTimeOffset.UtcNow));
+        prepared.Status.Should().Be(FinalOutputApprovalCommandStatus.Created);
+        return seeded with { ApprovalId = prepared.Approval!.Id };
+    }
+
+    private static async Task<SeededFinalOutput> SeedPreApprovalAsync(
+        string connectionString,
+        ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore fileStore)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var userId = Guid.NewGuid();
+        var session = new Session(userId, ConversationTemplateId.New());
+        var planJson = AgentPlanV2TestData.Create(
+            [
+                new AgentPlanV2TestStep(
+                    "Generate Markdown",
+                    "Generate a governed Markdown artifact.",
+                    AgentStepType.ArtifactGeneration,
+                    "generate_markdown_report")
+            ],
+            executable: true,
+            taskType: AgentTaskType.ReportGeneration,
+            knowledgeBaseIds: null);
+        var task = new AgentTask(
+            session.Id,
+            userId,
+            "Final-output transaction",
+            "Final-output transaction",
+            AgentTaskType.ReportGeneration,
+            AgentTaskRiskLevel.Low,
+            null,
+            planJson,
+            now);
+        var steps = AgentPlanV2TestData.AddTrackedPlanSteps(task, planJson, now);
+        var producerStep = steps.Single(step =>
+            string.Equals(step.ToolCode, "generate_markdown_report", StringComparison.Ordinal));
+        var finalStep = steps.Single(step =>
+            string.Equals(step.ToolCode, "finalize_artifacts", StringComparison.Ordinal));
+        var workspace = new ArtifactWorkspace(
+            task.Id,
+            $"ws_{Guid.NewGuid():N}",
+            "/tmp/final-output-persistence",
+            "/workspaces/final-output-persistence",
+            now);
+        task.AttachWorkspace(workspace.Id, now);
+        task.ConfirmExecutablePlan(
+            task.PlanJson,
+            steps.Where(step => step.RequiresApproval).Select(step => step.StepIndex).ToArray(),
+            now);
+        task.ApprovePlan(now);
+
+        var sourceBytes = Encoding.UTF8.GetBytes("# final output");
+        producerStep.Start(now.AddSeconds(1));
+        var artifact = workspace.AddDraftArtifact(
+            ArtifactType.Markdown,
+            "report.md",
+            "draft/report.md",
+            sourceBytes.LongLength,
+            "text/markdown",
+            producerStep.Id,
+            now.AddSeconds(2));
+        producerStep.Complete(
+            $$"""{"artifactId":"{{artifact.Id.Value:D}}","artifactType":"markdown","resultType":"artifact","status":"completed"}""",
+            now.AddSeconds(3));
+        var authority = await FinalOutputApprovalTestData.CreatePreApprovalAuthorityAsync(
+            task,
+            workspace,
+            new Dictionary<Guid, byte[]>
+            {
+                [artifact.Id.Value] = sourceBytes
+            },
+            now.AddSeconds(4));
+        fileStore.AddFile(
+            workspace.WorkspaceCode,
+            artifact.RelativePath,
+            sourceBytes,
+            artifact.MimeType);
+
+        await using var dbContext = CreateAiGatewayContext(connectionString);
+        dbContext.Sessions.Add(session);
+        dbContext.AgentTasks.Add(task);
+        dbContext.ArtifactWorkspaces.Add(workspace);
+        dbContext.AgentTaskRunAttempts.Add(authority.RunAttempt);
+        dbContext.AgentTaskRunQueueItems.Add(authority.OriginalQueueItem);
+        dbContext.Set<AgentNodeRun>().AddRange(authority.NodeRuns);
+        dbContext.Set<AgentEvidenceRecord>().AddRange(authority.Evidence);
+        await dbContext.SaveChangesAsync();
+        return new SeededFinalOutput(
+            task.Id,
+            userId,
+            workspace.Id,
+            workspace.WorkspaceCode,
+            finalStep.Id,
+            authority.RunAttempt.Id,
+            authority.NodeRuns.Single(node => node.RequiresApproval).Id,
+            authority.Evidence.Single().Id,
+            authority.Evidence.Single().EnvelopeDigest,
+            artifact.Id,
+            artifact.RelativePath,
+            artifact.MimeType,
+            sourceBytes,
+            authority.Proof,
+            ApprovalId: default);
+    }
+
+    private static IHost CreateStoreHost(
+        string connectionString,
+        ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore fileStore,
+        IArtifactWorkspaceFileSetStore? fileSetStore = null)
+    {
+        Environment.SetEnvironmentVariable(
+            "AICopilotSecurity__ApiKeyEncryptionKey",
+            Environment.GetEnvironmentVariable("AICopilotSecurity__ApiKeyEncryptionKey")
+            ?? "aicopilot-persistence-final-output-test-key");
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration["ConnectionStrings:ai-copilot"] = connectionString;
+        builder.AddEfCore();
+        builder.AddAiGatewayService();
+        builder.Services.AddSingleton<IArtifactWorkspaceFileStore>(fileStore);
+        builder.Services.AddFinalOutputApprovalStore();
+        if (fileSetStore is not null)
+        {
+            builder.Services.AddSingleton(fileSetStore);
+        }
+
+        return builder.Build();
+    }
+
+    private static AgentPlanNodeDocument CreateFinalizationNodeContract(
+        AgentNodeRun finalNode,
+        IReadOnlyCollection<AgentEvidenceRecord> parentEvidence)
+    {
+        var dependencies = parentEvidence
+            .Select(item => item.NodeId)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        return new AgentPlanNodeDocument(
+            AgentPlanContractVersions.NodeV1,
+            finalNode.NodeId,
+            finalNode.NodeKind,
+            dependencies,
+            Required: true,
+            "node-input:v1",
+            finalNode.OutputSchemaRef,
+            [BuiltInToolRegistrations.FinalizationCheckpointToolCode],
+            ["General.Chat"],
+            [],
+            [],
+            dependencies,
+            Input: null,
+            ModelPolicy: null,
+            new AgentPlanTimeoutPolicyDocument(
+                "timeout-policy:v1",
+                finalNode.TimeoutSeconds),
+            new AgentPlanRetryPolicyDocument(
+                "retry-policy:v1",
+                finalNode.MaxAttempts,
+                "None"),
+            new AgentPlanNodeBudgetDocument(
+                finalNode.MaxToolCalls,
+                finalNode.MaxModelCalls,
+                finalNode.MaxInputTokens,
+                finalNode.MaxOutputTokens,
+                MaxRows: 0,
+                finalNode.MaxCostAmount,
+                finalNode.MaxArtifactCount,
+                finalNode.MaxArtifactBytes),
+            new AgentPlanApprovalPolicyDocument(
+                Required: true,
+                "FinalOutput"),
+            new AgentPlanIdempotencyPolicyDocument(
+                "idempotency-policy:v1",
+                "Fenced"),
+            "ArtifactDraftOnly",
+            finalNode.JoinPolicy);
+    }
+
+    private static AiGatewayDbContext CreateAiGatewayContext(string connectionString) =>
+        new(PostgresPersistenceTestOptions.Create<AiGatewayDbContext>(
+            connectionString,
+            MigrationHistoryTables.AiGateway));
+
+    private static async Task ApplyDriftAsync(
+        string connectionString,
+        ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore fileStore,
+        SeededFinalOutput seeded,
+        string drift,
+        bool apply)
+    {
+        if (drift == "source-file")
+        {
+            fileStore.AddFile(
+                seeded.WorkspaceCode,
+                seeded.ArtifactRelativePath,
+                apply ? Encoding.UTF8.GetBytes("# FINAL OUTPUT") : seeded.SourceBytes,
+                seeded.ArtifactMimeType);
+            return;
+        }
+
+        await using var dbContext = CreateAiGatewayContext(connectionString);
+        switch (drift)
+        {
+            case "workspace":
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.artifact_workspaces
+                     SET workspace_code = {(apply ? "ws_drifted" : seeded.WorkspaceCode)}
+                     WHERE id = {seeded.WorkspaceId.Value}
+                     """);
+                break;
+            case "final-step":
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_steps
+                     SET status = {(apply ? "Approved" : "WaitingApproval")}
+                     WHERE id = {seeded.FinalStepId.Value}
+                     """);
+                break;
+            case "attempt":
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_task_run_attempts
+                     SET status = {(apply ? "Running" : "WaitingApproval")}
+                     WHERE id = {seeded.RunAttemptId.Value}
+                     """);
+                break;
+            case "final-node":
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_node_runs
+                     SET status = {(apply ? "Cancelled" : "WaitingApproval")}
+                     WHERE id = {seeded.FinalNodeRunId.Value}
+                     """);
+                break;
+            case "task-fence":
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_tasks
+                     SET run_fencing_token = {(apply
+                         ? seeded.Proof.TaskFencingToken + 1
+                         : seeded.Proof.TaskFencingToken)}
+                     WHERE id = {seeded.TaskId.Value}
+                     """);
+                break;
+            case "node-fence":
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_node_runs
+                     SET node_fencing_token = {(apply ? 1L : 0L)}
+                     WHERE id = {seeded.FinalNodeRunId.Value}
+                     """);
+                break;
+            case "evidence":
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_evidence_records
+                     SET envelope_digest = {(apply
+                         ? new string('c', 64)
+                         : seeded.EvidenceEnvelopeDigest)}
+                     WHERE id = {seeded.EvidenceId.Value}
+                     """);
+                break;
+            case "evidence-expiry":
+            {
+                DateTimeOffset? expiresAt = apply
+                    ? DateTimeOffset.UtcNow.AddMinutes(-1)
+                    : null;
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_evidence_records
+                     SET expires_at = {expiresAt}
+                     WHERE id = {seeded.EvidenceId.Value}
+                     """);
+                break;
+            }
+            case "artifact-metadata":
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.artifacts
+                     SET version = {(apply ? 2 : 1)}
+                     WHERE id = {seeded.ArtifactId.Value}
+                     """);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(drift));
+        }
+    }
+
+    private sealed record SeededFinalOutput(
+        AgentTaskId TaskId,
+        Guid UserId,
+        ArtifactWorkspaceId WorkspaceId,
+        string WorkspaceCode,
+        AgentStepId FinalStepId,
+        AgentTaskRunAttemptId RunAttemptId,
+        AgentNodeRunId FinalNodeRunId,
+        AgentEvidenceRecordId EvidenceId,
+        string EvidenceEnvelopeDigest,
+        ArtifactId ArtifactId,
+        string ArtifactRelativePath,
+        string ArtifactMimeType,
+        byte[] SourceBytes,
+        FinalOutputApprovalProof Proof,
+        ApprovalRequestId ApprovalId);
+
+    private sealed class ExpiringArtifactFileSetStore(
+        string connectionString,
+        AgentEvidenceRecordId evidenceId,
+        bool expireEvidenceOnStage)
+        : IArtifactWorkspaceFileSetStore
+    {
+        public bool ConfirmCalled { get; private set; }
+
+        public bool RollbackCalled { get; private set; }
+
+        public async Task<ArtifactFileSetStage> StageAsync(
+            string workspaceCode,
+            string operationKind,
+            string publishArea,
+            IReadOnlyCollection<ArtifactFileSetWriteRequest> files,
+            CancellationToken cancellationToken = default,
+            ArtifactFileSetAuthority? authority = null)
+        {
+            authority.Should().NotBeNull();
+            var commitId = Guid.NewGuid();
+            var publishedReference = $"final/.committed/{commitId:N}";
+            var published = files
+                .OrderBy(file => file.RelativePath, StringComparer.Ordinal)
+                .Select(file => new ArtifactFileSetPublishedFile(
+                    $"{publishedReference}/{ArtifactPathGuard.NormalizeRelativePath(file.RelativePath)}",
+                    file.Content.LongLength,
+                    file.MimeType,
+                    Convert.ToHexString(
+                            System.Security.Cryptography.SHA256.HashData(file.Content))
+                        .ToLowerInvariant()))
+                .ToArray();
+            var manifestJson = CanonicalJson.Serialize(new
+            {
+                version = "final-output-expiry-test:v1",
+                commitId,
+                workspaceCode,
+                operationKind,
+                publishedReference,
+                files = published
+            });
+
+            if (expireEvidenceOnStage)
+            {
+                await using var context = CreateAiGatewayContext(connectionString);
+                await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     UPDATE aigateway.agent_evidence_records
+                     SET expires_at = {DateTimeOffset.UtcNow.AddMinutes(-1)}
+                     WHERE id = {evidenceId.Value}
+                     """,
+                    cancellationToken);
+            }
+
+            return new ArtifactFileSetStage(
+                commitId,
+                workspaceCode,
+                operationKind,
+                $"staging:{commitId:N}",
+                publishedReference,
+                manifestJson,
+                CanonicalJson.ComputeSha256(manifestJson),
+                published,
+                DateTimeOffset.UtcNow,
+                authority!);
+        }
+
+        public Task ConfirmBestEffortAsync(
+            ArtifactFileSetStage stage,
+            CancellationToken cancellationToken = default)
+        {
+            ConfirmCalled = true;
+            return Task.CompletedTask;
+        }
+
+        public Task RollbackBestEffortAsync(
+            ArtifactFileSetStage stage,
+            CancellationToken cancellationToken = default)
+        {
+            RollbackCalled = true;
+            return Task.CompletedTask;
+        }
+
+        public Task LeavePendingAsync(
+            ArtifactFileSetStage stage,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task<bool> VerifyPublishedAsync(
+            ArtifactFileSetStage stage,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task<ArtifactFileSetPendingSnapshot> GetPendingAsync(
+            int maximumEntries,
+            DateTimeOffset createdBeforeUtc,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ArtifactFileSetPendingSnapshot([], false));
+
+        public Task ConfirmPendingAsync(
+            ArtifactFileSetStage stage,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task RollbackPendingAsync(
+            ArtifactFileSetStage stage,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task MarkPendingAttemptedAsync(
+            Guid commitId,
+            DateTimeOffset attemptedAtUtc,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task<bool> ExistsPendingAsync(
+            Guid commitId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+    }
+}

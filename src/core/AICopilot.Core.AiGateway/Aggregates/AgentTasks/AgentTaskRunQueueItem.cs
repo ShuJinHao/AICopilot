@@ -15,16 +15,26 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
         AgentTaskRunTriggerType triggerType,
         Guid requestedBy,
         DateTimeOffset nowUtc,
-        DateTimeOffset? availableAt = null)
+        DateTimeOffset? availableAt = null,
+        ApprovalRequestId? sourceApprovalRequestId = null)
     {
         if (requestedBy == Guid.Empty)
         {
             throw new ArgumentException("Queue requester is required.", nameof(requestedBy));
         }
 
+        if (sourceApprovalRequestId is not null &&
+            triggerType != AgentTaskRunTriggerType.ApprovalResume)
+        {
+            throw new ArgumentException(
+                "Only approval-resume queue items can bind an approval request.",
+                nameof(sourceApprovalRequestId));
+        }
+
         Id = AgentTaskRunQueueItemId.New();
         TaskId = taskId;
         TriggerType = triggerType;
+        SourceApprovalRequestId = sourceApprovalRequestId;
         RequestedBy = requestedBy;
         Status = AgentTaskRunQueueStatus.Queued;
         AvailableAt = availableAt ?? nowUtc;
@@ -35,6 +45,8 @@ public sealed class AgentTaskRunQueueItem : BaseEntity<AgentTaskRunQueueItemId>
     public AgentTaskId TaskId { get; private set; }
 
     public AgentTaskRunTriggerType TriggerType { get; private set; }
+
+    public ApprovalRequestId? SourceApprovalRequestId { get; private set; }
 
     public AgentTaskRunQueueStatus Status { get; private set; }
 

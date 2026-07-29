@@ -39,6 +39,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IArtifactWorkspaceFileStore, LocalArtifactWorkspaceFileStore>();
         builder.Services.AddScoped<IArtifactWorkspaceFileSetStore, LocalArtifactWorkspaceFileSetStore>();
         builder.Services.AddArtifactFileSetMaintenance();
+        builder.Services.AddFinalOutputApprovalStore();
         builder.Services.AddSingleton<IAgentTableFileParser, AgentTableFileParser>();
         builder.Services.AddSingleton<IAgentArtifactDocumentGenerator, AgentArtifactDocumentGenerator>();
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();

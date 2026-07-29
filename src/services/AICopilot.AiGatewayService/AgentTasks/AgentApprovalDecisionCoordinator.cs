@@ -20,6 +20,7 @@ public sealed class AgentApprovalDecisionCoordinator(
     ICurrentUser currentUser,
     IIdentityAccessService identityAccessService,
     AgentPlanDraftConfirmationService planDraftConfirmationService,
+    FinalOutputApprovalCoordinator? finalOutputApprovalCoordinator = null,
     MessageTimelineProjectionWriter? timelineProjectionWriter = null)
 {
     public Task<Result<AgentApprovalRequestDto>> ApproveAsync(
@@ -76,6 +77,34 @@ public sealed class AgentApprovalDecisionCoordinator(
 
         var task = taskResult.Value!;
         var workspace = await AgentApprovalAccess.LoadWorkspaceAsync(workspaceRepository, task, cancellationToken);
+        if (approval.ApprovalType == AgentApprovalType.FinalOutput)
+        {
+            if (finalOutputApprovalCoordinator is null)
+            {
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentFinalizationStateConflict,
+                    "Final-output approval coordinator is unavailable."));
+            }
+
+            var finalOutputDecision = await finalOutputApprovalCoordinator.DecideAsync(
+                approval,
+                task,
+                userId,
+                isApproved,
+                comment,
+                cancellationToken);
+            if (!finalOutputDecision.IsSuccess)
+            {
+                return Result.From(finalOutputDecision);
+            }
+
+            var decided = finalOutputDecision.Value!;
+            return Result.Success(AgentApprovalDtoMapper.Map(
+                decided.Approval!,
+                decided.Task!,
+                decided.Workspace));
+        }
+
         var now = DateTimeOffset.UtcNow;
         if (isApproved)
         {
@@ -119,8 +148,7 @@ public sealed class AgentApprovalDecisionCoordinator(
 
         await approvalRepository.SaveChangesAsync(cancellationToken);
 
-        if (isApproved && approval.ApprovalType is
-                AgentApprovalType.ToolCall or AgentApprovalType.FinalOutput)
+        if (isApproved && approval.ApprovalType == AgentApprovalType.ToolCall)
         {
             _ = await runQueue.EnqueueAsync(
                 task,
@@ -222,20 +250,9 @@ public sealed class AgentApprovalDecisionCoordinator(
 
                 break;
             case AgentApprovalType.FinalOutput:
-                if (task.Status == AgentTaskStatus.WorkspaceReady)
-                {
-                    task.WaitForFinalApproval(now);
-                }
-
-                var finalStep = task.Steps
-                    .OrderByDescending(step => step.StepIndex)
-                    .FirstOrDefault(step => string.Equals(step.ToolCode, "finalize_artifacts", StringComparison.OrdinalIgnoreCase));
-                if (finalStep?.Status == AgentStepStatus.WaitingApproval)
-                {
-                    finalStep.Approve();
-                }
-
-                break;
+                return Result.Failure(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentFinalizationStateConflict,
+                    "Final-output decisions must use the proof-bound approval coordinator."));
             default:
                 throw new ArgumentOutOfRangeException(nameof(approval.ApprovalType), approval.ApprovalType, "Unknown approval type.");
         }

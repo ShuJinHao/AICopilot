@@ -66,6 +66,7 @@ internal sealed class AgentTaskRuntime(
     IBusinessDataSourceProfileRegistry businessDataSourceProfileRegistry,
     IBusinessQueryProviderRegistry businessQueryProviderRegistry,
     IBusinessQueryContextStore businessQueryContextStore,
+    FinalOutputApprovalCoordinator? finalOutputApprovalCoordinator = null,
     AgentNodeRunMaterializer? nodeRunMaterializer = null,
     NodeRunClaimCoordinator? nodeRunClaimCoordinator = null,
     NodeCheckpointCoordinator? nodeCheckpointCoordinator = null,
@@ -457,9 +458,17 @@ internal sealed class AgentTaskRuntime(
                             cancellationToken);
                     }
 
-                    var finalApprovalResolution = await ResolveFinalOutputApprovalAsync(
+                    if (finalOutputApprovalCoordinator is null)
+                    {
+                        return Result.Failure(new ApiProblemDescriptor(
+                            AppProblemCodes.AgentFinalizationStateConflict,
+                            "Final-output approval coordinator is unavailable."));
+                    }
+
+                    var finalApprovalResolution = await finalOutputApprovalCoordinator.EnsurePendingAsync(
                         task,
-                        workspace.WorkspaceCode,
+                        workspace,
+                        task.UserId,
                         cancellationToken);
                     if (!finalApprovalResolution.IsSuccess)
                     {
@@ -474,22 +483,6 @@ internal sealed class AgentTaskRuntime(
                             cancellationToken);
                     }
 
-                    var approvalResolution = finalApprovalResolution.Value!;
-                    var approval = approvalResolution.Approval;
-                    task.MarkWorkspaceReady(now);
-                    task.WaitForFinalApproval(now);
-                    attempt.WaitForApproval(now, "Waiting for final output approval.");
-                    task.ReleaseRunLease(now, clearActiveAttempt: false);
-                    if (approvalResolution.IsCreated)
-                    {
-                        await runtimeEventRecorder.StageFinalReviewSubmittedAsync(
-                            task,
-                            workspace,
-                            approval,
-                            cancellationToken);
-                    }
-
-                    await SaveAsync(task, workspace, attempt, cancellationToken);
                     return Result.Success(task);
                 }
                 else
@@ -1550,7 +1543,7 @@ internal sealed class AgentTaskRuntime(
             new ApprovalRequestsByTaskSpec(task.Id),
             cancellationToken);
         var attempts = await runAttemptStore.ListByTaskAsync(task.Id, cancellationToken);
-        return durableClaim is null
+        var validated = durableClaim is null
             ? AgentFinalizationCheckpointStateValidator.ValidatePaused(
                 task,
                 workspace,
@@ -1563,6 +1556,28 @@ internal sealed class AgentTaskRuntime(
                 attempts,
                 durableClaim,
                 DateTimeOffset.UtcNow);
+        if (!validated.IsSuccess || workspace is null)
+        {
+            return validated;
+        }
+
+        if (finalOutputApprovalCoordinator is null)
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentFinalizationStateConflict,
+                "Final-output approval coordinator is unavailable."));
+        }
+
+        var proofVerified = await finalOutputApprovalCoordinator.VerifyCheckpointAsync(
+            task,
+            workspace,
+            validated.Value!.Approval,
+            allowApprovedCheckpoint:
+                validated.Value.Phase == AgentFinalizationCheckpointPhase.Approved,
+            cancellationToken);
+        return proofVerified.IsSuccess
+            ? validated
+            : Result.From(proofVerified);
     }
 
     private AgentToolExecutorResolver CreateExecutorResolver()
@@ -1715,56 +1730,6 @@ internal sealed class AgentTaskRuntime(
             DateTimeOffset.UtcNow);
         approvalRepository.Add(approval);
         return new ApprovalRequestResolution(approval, IsCreated: true);
-    }
-
-    private async Task<Result<ApprovalRequestResolution>> ResolveFinalOutputApprovalAsync(
-        AgentTask task,
-        string workspaceCode,
-        CancellationToken cancellationToken)
-    {
-        var approvals = await approvalRepository.ListAsync(
-            new ApprovalRequestsByTaskSpec(task.Id),
-            cancellationToken);
-        var finalApprovals = approvals
-            .Where(approval => approval.ApprovalType == AgentApprovalType.FinalOutput)
-            .ToArray();
-        var pendingApprovals = approvals
-            .Where(approval => approval.Status == AgentApprovalStatus.Pending)
-            .ToArray();
-        if (finalApprovals.Length == 0 && pendingApprovals.Length == 0)
-        {
-            var approval = new ApprovalRequest(
-                task.Id,
-                AgentApprovalType.FinalOutput,
-                workspaceCode,
-                task.UserId,
-                DateTimeOffset.UtcNow);
-            approvalRepository.Add(approval);
-            return Result.Success(new ApprovalRequestResolution(approval, IsCreated: true));
-        }
-
-        if (finalApprovals.Length == 1 &&
-            finalApprovals[0].Status == AgentApprovalStatus.Pending &&
-            string.Equals(finalApprovals[0].TargetId, workspaceCode, StringComparison.Ordinal) &&
-            finalApprovals[0].RequestedBy == task.UserId &&
-            pendingApprovals.Length == 1 &&
-            pendingApprovals[0].Id == finalApprovals[0].Id)
-        {
-            var decisionProof = AgentFinalizationCheckpointStateValidator
-                .ValidateApprovalDecisionProof(finalApprovals[0]);
-            if (!decisionProof.IsSuccess)
-            {
-                return Result.From(decisionProof);
-            }
-
-            return Result.Success(new ApprovalRequestResolution(
-                finalApprovals[0],
-                IsCreated: false));
-        }
-
-        return Result.Failure(new ApiProblemDescriptor(
-            AppProblemCodes.AgentApprovalStateConflict,
-            "Final-output checkpoint requires no historical approval and no competing pending approval."));
     }
 
     private sealed record ApprovalRequestResolution(

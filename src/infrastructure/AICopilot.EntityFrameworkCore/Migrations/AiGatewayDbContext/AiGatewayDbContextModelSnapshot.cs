@@ -398,6 +398,10 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("safe_message");
 
+                    b.Property<Guid?>("SourceApprovalRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_approval_request_id");
+
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("started_at");
@@ -435,6 +439,11 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
 
                     b.HasIndex("RunAttemptId")
                         .HasDatabaseName("ix_agent_task_run_queue_items_run_attempt_id");
+
+                    b.HasIndex("SourceApprovalRequestId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_agent_task_run_queue_items_source_approval")
+                        .HasFilter("source_approval_request_id IS NOT NULL");
 
                     b.HasIndex("TaskId")
                         .IsUnique()
@@ -1488,6 +1497,64 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("FinalOutputArtifactBindingDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("final_output_artifact_binding_digest");
+
+                    b.Property<string>("FinalOutputArtifactBindingsJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("final_output_artifact_bindings_json");
+
+                    b.Property<string>("FinalOutputDecisionProofDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("final_output_decision_proof_digest");
+
+                    b.Property<string>("FinalOutputEvidenceSetDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("final_output_evidence_set_digest");
+
+                    b.Property<Guid?>("FinalOutputFinalStepId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("final_output_final_step_id");
+
+                    b.Property<string>("FinalOutputManifestDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("final_output_manifest_digest");
+
+                    b.Property<long?>("FinalOutputNodeFencingToken")
+                        .HasColumnType("bigint")
+                        .HasColumnName("final_output_node_fencing_token");
+
+                    b.Property<Guid?>("FinalOutputNodeRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("final_output_node_run_id");
+
+                    b.Property<string>("FinalOutputProofDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("final_output_proof_digest");
+
+                    b.Property<string>("FinalOutputProofVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("final_output_proof_version");
+
+                    b.Property<Guid?>("FinalOutputRunAttemptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("final_output_run_attempt_id");
+
+                    b.Property<long?>("FinalOutputTaskFencingToken")
+                        .HasColumnType("bigint")
+                        .HasColumnName("final_output_task_fencing_token");
+
+                    b.Property<Guid?>("FinalOutputWorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("final_output_workspace_id");
+
                     b.Property<Guid>("RequestedBy")
                         .HasColumnType("uuid")
                         .HasColumnName("requested_by");
@@ -1518,6 +1585,11 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
 
                     b.HasIndex("TaskId")
                         .HasDatabaseName("ix_approval_requests_task_id");
+
+                    b.HasIndex("TaskId", "ApprovalType")
+                        .IsUnique()
+                        .HasDatabaseName("ux_approval_requests_final_output_task")
+                        .HasFilter("approval_type = 'FinalOutput'");
 
                     b.ToTable("approval_requests", "aigateway");
                 });
@@ -2521,6 +2593,16 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                         .HasForeignKey("TaskId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentTaskRunQueueItem", b =>
+                {
+                    b.HasOne("AICopilot.Core.AiGateway.Aggregates.Approvals.ApprovalRequest", null)
+                        .WithMany()
+                        .HasForeignKey("SourceApprovalRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_agent_task_run_queue_items_source_approval");
                 });
 
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Artifacts.Artifact", b =>

@@ -185,6 +185,24 @@ internal static class AgentFinalizationCheckpointStateValidator
         }
 
         var finalApproval = finalApprovals[0];
+        if (!finalApproval.HasValidFinalOutputProof())
+        {
+            return Conflict(
+                "Final-output checkpoint approval is missing its immutable authority proof.");
+        }
+
+        var finalOutputProof = finalApproval.GetFinalOutputProof();
+        if (finalOutputProof.WorkspaceId != workspace.Id ||
+            !string.Equals(finalOutputProof.WorkspaceCode, workspace.WorkspaceCode, StringComparison.Ordinal) ||
+            finalOutputProof.FinalStepId != finalStep.Id ||
+            finalOutputProof.ActiveRunAttemptId != activeAttempt.Id ||
+            finalOutputProof.TaskFencingToken != task.RunFencingToken ||
+            activeAttempt.TaskFencingToken != finalOutputProof.TaskFencingToken)
+        {
+            return Conflict(
+                "Final-output checkpoint task, workspace, step, attempt, or task fence drifted after approval.");
+        }
+
         var approvalProof = ValidateApprovalDecisionProof(finalApproval);
         if (!approvalProof.IsSuccess)
         {
@@ -230,6 +248,17 @@ internal static class AgentFinalizationCheckpointStateValidator
         {
             return Conflict(
                 "Only an approved final-output checkpoint may resume under a worker lease.");
+        }
+
+        if (resumedClaim is not null &&
+            (resumedClaim.QueueItem.TriggerType != AgentTaskRunTriggerType.ApprovalResume ||
+             resumedClaim.QueueItem.SourceApprovalRequestId != finalApproval.Id ||
+             resumedClaim.QueueItem.TaskId != task.Id ||
+             resumedClaim.QueueItem.RunAttemptId != activeAttempt.Id ||
+             resumedClaim.QueueItem.TaskFencingToken != task.RunFencingToken))
+        {
+            return Conflict(
+                "Final-output resume queue item is not uniquely bound to the approved checkpoint.");
         }
 
         return Result.Success(new AgentFinalizationCheckpointState(
@@ -340,6 +369,13 @@ internal static class AgentFinalizationCheckpointStateValidator
 
     internal static Result ValidateApprovalDecisionProof(ApprovalRequest approval)
     {
+        if (!approval.HasValidFinalOutputProof())
+        {
+            return Result.Failure(new ApiProblemDescriptor(
+                AppProblemCodes.AgentFinalizationStateConflict,
+                "Final-output approval authority proof is missing or invalid."));
+        }
+
         var hasDecisionTime = approval.ApprovedAt is not null &&
                               approval.ApprovedAt.Value >= approval.CreatedAt;
         var isValid = approval.Status switch
@@ -347,15 +383,18 @@ internal static class AgentFinalizationCheckpointStateValidator
             AgentApprovalStatus.Pending =>
                 approval.ApprovedBy is null &&
                 approval.ApprovedAt is null &&
-                approval.ApprovalComment is null,
+                approval.ApprovalComment is null &&
+                approval.FinalOutputDecisionProofDigest is null,
             AgentApprovalStatus.Approved or AgentApprovalStatus.Rejected =>
                 approval.ApprovedBy is not null &&
                 approval.ApprovedBy.Value != Guid.Empty &&
-                hasDecisionTime,
+                hasDecisionTime &&
+                approval.HasValidFinalOutputDecisionProof(),
             AgentApprovalStatus.Cancelled or AgentApprovalStatus.Expired =>
                 approval.ApprovedBy is null &&
                 approval.ApprovalComment is null &&
-                hasDecisionTime,
+                hasDecisionTime &&
+                approval.FinalOutputDecisionProofDigest is null,
             _ => false
         };
 

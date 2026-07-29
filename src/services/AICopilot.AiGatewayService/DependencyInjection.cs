@@ -58,7 +58,9 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentTaskRunQueue, AgentTaskRunQueue>();
         AddScopedComponents(builder.Services,
             typeof(AgentTaskDtoQueryService), typeof(AgentTaskPlanPreparationService), typeof(PlanAgentTaskCoordinator), typeof(AgentTaskLifecycleCoordinator),
-            typeof(AgentApprovalQueryCoordinator), typeof(AgentApprovalDecisionCoordinator), typeof(ArtifactWorkspaceLifecycleCoordinator),
+            typeof(AgentApprovalQueryCoordinator), typeof(AgentApprovalDecisionCoordinator),
+            typeof(FinalOutputApprovalProofFactory), typeof(FinalOutputApprovalCoordinator),
+            typeof(ArtifactWorkspaceLifecycleCoordinator),
             typeof(ArtifactWorkspaceQueryCoordinator), typeof(ArtifactVersioningQueryCoordinator), typeof(ArtifactVersioningCommandCoordinator),
             typeof(ArtifactWorkspaceP9Coordinator), typeof(AgentRuntimeEventRecorder), typeof(AgentTaskRunQueueWorkerCoordinator),
             typeof(DurableTaskClaimCoordinator), typeof(AgentNodeRunMaterializer), typeof(NodeRunClaimCoordinator),
