@@ -2,17 +2,21 @@ using System.Text.Json;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
+using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
+using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
+using AICopilot.SharedKernel.Ai;
 using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.EntityFrameworkCore.Repository;
 
 internal sealed class AgentNodeCheckpointStore(
-    AgentExecutionTransactionRunner transactionRunner)
+    AgentExecutionTransactionRunner transactionRunner,
+    ICurrentUser? currentUser = null)
     : IAgentNodeCheckpointStore
 {
     public Task<AgentFencedWriteResult> CommitSuccessAsync(
@@ -51,7 +55,7 @@ internal sealed class AgentNodeCheckpointStore(
             cancellationToken);
     }
 
-    private static async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitSuccessCoreAsync(
+    private async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitSuccessCoreAsync(
         AiGatewayDbContext context,
         (AgentTask Task, AgentTaskRunAttempt Attempt) authority,
         AgentNodeSuccessCheckpoint checkpoint,
@@ -111,14 +115,16 @@ internal sealed class AgentNodeCheckpointStore(
             cancellationToken);
         context.AgentEvidenceRecords.Add(checkpoint.Evidence);
         context.AgentRunUsageLedgerEntries.Add(checkpoint.Usage);
+        IReadOnlyCollection<AuditLogEntry>? auditEntries = null;
         if (finalizationAuthority is not null)
         {
-            ApplyFinalization(
+            auditEntries = await ApplyFinalizationAsync(
                 context,
                 authority.Task,
                 authority.Attempt,
                 finalizationAuthority,
-                checkpoint);
+                checkpoint,
+                cancellationToken);
         }
 
         node.CompleteCheckpoint(
@@ -131,7 +137,11 @@ internal sealed class AgentNodeCheckpointStore(
             checkpoint.ProviderReceiptHash,
             checkpoint.CompletedAtUtc);
         return await PromoteAndSucceedAsync(
-            context, checkpoint.RunAttemptId, checkpoint.CompletedAtUtc, cancellationToken);
+            context,
+            checkpoint.RunAttemptId,
+            checkpoint.CompletedAtUtc,
+            cancellationToken,
+            auditEntries);
     }
 
     private static async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitFailureCoreAsync(
@@ -183,12 +193,14 @@ internal sealed class AgentNodeCheckpointStore(
         AiGatewayDbContext context,
         AgentTaskRunAttemptId runAttemptId,
         DateTimeOffset completedAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<AuditLogEntry>? auditEntries = null)
     {
         await AgentNodeRunDependencyPromoter.PromoteAsync(
             context, runAttemptId, completedAtUtc, cancellationToken);
         return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-            AgentFencedWriteResult.Succeeded);
+            AgentFencedWriteResult.Succeeded,
+            AuditEntries: auditEntries);
     }
 
     private static async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitOutcomeUnknownCoreAsync(
@@ -288,6 +300,10 @@ internal sealed class AgentNodeCheckpointStore(
                 FOR UPDATE
                 """)
             .SingleOrDefaultAsync(cancellationToken);
+        var session = await AgentExecutionRowLock.ByIdAsync<Session>(
+            context,
+            task.SessionId.Value,
+            cancellationToken);
 
         var stage = mutation.FileSetStage;
         if (task.Status != AgentTaskStatus.WaitingFinalApproval ||
@@ -304,6 +320,7 @@ internal sealed class AgentNodeCheckpointStore(
             workspace.Status != ArtifactWorkspaceStatus.Active ||
             artifacts.Count == 0 ||
             approval is null ||
+            session is null ||
             approval.TaskId != task.Id ||
             approval.ApprovalType != AgentApprovalType.FinalOutput ||
             approval.Status != AgentApprovalStatus.Approved ||
@@ -372,6 +389,22 @@ internal sealed class AgentNodeCheckpointStore(
             return null;
         }
 
+        var hasPrematureFinalProjection = await context.MessageEvents
+            .AsNoTracking()
+            .AnyAsync(messageEvent =>
+                    messageEvent.AgentTaskId == task.Id &&
+                    ((messageEvent.EventType == MessageEventType.AgentTaskStepCompleted &&
+                      messageEvent.AgentStepId == mutation.FinalStepId) ||
+                     (messageEvent.EventType == MessageEventType.ArtifactReady &&
+                      messageEvent.ArtifactWorkspaceId == mutation.WorkspaceId) ||
+                     (messageEvent.EventType == MessageEventType.FinalOutputReady &&
+                      messageEvent.ArtifactWorkspaceId == mutation.WorkspaceId)),
+                cancellationToken);
+        if (hasPrematureFinalProjection)
+        {
+            return null;
+        }
+
         foreach (var artifact in artifacts)
         {
             var binding = mutation.ArtifactBindings.SingleOrDefault(candidate => candidate.ArtifactId == artifact.Id);
@@ -423,7 +456,7 @@ internal sealed class AgentNodeCheckpointStore(
             }
         }
 
-        return new FinalizationAuthority(workspace, artifacts, finalStep, approval);
+        return new FinalizationAuthority(session, workspace, artifacts, finalStep, approval);
     }
 
     private static async Task<bool> MatchesFinalOutputApprovalAuthorityAsync(
@@ -527,12 +560,13 @@ internal sealed class AgentNodeCheckpointStore(
             cancellationToken);
     }
 
-    private static void ApplyFinalization(
+    private async Task<IReadOnlyCollection<AuditLogEntry>> ApplyFinalizationAsync(
         AiGatewayDbContext context,
         AgentTask task,
         AgentTaskRunAttempt attempt,
         FinalizationAuthority authority,
-        AgentNodeSuccessCheckpoint checkpoint)
+        AgentNodeSuccessCheckpoint checkpoint,
+        CancellationToken cancellationToken)
     {
         var mutation = checkpoint.Finalization!;
         foreach (var artifact in authority.Artifacts)
@@ -564,6 +598,111 @@ internal sealed class AgentNodeCheckpointStore(
             checkpoint.NodeFencingToken,
             checkpoint.CompletedAtUtc);
         context.ArtifactFileSetOperations.Add(operation);
+
+        var nextSequence = await context.MessageEvents
+            .Where(messageEvent => messageEvent.SessionId == authority.Session.Id)
+            .Select(messageEvent => (int?)messageEvent.Sequence)
+            .MaxAsync(cancellationToken) ?? 0;
+        context.MessageEvents.Add(MessageEvent.FromProjection(
+            authority.Session.Id,
+            checked(++nextSequence),
+            MessageEventType.AgentTaskStepCompleted,
+            checkpoint.CompletedAtUtc,
+            task.Id,
+            agentStepId: authority.FinalStep.Id,
+            artifactWorkspaceId: authority.Workspace.Id));
+        foreach (var artifact in authority.Artifacts.OrderBy(item => item.Id.Value))
+        {
+            context.MessageEvents.Add(MessageEvent.FromProjection(
+                authority.Session.Id,
+                checked(++nextSequence),
+                MessageEventType.ArtifactReady,
+                checkpoint.CompletedAtUtc,
+                task.Id,
+                artifactWorkspaceId: authority.Workspace.Id,
+                artifactId: artifact.Id));
+        }
+
+        context.MessageEvents.Add(MessageEvent.FromProjection(
+            authority.Session.Id,
+            checked(++nextSequence),
+            MessageEventType.FinalOutputReady,
+            checkpoint.CompletedAtUtc,
+            task.Id,
+            artifactWorkspaceId: authority.Workspace.Id));
+
+        return
+        [
+            CreateAuditEntry(
+                "Agent.ToolExecution",
+                "AgentStep",
+                authority.FinalStep.Id.Value.ToString(),
+                authority.FinalStep.ToolCode ?? authority.FinalStep.Title,
+                "Final-output checkpoint committed.",
+                task,
+                authority.Workspace,
+                authority.FinalStep,
+                checkpoint.CompletedAtUtc),
+            CreateAuditEntry(
+                "Agent.WorkspaceFinalize",
+                "ArtifactWorkspace",
+                authority.Workspace.Id.Value.ToString(),
+                authority.Workspace.WorkspaceCode,
+                "Workspace artifacts finalized.",
+                task,
+                authority.Workspace,
+                step: null,
+                checkpoint.CompletedAtUtc)
+        ];
+    }
+
+    private AuditLogEntry CreateAuditEntry(
+        string actionCode,
+        string targetType,
+        string targetId,
+        string targetName,
+        string summary,
+        AgentTask task,
+        ArtifactWorkspace workspace,
+        AgentStep? step,
+        DateTimeOffset createdAtUtc)
+    {
+        var metadata = new Dictionary<string, string>
+        {
+            ["taskId"] = task.Id.Value.ToString(),
+            ["taskCode"] = task.TaskCode,
+            ["workspaceCode"] = workspace.WorkspaceCode
+        };
+        if (step is not null)
+        {
+            metadata["stepOrder"] = step.StepIndex.ToString();
+            metadata["toolName"] = step.ToolCode ?? string.Empty;
+            metadata["artifactId"] = string.Empty;
+            metadata["failureReason"] = string.Empty;
+        }
+        else
+        {
+            metadata["artifactCount"] = workspace.Artifacts.Count.ToString();
+        }
+
+        return new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            ActionGroup = AuditActionGroups.AiGateway,
+            ActionCode = actionCode,
+            TargetType = targetType,
+            TargetId = targetId,
+            TargetName = targetName,
+            OperatorUserId = currentUser?.Id?.ToString(),
+            OperatorUserName = string.IsNullOrWhiteSpace(currentUser?.UserName)
+                ? "System"
+                : currentUser.UserName,
+            OperatorRoleName = currentUser?.Role,
+            Result = AuditResults.Succeeded,
+            Summary = summary,
+            ChangedFields = AuditMetadataCodec.Combine(changedFields: null, metadata),
+            CreatedAt = createdAtUtc.UtcDateTime
+        };
     }
 
     private Task<AgentFencedWriteResult> ExecuteCheckpointAsync(
@@ -656,6 +795,7 @@ internal sealed class AgentNodeCheckpointStore(
         new(AgentFencedWriteResult.StaleFence);
 
     private sealed record FinalizationAuthority(
+        Session Session,
         ArtifactWorkspace Workspace,
         IReadOnlyList<Artifact> Artifacts,
         AgentStep FinalStep,

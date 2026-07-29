@@ -648,7 +648,7 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
         AssertFinalCheckpointAsync(expireEvidenceAfterStaging: true);
 
     [Fact]
-    public Task FinalCheckpoint_ShouldAtomicallyCompleteAllAuthoritiesAndResumeQueue() =>
+    public Task FinalCheckpoint_ShouldAtomicallyCompleteAuthoritiesProjectionsAuditsAndResumeQueue() =>
         AssertFinalCheckpointAsync(expireEvidenceAfterStaging: false);
 
     private async Task AssertFinalCheckpointAsync(bool expireEvidenceAfterStaging)
@@ -842,6 +842,12 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             (await verification.Set<AgentNodeRun>().AsNoTracking().SingleAsync(item =>
                     item.Id == seeded.FinalNodeRunId))
                 .Status.Should().Be(AgentNodeRunStatus.Running);
+            (await verification.MessageEvents.CountAsync(messageEvent =>
+                    messageEvent.AgentTaskId == seeded.TaskId &&
+                    (messageEvent.EventType == MessageEventType.AgentTaskStepCompleted ||
+                     messageEvent.EventType == MessageEventType.ArtifactReady ||
+                     messageEvent.EventType == MessageEventType.FinalOutputReady)))
+                .Should().Be(0);
             return;
         }
 
@@ -884,6 +890,34 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             item.SourceApprovalRequestId == seeded.ApprovalId);
         queue.Status.Should().Be(AgentTaskRunQueueStatus.Succeeded);
         queue.SafeMessage.Should().Be("Agent task run reached Completed.");
+        var finalizationEvents = await verification.MessageEvents
+            .AsNoTracking()
+            .Where(messageEvent =>
+                messageEvent.AgentTaskId == seeded.TaskId &&
+                (messageEvent.EventType == MessageEventType.AgentTaskStepCompleted ||
+                 messageEvent.EventType == MessageEventType.ArtifactReady ||
+                 messageEvent.EventType == MessageEventType.FinalOutputReady))
+            .OrderBy(messageEvent => messageEvent.Sequence)
+            .ToArrayAsync();
+        finalizationEvents.Select(messageEvent => messageEvent.EventType).Should().Equal(
+            MessageEventType.AgentTaskStepCompleted,
+            MessageEventType.ArtifactReady,
+            MessageEventType.FinalOutputReady);
+        finalizationEvents[0].AgentStepId.Should().Be(seeded.FinalStepId);
+        finalizationEvents[1].ArtifactId.Should().Be(seeded.ArtifactId);
+        finalizationEvents.Should().OnlyContain(messageEvent =>
+            messageEvent.ArtifactWorkspaceId == seeded.WorkspaceId);
+
+        await using var audit = new AuditDbContext(
+            PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString));
+        (await audit.AuditLogs.AsNoTracking().CountAsync(entry =>
+                entry.ActionCode == "Agent.ToolExecution" &&
+                entry.TargetId == seeded.FinalStepId.Value.ToString()))
+            .Should().Be(1);
+        (await audit.AuditLogs.AsNoTracking().CountAsync(entry =>
+                entry.ActionCode == "Agent.WorkspaceFinalize" &&
+                entry.TargetId == seeded.WorkspaceId.Value.ToString()))
+            .Should().Be(1);
     }
 
     private async Task<PostgresScratchDatabase> CreateMigratedDatabaseAsync()

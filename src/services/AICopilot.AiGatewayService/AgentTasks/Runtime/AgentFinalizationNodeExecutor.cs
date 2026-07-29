@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
@@ -9,9 +8,7 @@ using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.Services.Contracts;
-using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.AgentTasks;
@@ -25,11 +22,7 @@ internal sealed class AgentFinalizationNodeExecutor(
     IArtifactWorkspaceFileSetStore fileSetStore,
     NodeRunClaimCoordinator nodeRunClaimCoordinator,
     NodeCheckpointCoordinator nodeCheckpointCoordinator,
-    IRepository<ArtifactWorkspace> workspaceRepository,
-    AgentAuditRecorder auditRecorder,
-    ILogger<AgentFinalizationNodeExecutor> logger,
-    IOptions<AgentRunQueueOptions>? runQueueOptions = null,
-    MessageTimelineProjectionWriter? timelineProjectionWriter = null)
+    IOptions<AgentRunQueueOptions>? runQueueOptions = null)
 {
     public async Task<Result<AgentFinalizationNodeExecutionResult>> ExecuteAsync(
         DurableTaskClaim taskClaim,
@@ -281,11 +274,6 @@ internal sealed class AgentFinalizationNodeExecutor(
         {
             throw;
         }
-        await StageProjectionsBestEffortAsync(
-            taskClaim.Task,
-            workspace,
-            finalStep,
-            cancellationToken);
         return Result.Success(new AgentFinalizationNodeExecutionResult(stage, durableOutputJson));
     }
 
@@ -408,44 +396,6 @@ internal sealed class AgentFinalizationNodeExecutor(
             ? Result.Success(evidenceSetDigest)
             : Conflict<string>(
                 "Final-output source manifest differs from the approved manifest.");
-    }
-
-    private async Task StageProjectionsBestEffortAsync(
-        AgentTask task,
-        ArtifactWorkspace workspace,
-        AgentStep finalStep,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await auditRecorder.RecordToolAsync(
-                task,
-                workspace,
-                finalStep,
-                AuditResults.Succeeded,
-                "Final-output checkpoint committed.",
-                artifactId: null,
-                cancellationToken: cancellationToken);
-            await auditRecorder.RecordWorkspaceFinalizedAsync(
-                task,
-                workspace,
-                AuditResults.Succeeded,
-                "Workspace artifacts finalized.",
-                cancellationToken);
-            if (timelineProjectionWriter is not null)
-            {
-                await timelineProjectionWriter.StageStepCompletedAsync(task, finalStep, cancellationToken);
-                await timelineProjectionWriter.StageWorkspaceFinalizedAsync(task, workspace, cancellationToken);
-            }
-
-            await workspaceRepository.SaveChangesAsync(cancellationToken);
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(
-                "Final-output authority committed but best-effort projections were deferred. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
-                exception.GetType().Name);
-        }
     }
 
     private static Result<AgentNormalizedNodeCheckpoint> BuildCheckpoint(
