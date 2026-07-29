@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Json;
 using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
@@ -206,6 +207,67 @@ public sealed class AgentRunQueueProductionOpsTests
     }
 
     [Fact]
+    public async Task DurableWorker_ShouldFreshReadReconciliationBeforeQueueCompletion()
+    {
+        var task = CreateRunningTask();
+        var now = DateTimeOffset.UtcNow;
+        var attempt = new AgentTaskRunAttempt(
+            task.Id,
+            1,
+            AgentTaskRunTriggerType.Manual,
+            "fresh-read-worker",
+            now,
+            TimeSpan.FromMinutes(5));
+        task.BeginRunAttempt(
+            attempt.Id,
+            attempt.AttemptNo,
+            attempt.LeaseId!.Value,
+            attempt.LeaseOwner!,
+            attempt.LeaseExpiresAt!.Value,
+            now);
+        attempt.BindTaskFencingToken(task.RunFencingToken);
+        var queueItem = new AgentTaskRunQueueItem(
+            task.Id,
+            AgentTaskRunTriggerType.Manual,
+            task.UserId,
+            now);
+        queueItem.AcquireLease(
+            attempt.LeaseId.Value,
+            attempt.LeaseOwner!,
+            now,
+            TimeSpan.FromMinutes(5),
+            task.RunFencingToken);
+        queueItem.LinkRunAttempt(attempt.Id, now);
+        var staleTaskSnapshot = ShallowClone(task);
+        var claim = new DurableTaskClaim(
+            queueItem,
+            staleTaskSnapshot,
+            attempt,
+            task.RunFencingToken,
+            attempt.LeaseId.Value,
+            attempt.LeaseExpiresAt.Value);
+        var taskRepository = new InMemoryRepository<AgentTask>(task);
+        var attemptStore = new InMemoryAgentTaskRunAttemptStore(attempt);
+        var queueStore = new InMemoryAgentTaskRunQueueStore(queueItem);
+        var durableStore = new RecordingDurableTaskClaimStore();
+        var coordinator = new AgentTaskRunQueueWorkerCoordinator(
+            queueStore,
+            taskRepository,
+            attemptStore,
+            new AgentTaskRunQueue(
+                queueStore,
+                AgentPlanV2TestData.CreateMatchingFreshReadGate()),
+            new ReconciliationRuntime(task, attempt),
+            durableTaskClaimCoordinator: new DurableTaskClaimCoordinator(durableStore));
+
+        await coordinator.ExecuteClaimAsync(claim, CancellationToken.None);
+
+        task.Status.Should().Be(AgentTaskStatus.ReconciliationRequired);
+        staleTaskSnapshot.Status.Should().Be(AgentTaskStatus.Running);
+        durableStore.CompleteCallCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task DataWorker_ShouldFailStaleStartedLeaseAndAudit()
     {
         var task = CreateFailedTask();
@@ -288,7 +350,7 @@ public sealed class AgentRunQueueProductionOpsTests
         queueDto.SafeMessage.Should().Be("Agent task plan failed integrity validation.");
     }
 
-    private static AgentTask CreateFailedTask()
+    private static AgentTask CreateRunningTask()
     {
         var now = DateTimeOffset.UtcNow;
         var task = new AgentTask(
@@ -309,7 +371,7 @@ public sealed class AgentRunQueueProductionOpsTests
                 AgentTaskType.ReportGeneration,
                 knowledgeBaseIds: null),
             now);
-        var step = task.AddStep(
+        task.AddStep(
             "Generate",
             "Generate output",
             AgentStepType.ArtifactGeneration,
@@ -326,10 +388,26 @@ public sealed class AgentRunQueueProductionOpsTests
         task.ConfirmExecutablePlan(task.PlanJson, [2], now);
         task.ApprovePlan(now);
         task.Start(now);
+        return task;
+    }
+
+    private static AgentTask CreateFailedTask()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = CreateRunningTask();
+        var step = task.Steps.OrderBy(candidate => candidate.StepIndex).First();
         step.Start(now);
         step.Fail("failed", now);
         task.Fail("failed", now);
         return task;
+    }
+
+    private static T ShallowClone<T>(T value)
+        where T : class
+    {
+        return (T)typeof(object)
+            .GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(value, null)!;
     }
 
     private static AgentTaskRunQueueItem FailedRetryItem(AgentTask task, DateTimeOffset now)
@@ -426,6 +504,72 @@ public sealed class AgentRunQueueProductionOpsTests
             Result<AgentTask> result = Result.Failure(failures);
             return Task.FromResult(result);
         }
+    }
+
+    private sealed class ReconciliationRuntime(
+        AgentTask authoritativeTask,
+        AgentTaskRunAttempt authoritativeAttempt) : IAgentTaskRuntime
+    {
+        public Task<Result<AgentTask>> RunAsync(
+            AgentTask task,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Durable claim execution is required.");
+
+        public Task<Result<AgentTask>> RunAsync(
+            AgentTask task,
+            AgentTaskRunTriggerType triggerType = AgentTaskRunTriggerType.Manual,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Durable claim execution is required.");
+
+        public Task<Result<AgentTask>> RunClaimedAsync(
+            DurableTaskClaim claim,
+            CancellationToken cancellationToken = default)
+        {
+            var now = DateTimeOffset.UtcNow;
+            authoritativeTask.RequireReconciliation(now);
+            authoritativeAttempt.RequireReconciliation(
+                now,
+                "Final-output authority conflict requires reconciliation.");
+            return Task.FromResult(Result.Success(claim.Task));
+        }
+    }
+
+    private sealed class RecordingDurableTaskClaimStore : IAgentDurableTaskClaimStore
+    {
+        public int CompleteCallCount { get; private set; }
+
+        public Task<DurableTaskClaim?> TryClaimNextAsync(
+            string leaseOwner,
+            TimeSpan leaseDuration,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<DurableTaskClaim?>(null);
+
+        public Task<AgentFencedWriteResult> TryMarkStartedAsync(
+            DurableTaskClaim claim,
+            DateTimeOffset startedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            claim.QueueItem.MarkStarted(claim.RunAttempt.Id, startedAtUtc);
+            return Task.FromResult(AgentFencedWriteResult.Succeeded);
+        }
+
+        public Task<AgentFencedWriteResult> TryCompleteAsync(
+            DurableTaskClaim claim,
+            AgentTaskRunQueueStatus terminalStatus,
+            string? failureCode,
+            string safeMessage,
+            DateTimeOffset completedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            CompleteCallCount++;
+            return Task.FromResult(AgentFencedWriteResult.Succeeded);
+        }
+
+        public Task<int> RecoverExpiredStartedAsync(
+            DateTimeOffset nowUtc,
+            int maxItems,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
     }
 
     private sealed class CapturingAuditLogWriter : IAuditLogWriter

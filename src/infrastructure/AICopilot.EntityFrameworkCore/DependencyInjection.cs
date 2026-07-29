@@ -39,7 +39,9 @@ public static class DependencyInjection
             configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.AiCopilot));
         builder.AddNpgsqlDbContext<AiGatewayDbContext>(
             "ai-copilot",
-            configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(MigrationHistoryTables.AiGateway));
+            configureDbContextOptions: AICopilotNpgsqlOptions.ConfigureMigrationHistory(
+                MigrationHistoryTables.AiGateway,
+                enableRetryOnFailure: true));
         builder.AddNpgsqlDbContext<AuditDbContext>("ai-copilot");
         builder.AddNpgsqlDbContext<DataAnalysisDbContext>(
             "ai-copilot",

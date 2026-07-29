@@ -66,7 +66,14 @@ internal sealed class AgentTaskRunQueueWorkerCoordinator(
 
         var result = await runtime.RunClaimedAsync(claim, cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        if (claim.Task.Status == AgentTaskStatus.ReconciliationRequired)
+        var authoritativeTask = await taskRepository.GetAsync(
+            task => task.Id == claim.Task.Id,
+            cancellationToken: cancellationToken);
+        var authoritativeAttempt = await attemptStore.FirstByIdAsync(
+            claim.RunAttempt.Id,
+            cancellationToken);
+        if (authoritativeTask is null || authoritativeAttempt is null ||
+            authoritativeTask.Status == AgentTaskStatus.ReconciliationRequired)
         {
             return;
         }
@@ -87,23 +94,23 @@ internal sealed class AgentTaskRunQueueWorkerCoordinator(
                 ?? problem?.Detail
                 ?? "Agent task run failed before runtime execution completed.";
         }
-        else if (claim.Task.Status == AgentTaskStatus.Cancelled)
+        else if (authoritativeTask.Status == AgentTaskStatus.Cancelled)
         {
             terminalStatus = AgentTaskRunQueueStatus.Cancelled;
             failureCode = AppProblemCodes.AgentTaskCancellationRequested;
             safeMessage = "Agent task cancellation requested.";
         }
-        else if (claim.Task.Status == AgentTaskStatus.Failed)
+        else if (authoritativeTask.Status == AgentTaskStatus.Failed)
         {
             terminalStatus = AgentTaskRunQueueStatus.Failed;
-            failureCode = claim.RunAttempt.FailureCode ?? "agent_task_failed";
-            safeMessage = claim.RunAttempt.SafeMessage
-                ?? claim.Task.FinalSummary
+            failureCode = authoritativeAttempt.FailureCode ?? "agent_task_failed";
+            safeMessage = authoritativeAttempt.SafeMessage
+                ?? authoritativeTask.FinalSummary
                 ?? "Agent task failed.";
         }
         else
         {
-            safeMessage = $"Agent task run reached {claim.Task.Status}.";
+            safeMessage = $"Agent task run reached {authoritativeTask.Status}.";
         }
 
         await durableTaskClaimCoordinator.CompleteAsync(

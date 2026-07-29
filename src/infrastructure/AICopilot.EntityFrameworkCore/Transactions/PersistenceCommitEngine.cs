@@ -1,9 +1,11 @@
+using System.Runtime.ExceptionServices;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.Services.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
 
 namespace AICopilot.EntityFrameworkCore.Transactions;
 
@@ -115,9 +117,24 @@ public sealed class PersistenceCommitEngine(
                     executionState.Participant.TransactionOwner,
                     transaction);
 
-                var currentAttempt = await executionState.Participant.PersistAttemptAsync(
-                    attemptContext,
-                    executionState.CallerCancellationToken);
+                PersistenceAttemptResult<TResult> currentAttempt;
+                try
+                {
+                    currentAttempt = await executionState.Participant.PersistAttemptAsync(
+                        attemptContext,
+                        executionState.CallerCancellationToken);
+                }
+                catch (Exception exception)
+                {
+                    var retryable = FindRetryableProviderException(exception);
+                    if (retryable is null)
+                    {
+                        throw;
+                    }
+
+                    ExceptionDispatchInfo.Capture(retryable).Throw();
+                    throw;
+                }
 
                 executionState.SetMarkerExpectation(currentAttempt.HasPersistentChanges);
                 if (!currentAttempt.HasPersistentChanges)
@@ -141,6 +158,19 @@ public sealed class PersistenceCommitEngine(
 
         participant.CommitConfirmed(attemptResult.Result);
         return attemptResult.Result;
+    }
+
+    private static Exception? FindRetryableProviderException(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is NpgsqlException { IsTransient: true })
+            {
+                return current;
+            }
+        }
+
+        return null;
     }
 
     private static Task<bool> VerifyCommitAsync(

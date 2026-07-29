@@ -76,6 +76,13 @@ public sealed class RepositoryPersistenceCommitter(
             PersistenceAttemptContext context,
             CancellationToken cancellationToken)
         {
+            if (businessDbContext is AiGatewayDbContext aiGatewayDbContext)
+            {
+                await MessageTimelineSequenceCoordinator.AllocateAsync(
+                    aiGatewayDbContext,
+                    cancellationToken);
+            }
+
             var businessAffectedRows = await businessDbContext.SaveChangesAsync(
                 acceptAllChangesOnSuccess: false,
                 cancellationToken);

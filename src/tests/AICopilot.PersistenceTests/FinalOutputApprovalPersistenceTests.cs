@@ -1,6 +1,7 @@
 using System.Text;
 using AICopilot.AiGatewayService;
 using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Artifacts;
@@ -11,6 +12,7 @@ using AICopilot.Core.AiGateway.Runtime.AgentExecution;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Persistence;
+using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -22,6 +24,74 @@ namespace AICopilot.PersistenceTests;
 [Collection(PostgresPersistenceTestCollection.Name)]
 public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixture fixture)
 {
+    [Fact]
+    public async Task TimelineSequence_ShouldSerializeConcurrentRepositoryWriters()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var session = new Session(Guid.NewGuid(), ConversationTemplateId.New());
+        await using (var seedContext = CreateAiGatewayContext(database.ConnectionString))
+        {
+            seedContext.Sessions.Add(session);
+            await seedContext.SaveChangesAsync();
+        }
+
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using var firstScope = host.Services.CreateScope();
+        using var secondScope = host.Services.CreateScope();
+        var createdAt = DateTimeOffset.UtcNow;
+        firstScope.ServiceProvider
+            .GetRequiredService<IMessageTimelineProjectionStore>()
+            .Add(MessageEvent.FromProjection(
+                session.Id,
+                sequence: 1,
+                MessageEventType.AgentTaskPlanCreated,
+                createdAt));
+        secondScope.ServiceProvider
+            .GetRequiredService<IMessageTimelineProjectionStore>()
+            .Add(MessageEvent.FromProjection(
+                session.Id,
+                sequence: 1,
+                MessageEventType.FinalOutputReady,
+                createdAt.AddMilliseconds(1)));
+
+        var affectedRows = await Task.WhenAll(
+            firstScope.ServiceProvider
+                .GetRequiredService<IRepository<Session>>()
+                .SaveChangesAsync(),
+            secondScope.ServiceProvider
+                .GetRequiredService<IRepository<Session>>()
+                .SaveChangesAsync());
+
+        affectedRows.Should().OnlyContain(count => count > 0);
+        using (var messageScope = host.Services.CreateScope())
+        {
+            await messageScope.ServiceProvider
+                .GetRequiredService<SessionMessagePersistenceService>()
+                .AppendAsync(
+                    session.Id.Value,
+                    "message after concurrent projections",
+                    MessageType.Assistant);
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        var timeline = await verification.MessageEvents
+                .AsNoTracking()
+                .Where(messageEvent => messageEvent.SessionId == session.Id)
+                .OrderBy(messageEvent => messageEvent.Sequence)
+                .ToArrayAsync();
+        timeline
+            .Select(messageEvent => messageEvent.Sequence)
+            .Should()
+            .Equal(1, 2, 3);
+        var message = await verification.Messages
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.SessionId == session.Id);
+        message.Sequence.Should().Be(3);
+        timeline.Single(messageEvent => messageEvent.MessageId == message.Id)
+            .Sequence.Should().Be(message.Sequence);
+    }
+
     [Fact]
     public async Task Prepare_ShouldSerializeConcurrentCreatorsIntoOneProofBoundApproval()
     {
@@ -835,6 +905,7 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
 
         if (expireEvidenceAfterStaging)
         {
+            await InstallFailFirstFinalizationAuditTriggerAsync(database.ConnectionString);
             using var reconciliationScope = host.Services.CreateScope();
             var reconciliation = await reconciliationScope.ServiceProvider
                 .GetRequiredService<NodeCheckpointCoordinator>()
@@ -1000,6 +1071,35 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             await database.DisposeAsync();
             throw;
         }
+    }
+
+    private static async Task InstallFailFirstFinalizationAuditTriggerAsync(
+        string connectionString)
+    {
+        await using var context = CreateAiGatewayContext(connectionString);
+        await context.Database.ExecuteSqlRawAsync(
+            """
+            CREATE SEQUENCE public.finalization_reconciliation_audit_retry_sequence;
+
+            CREATE FUNCTION public.fail_first_finalization_reconciliation_audit()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $function$
+            BEGIN
+                IF nextval('public.finalization_reconciliation_audit_retry_sequence') = 1 THEN
+                    RAISE EXCEPTION 'simulated transient finalization audit failure'
+                        USING ERRCODE = '40001';
+                END IF;
+                RETURN NEW;
+            END;
+            $function$;
+
+            CREATE TRIGGER fail_first_finalization_reconciliation_audit
+            BEFORE INSERT ON public.audit_logs
+            FOR EACH ROW
+            WHEN (NEW.action_code = 'Agent.FinalizationReconciliationRequired')
+            EXECUTE FUNCTION public.fail_first_finalization_reconciliation_audit();
+            """);
     }
 
     private static async Task<SeededFinalOutput> SeedAndPrepareAsync(

@@ -52,9 +52,21 @@ public static class MigrationHistoryTables
 
 public static class AICopilotNpgsqlOptions
 {
-    public static Action<DbContextOptionsBuilder> ConfigureMigrationHistory(MigrationHistoryTable table)
+    public static Action<DbContextOptionsBuilder> ConfigureMigrationHistory(
+        MigrationHistoryTable table,
+        bool enableRetryOnFailure = false)
     {
-        return options => options.UseNpgsql(npgsql => npgsql.MigrationsHistoryTable(table.TableName, table.Schema));
+        return options => options.UseNpgsql(npgsql =>
+        {
+            npgsql.MigrationsHistoryTable(table.TableName, table.Schema);
+            if (enableRetryOnFailure)
+            {
+                npgsql.EnableRetryOnFailure(
+                    maxRetryCount: 3,
+                    maxRetryDelay: TimeSpan.FromSeconds(5),
+                    errorCodesToAdd: null);
+            }
+        });
     }
 
     public static DbContextOptionsBuilder UseNpgsqlWithMigrationHistory(
