@@ -5,7 +5,7 @@
 ## 1. 当前状态
 
 - AICopilot 的目标是企业数据与证据编排平台，不是通用自治多 Agent 平台。
-- 本表的“当前源码 SHA”是本轮逐项复核能力实现时的活动 `main` SHA，不是发布版本或生产证据；B01 的测试治理与文档变化由该批 PR/merge SHA 另行绑定，文档不自引用尚未形成的 commit。
+- 本表的“当前源码 SHA”绑定已形成的实现提交或活动 `main` merge SHA，不是发布版本或生产证据；PR candidate、merge 后 `main` 和生产运行身份仍必须分别用各自 exact SHA 证明，文档不自引用尚未形成的 merge commit。
 - “源码候选”只说明活动树存在对应实现，不等于当前 exact HEAD 已通过完整受影响验证，更不等于已经发布或生产验收。旧分支、旧 CI run、固定 runner/case 数和旧覆盖率不能作为当前候选证据。
 - 当前生产边界保持不变：Cloud 永久只读；AICopilot 不直连 PLC；Plan 未确认前不执行；Simulation 必须显式开启且不得作为 Cloud 失败 fallback；模型不能授予权限。
 - TEST-01 的只读分析已经完成，B01 是仓内选择器/项目图实现载体；其关闭状态只由 Deployment 专项清单在 B01 head SHA、merge SHA 的 CI 与最终 exact-SHA evidence 全部对账后更新，本路线图不提前宣告关闭。
@@ -15,9 +15,9 @@
 | Plan v2、唯一 compiler 与 Skill/DynamicPlanner 退役 | `77a8646e633ed26d45dc3e3bea6a8995c3603cdd` | 源码候选；新执行轨为 v2 | 当前 SHA 未完成完整受影响矩阵 | 未验收 | Plan v1 只读兼容必须保留至 `2026-12-31`；不得恢复双执行器 |
 | durable Queue/Attempt/NodeRun/Evidence/fencing | `77a8646e633ed26d45dc3e3bea6a8995c3603cdd` | 源码候选 | 有局部测试，当前 SHA 未完成 kill/restart、OutcomeUnknown 与完整恢复矩阵 | 未验收 | exact-SHA 故障矩阵和生产运行证据 |
 | 有限 DAG、受控 Agent Node 与 IntentRegistry | `77a8646e633ed26d45dc3e3bea6a8995c3603cdd` | 源码候选 | 当前 SHA 未完成全链路等价与恢复验证 | 未验收 | 依赖/合流、预算、深度、取消和失败传播 |
-| Agent 最终产物闭环 | `77a8646e633ed26d45dc3e3bea6a8995c3603cdd` | 严格 finalization 源码候选；本批只补错误码与契约，不搬旧实现 | 局部校验存在；完整 E2E 未通过 | 未验收 | 严格审批 tuple、decision proof、竞争批准/拒绝、checkpoint 损坏、幂等恢复、旧同步入口 fail-closed |
-| AI-01 首次 JIT 身份绑定 | `77a8646e633ed26d45dc3e3bea6a8995c3603cdd` | OIDC/JIT 源码候选 | 普通流程有测试；首次并发未形成可接受证据 | 未验收 | 同一 Cloud identity / 本地用户并发争用、唯一冲突稳定映射与审计 |
-| AI-02 Cloud 真实只读链路 | `77a8646e633ed26d45dc3e3bea6a8995c3603cdd` | typed GET、业务插件与同源受控 fallback 源码候选 | 本地契约测试不代表真实 Cloud 验收 | 未验收 | Cloud provider 生产契约、provider→consumer 发布顺序、真实权限与真实数据 |
+| Agent 最终产物闭环 | `e7979d6dfe8c0997252d16dd604679ffd3d61202` | B03 源码闭环已固化：唯一 proof-bound 审批协调器、原子 decision/queue、durable NodeRun 关单、旧 finalize fail-closed、迁移脏数据阻断 | 本地精确矩阵已覆盖唯一审批、竞争/迟到决策、完整元组/源字节漂移、真实 PostgreSQL 原子性、Evidence 过期、commit outcome unknown、损坏 journal/checkpoint 与重复恢复；GitHub 关闭仍以包含该实现树的 PR candidate 和 merge 后 `main` exact-SHA CI 为准 | 未验收 | 真实部署、生产运行身份、多实例 kill/restart 与真实文件系统/账号场景尚未验收；不得把源码闭环写成生产完成 |
+| AI-01 首次 JIT 身份绑定 | `9928307c4fbf64ae4b5e2c257a9be24e4a00dab4` | 源码与 GitHub 已关闭；Cloud OIDC/JIT 与本地绑定并发不变量已进入 `main` | B02 候选与 merge 后 exact-SHA 门禁已完成；不等于真实账号登录 | 未验收 | 独立执行真实部署与真实 Cloud 账号登录验收；失败时先按责任端定位，不能直接重开 AICopilot 修改 |
+| AI-02 Cloud 真实只读链路 | `9928307c4fbf64ae4b5e2c257a9be24e4a00dab4` | 冻结；现有 typed GET、业务插件与同源受控 fallback 不在 B03 修改，未创建 Cloud consumer 对齐分支 | 本地契约测试不代表真实 Cloud 验收 | 未验收 | Cloud 修改已合并、发布契约冻结、真实只读权限与响应样例明确且用户再次授权后，才允许只读兼容性审核和必要的 consumer 对齐 |
 | CAP-01 / CAP-02 产能摘要 | `77a8646e633ed26d45dc3e3bea6a8995c3603cdd` | `totalCount → outputQty` 与“完工弹夹数”摘要源码存在 | 静态语义可见；真实分组数据未验收 | 未验收 | 证明分组指标是完工弹夹数而非返回记录数，并核对 PLC/时间维度 |
 | VER-01 构建身份 | `77a8646e633ed26d45dc3e3bea6a8995c3603cdd` | 构建身份解析源码存在 | 当前生产版本未按 merge SHA 验收 | 未验收 | 候选、镜像/包、运行时版本与 merge SHA 的完整绑定 |
 
@@ -75,13 +75,13 @@
 |---|---|---|---|
 | B0 | 唯一实施基线、项目图和 Analyzer owner | B01 承载基线与 TEST-01 仓内实现；最终状态以 exact-SHA evidence 和 Deployment 专项清单为准 | 当前候选 clean、exact SHA，项目图/Analyzer/受影响测试重新对账 |
 | P0 | IntentCandidate、Plan v2、LinearV1、Node/Evidence/ExecutionSnapshot 契约 | 源码候选；验证/生产状态见上表 | schema/digest 稳定，超限显式拒绝，影子 planner 不进入生产 DI |
-| P1 | 两级 claim/fencing、状态机、恢复、OutcomeUnknown、配额和 Artifact 对账 | 源码候选；最终产物仍独立阻断 | 多 Worker claim/kill/recovery、状态迁移、配额结算、文件集故障矩阵通过 |
+| P1 | 两级 claim/fencing、状态机、恢复、OutcomeUnknown、配额和 Artifact 对账 | 源码候选；B03 已固化最终产物源码闭环，P1 其它能力与生产状态仍按上表逐项验收 | 多 Worker claim/kill/recovery、状态迁移、配额结算、文件集故障矩阵通过 |
 | P2 | 共享 Node Executor、Evidence Normalizer、双只读执行器和最小生产 PlanCompiler | 源码候选；验证/生产状态见上表 | Chat/Durable 语义一致，无 compiler 空窗、上下文污染或跨路径 fallback |
 | P3 | Plan v2 单轨和 Skill/DynamicPlanner 物理退役 | 新执行轨源码候选；v1 只读兼容仍受截止日约束 | 保留能力等价、退役能力显式、旧拒绝不变、活动系统零旧消费者 |
 | P4 | 有限 DagV1、依赖与合流 | 源码候选；验证/生产状态见上表 | 新 digest/确认、并发、失败传播和恢复稳定 |
 | P5 | 受控 Agent Node | 源码候选；验证/生产状态见上表 | 独立上下文、typed result、深度/预算/权限均 fail-closed |
 | P6 | 完整 IntentRegistry 和同一 PlanCompiler 泛化 | 源码候选；验证/生产状态见上表 | 单一 registry/compiler，多意图稳定，unknown fail-closed |
-| P7 | 工作台、Eval、监控、产物和当前数据健康评估 | 源码候选；最终产物和真实数据仍阻断 | UI 与后端事实一致，可观测、可追溯，健康结果保持 DerivedFact |
+| P7 | 工作台、Eval、监控、产物和当前数据健康评估 | 源码候选；最终产物源码闭环已固化，但生产验收和真实数据仍阻断 | UI 与后端事实一致，可观测、可追溯，健康结果保持 DerivedFact |
 | DP1–DP3 | 时序合同、异常模型、故障预测 | 未纳入当前候选 | 单独跨项目授权、真实数据/标签、时间切分防泄漏和模型回滚门 |
 
 阶段顺序不可交换：
