@@ -185,6 +185,30 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
     }
 
     [Fact]
+    public async Task Prepare_ShouldRejectApprovalTimestampAfterRunLeaseExpiry()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedPreApprovalAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using var scope = host.Services.CreateScope();
+
+        var result = await scope.ServiceProvider
+            .GetRequiredService<IFinalOutputApprovalStore>()
+            .PrepareAsync(new FinalOutputApprovalPreparation(
+                seeded.TaskId,
+                seeded.UserId,
+                seeded.Proof,
+                DateTimeOffset.UtcNow.AddHours(1)));
+
+        result.Status.Should().Be(FinalOutputApprovalCommandStatus.FinalizationConflict);
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.ApprovalRequests.CountAsync()).Should().Be(0);
+        (await verification.AgentTaskRunQueueItems.AsNoTracking().SingleAsync())
+            .Status.Should().Be(AgentTaskRunQueueStatus.Started);
+    }
+
+    [Fact]
     public async Task Decide_ShouldMakeConcurrentApproveApproveIdempotentWithOneResumeQueue()
     {
         await using var database = await CreateMigratedDatabaseAsync();
@@ -809,6 +833,20 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             }
         }
 
+        if (expireEvidenceAfterStaging)
+        {
+            using var reconciliationScope = host.Services.CreateScope();
+            var reconciliation = await reconciliationScope.ServiceProvider
+                .GetRequiredService<NodeCheckpointCoordinator>()
+                .CommitFinalizationConflictAsync(
+                    taskClaim,
+                    nodeClaim,
+                    "Approved final-output Evidence expired before the authoritative checkpoint.",
+                    DateTimeOffset.UtcNow,
+                    CancellationToken.None);
+            reconciliation.IsSuccess.Should().BeTrue();
+        }
+
         if (!expireEvidenceAfterStaging)
         {
             using var completionScope = host.Services.CreateScope();
@@ -835,19 +873,40 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             (await verification.ArtifactFileSetOperations.CountAsync()).Should().Be(0);
             (await verification.AgentTasks.AsNoTracking().SingleAsync(item =>
                     item.Id == seeded.TaskId))
-                .Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+                .Should()
+                .Match<AgentTask>(task =>
+                    task.Status == AgentTaskStatus.ReconciliationRequired &&
+                    task.ActiveRunAttemptId == seeded.RunAttemptId);
             (await verification.ArtifactWorkspaces.AsNoTracking().SingleAsync(item =>
                     item.Id == seeded.WorkspaceId))
                 .Status.Should().Be(ArtifactWorkspaceStatus.Active);
-            (await verification.Set<AgentNodeRun>().AsNoTracking().SingleAsync(item =>
-                    item.Id == seeded.FinalNodeRunId))
-                .Status.Should().Be(AgentNodeRunStatus.Running);
+            var reconciliationNode = await verification.Set<AgentNodeRun>()
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == seeded.FinalNodeRunId);
+            reconciliationNode.Status.Should().Be(AgentNodeRunStatus.OutcomeUnknown);
+            reconciliationNode.ReconciliationPolicy.Should()
+                .Be("manual-final-output-authority-conflict-v1");
+            (await verification.AgentTaskRunAttempts.AsNoTracking().SingleAsync(item =>
+                    item.Id == seeded.RunAttemptId))
+                .Status.Should().Be(AgentTaskRunAttemptStatus.ReconciliationRequired);
+            (await verification.AgentTasks
+                    .Include(item => item.Steps)
+                    .AsNoTracking()
+                    .SingleAsync(item => item.Id == seeded.TaskId))
+                .Steps.Single(item => item.Id == seeded.FinalStepId)
+                .Status.Should().Be(AgentStepStatus.Approved);
             (await verification.MessageEvents.CountAsync(messageEvent =>
                     messageEvent.AgentTaskId == seeded.TaskId &&
                     (messageEvent.EventType == MessageEventType.AgentTaskStepCompleted ||
                      messageEvent.EventType == MessageEventType.ArtifactReady ||
                      messageEvent.EventType == MessageEventType.FinalOutputReady)))
                 .Should().Be(0);
+            await using var reconciliationAudit = new AuditDbContext(
+                PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString));
+            (await reconciliationAudit.AuditLogs.AsNoTracking().CountAsync(entry =>
+                    entry.ActionCode == "Agent.FinalizationReconciliationRequired" &&
+                    entry.TargetId == seeded.FinalNodeRunId.Value.ToString()))
+                .Should().Be(1);
             return;
         }
 

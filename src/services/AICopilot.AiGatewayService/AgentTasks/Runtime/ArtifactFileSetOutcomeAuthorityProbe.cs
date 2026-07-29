@@ -19,7 +19,10 @@ internal sealed class ArtifactFileSetOutcomeAuthorityProbe(
     };
 
     public bool CanProbe(AgentOutcomeReconciliationClaim claim) =>
-        claim.NodeRun.SideEffectClass == AgentNodeSideEffectClass.ArtifactWrite;
+        claim.NodeRun.SideEffectClass == AgentNodeSideEffectClass.ArtifactWrite &&
+        claim.NodeRun.ReconciliationPolicy?.StartsWith(
+            "manual-",
+            StringComparison.Ordinal) != true;
 
     public async Task<AgentOutcomeAuthorityProbeResult> ProbeAsync(
         AgentOutcomeReconciliationClaim claim,

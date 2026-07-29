@@ -44,6 +44,40 @@ internal sealed class NodeCheckpointCoordinator(
             AgentRuntimeTelemetry.RecordOutcomeUnknown);
     }
 
+    public Task<Result> CommitFinalizationConflictAsync(
+        DurableTaskClaim taskClaim,
+        AgentNodeRunClaim nodeClaim,
+        string safeMessage,
+        DateTimeOffset recordedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var normalizedMessage = string.IsNullOrWhiteSpace(safeMessage)
+            ? "Final-output authority conflict requires manual reconciliation."
+            : safeMessage.Trim();
+        if (normalizedMessage.Length > 2000)
+        {
+            normalizedMessage = normalizedMessage[..2000];
+        }
+
+        return CommitOutcomeUnknownAsync(
+            new AgentNodeOutcomeUnknownCheckpoint(
+                taskClaim.Task.Id,
+                taskClaim.RunAttempt.Id,
+                nodeClaim.NodeRun.Id,
+                taskClaim.TaskFencingToken,
+                nodeClaim.NodeFencingToken,
+                nodeClaim.NodeRun.ToolCode ?? "finalize_artifacts",
+                ProviderReceiptHash: null,
+                ReconciliationPolicy: "manual-final-output-authority-conflict-v1",
+                LastConfirmedStage: "approval-decision-committed-finalization-not-committed",
+                IntegrityStatus: "authority-conflict",
+                normalizedMessage,
+                recordedAtUtc.AddMinutes(1),
+                recordedAtUtc.AddHours(24),
+                recordedAtUtc),
+            cancellationToken);
+    }
+
     private static Result CompleteCheckpoint(
         AgentFencedWriteResult result,
         long started,

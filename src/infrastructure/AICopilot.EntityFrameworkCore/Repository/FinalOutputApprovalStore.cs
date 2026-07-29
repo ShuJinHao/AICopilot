@@ -115,7 +115,7 @@ internal sealed class FinalOutputApprovalStore(
                     };
                 }
 
-                if (!IsPreApproval(authority))
+                if (!IsPreApproval(authority, preparation.CreatedAtUtc))
                 {
                     return Attempt(Conflict(authority));
                 }
@@ -853,7 +853,9 @@ internal sealed class FinalOutputApprovalStore(
         return expected == proofNodeFencingToken;
     }
 
-    private static bool IsPreApproval(LockedAuthority authority)
+    private static bool IsPreApproval(
+        LockedAuthority authority,
+        DateTimeOffset approvalCreatedAtUtc)
     {
         var task = authority.Task;
         var attempt = authority.Attempt;
@@ -866,7 +868,10 @@ internal sealed class FinalOutputApprovalStore(
                task.RunLeaseId is not null &&
                task.RunLeaseId == attempt.LeaseId &&
                task.RunLeaseExpiresAt is not null &&
+               task.RunLeaseExpiresAt > approvalCreatedAtUtc &&
                attempt.Status == AgentTaskRunAttemptStatus.Running &&
+               attempt.LeaseExpiresAt is not null &&
+               attempt.LeaseExpiresAt > approvalCreatedAtUtc &&
                attempt.LeaseExpiresAt == task.RunLeaseExpiresAt &&
                authority.Workspace.Status == ArtifactWorkspaceStatus.Active &&
                authority.FinalStep.Status == AgentStepStatus.WaitingApproval &&

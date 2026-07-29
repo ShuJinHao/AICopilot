@@ -203,7 +203,7 @@ internal sealed class AgentNodeCheckpointStore(
             AuditEntries: auditEntries);
     }
 
-    private static async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitOutcomeUnknownCoreAsync(
+    private async Task<AgentExecutionTransactionAttempt<AgentFencedWriteResult>> CommitOutcomeUnknownCoreAsync(
         AiGatewayDbContext context,
         (AgentTask Task, AgentTaskRunAttempt Attempt) authority,
         AgentNodeOutcomeUnknownCheckpoint checkpoint,
@@ -232,7 +232,14 @@ internal sealed class AgentNodeCheckpointStore(
             checkpoint.RecordedAtUtc,
             checkpoint.SafeMessage);
         return new AgentExecutionTransactionAttempt<AgentFencedWriteResult>(
-            AgentFencedWriteResult.Succeeded);
+            AgentFencedWriteResult.Succeeded,
+            AuditEntries:
+            [
+                CreateOutcomeUnknownAuditEntry(
+                    authority.Task,
+                    node,
+                    checkpoint)
+            ]);
     }
 
     private static bool MatchesCheckpointAuthority(
@@ -702,6 +709,49 @@ internal sealed class AgentNodeCheckpointStore(
             Summary = summary,
             ChangedFields = AuditMetadataCodec.Combine(changedFields: null, metadata),
             CreatedAt = createdAtUtc.UtcDateTime
+        };
+    }
+
+    private AuditLogEntry CreateOutcomeUnknownAuditEntry(
+        AgentTask task,
+        AgentNodeRun node,
+        AgentNodeOutcomeUnknownCheckpoint checkpoint)
+    {
+        var finalizationConflict = checkpoint.ReconciliationPolicy.StartsWith(
+            "manual-final-output-authority-conflict-",
+            StringComparison.Ordinal);
+        return new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            ActionGroup = AuditActionGroups.AiGateway,
+            ActionCode = finalizationConflict
+                ? "Agent.FinalizationReconciliationRequired"
+                : "Agent.NodeOutcomeUnknown",
+            TargetType = "AgentNodeRun",
+            TargetId = node.Id.Value.ToString(),
+            TargetName = node.ToolCode ?? node.NodeKind,
+            OperatorUserId = currentUser?.Id?.ToString(),
+            OperatorUserName = string.IsNullOrWhiteSpace(currentUser?.UserName)
+                ? "System"
+                : currentUser.UserName,
+            OperatorRoleName = currentUser?.Role,
+            Result = AuditResults.Rejected,
+            Summary = checkpoint.SafeMessage,
+            ChangedFields = AuditMetadataCodec.Combine(
+                changedFields: null,
+                new Dictionary<string, string>
+                {
+                    ["taskId"] = task.Id.Value.ToString(),
+                    ["taskCode"] = task.TaskCode,
+                    ["runAttemptId"] = checkpoint.RunAttemptId.Value.ToString(),
+                    ["nodeRunId"] = checkpoint.NodeRunId.Value.ToString(),
+                    ["taskFencingToken"] = checkpoint.TaskFencingToken.ToString(),
+                    ["nodeFencingToken"] = checkpoint.NodeFencingToken.ToString(),
+                    ["reconciliationPolicy"] = checkpoint.ReconciliationPolicy,
+                    ["lastConfirmedStage"] = checkpoint.LastConfirmedStage,
+                    ["integrityStatus"] = checkpoint.IntegrityStatus
+                }),
+            CreatedAt = checkpoint.RecordedAtUtc.UtcDateTime
         };
     }
 

@@ -1112,6 +1112,26 @@ internal sealed class AgentTaskRuntime(
                 AppProblemCodes.AgentFinalizationStateConflict,
                 "Final-output NodeRun failed before its authoritative checkpoint completed.");
         var failedAt = DateTimeOffset.UtcNow;
+        if (string.Equals(
+                problem.Code,
+                AppProblemCodes.AgentFinalizationStateConflict,
+                StringComparison.Ordinal) ||
+            string.Equals(
+                problem.Code,
+                AppProblemCodes.AgentNodeRunStateConflict,
+                StringComparison.Ordinal))
+        {
+            var reconciliation = await nodeCheckpointCoordinator.CommitFinalizationConflictAsync(
+                durableClaim,
+                nodeClaim,
+                problem.Detail,
+                failedAt,
+                cancellationToken);
+            return reconciliation.IsSuccess
+                ? Result.Success(task)
+                : Result.From(reconciliation);
+        }
+
         var failed = await nodeCheckpointCoordinator.CommitFailureAsync(
             new AgentNodeFailureCheckpoint(
                 task.Id,
