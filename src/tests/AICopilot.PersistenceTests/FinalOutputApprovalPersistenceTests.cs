@@ -279,6 +279,128 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
     }
 
     [Fact]
+    public async Task DraftVersionCommit_ShouldFailClosedWhenFinalReviewSealsAfterPrevalidation()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedPreApprovalAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using var editScope = host.Services.CreateScope();
+        var editContext = editScope.ServiceProvider.GetRequiredService<AiGatewayDbContext>();
+        var workspaceRepository = editScope.ServiceProvider
+            .GetRequiredService<IRepository<ArtifactWorkspace>>();
+        var workspace = await editContext.ArtifactWorkspaces
+            .Include(candidate => candidate.Artifacts)
+            .SingleAsync(candidate => candidate.Id == seeded.WorkspaceId);
+        var artifact = workspace.Artifacts.Single(candidate => candidate.Id == seeded.ArtifactId);
+        (await editContext.ApprovalRequests
+                .AsNoTracking()
+                .AnyAsync(candidate =>
+                    candidate.TaskId == seeded.TaskId &&
+                    candidate.ApprovalType == AgentApprovalType.FinalOutput))
+            .Should().BeFalse("the stale editor passed the pre-commit review-window check");
+
+        artifact.AddVersion(
+            $"draft/{Guid.NewGuid():N}/report.md",
+            artifact.FileSize + 1,
+            DateTimeOffset.UtcNow);
+        workspaceRepository.Update(workspace);
+
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var prepared = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .PrepareAsync(new FinalOutputApprovalPreparation(
+                    seeded.TaskId,
+                    seeded.UserId,
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            prepared.Status.Should().Be(FinalOutputApprovalCommandStatus.Created);
+        }
+
+        var commit = () => workspaceRepository.SaveChangesAsync();
+        var failure = await commit.Should()
+            .ThrowAsync<ArtifactFinalReviewMutationConflictException>();
+        failure.Which.TaskId.Should().Be(seeded.TaskId.Value);
+        editContext.ChangeTracker.HasChanges().Should().BeFalse();
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        var persisted = await verification.Set<Artifact>()
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == seeded.ArtifactId);
+        persisted.Version.Should().Be(1);
+        persisted.RelativePath.Should().Be(seeded.ArtifactRelativePath);
+        (await verification.ApprovalRequests.CountAsync(candidate =>
+                candidate.TaskId == seeded.TaskId &&
+                candidate.ApprovalType == AgentApprovalType.FinalOutput))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DraftVersionCommitAndFinalReviewSeal_ShouldHaveExactlyOneWinner()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedPreApprovalAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using var editScope = host.Services.CreateScope();
+        using var approvalScope = host.Services.CreateScope();
+        var editContext = editScope.ServiceProvider.GetRequiredService<AiGatewayDbContext>();
+        var workspaceRepository = editScope.ServiceProvider
+            .GetRequiredService<IRepository<ArtifactWorkspace>>();
+        var workspace = await editContext.ArtifactWorkspaces
+            .Include(candidate => candidate.Artifacts)
+            .SingleAsync(candidate => candidate.Id == seeded.WorkspaceId);
+        var artifact = workspace.Artifacts.Single(candidate => candidate.Id == seeded.ArtifactId);
+        artifact.AddVersion(
+            $"draft/{Guid.NewGuid():N}/report.md",
+            artifact.FileSize + 1,
+            DateTimeOffset.UtcNow);
+        workspaceRepository.Update(workspace);
+
+        var editTask = Record.ExceptionAsync(
+            () => workspaceRepository.SaveChangesAsync());
+        var approvalTask = approvalScope.ServiceProvider
+            .GetRequiredService<IFinalOutputApprovalStore>()
+            .PrepareAsync(new FinalOutputApprovalPreparation(
+                seeded.TaskId,
+                seeded.UserId,
+                seeded.Proof,
+                DateTimeOffset.UtcNow));
+        await Task.WhenAll(editTask, approvalTask);
+
+        var editFailure = await editTask;
+        var approval = await approvalTask;
+        if (approval.Status == FinalOutputApprovalCommandStatus.Created)
+        {
+            editFailure.Should().BeOfType<ArtifactFinalReviewMutationConflictException>();
+        }
+        else
+        {
+            approval.Status.Should().Be(FinalOutputApprovalCommandStatus.FinalizationConflict);
+            editFailure.Should().BeNull();
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        var persisted = await verification.Set<Artifact>()
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == seeded.ArtifactId);
+        var approvalCount = await verification.ApprovalRequests.CountAsync(candidate =>
+            candidate.TaskId == seeded.TaskId &&
+            candidate.ApprovalType == AgentApprovalType.FinalOutput);
+        if (approval.Status == FinalOutputApprovalCommandStatus.Created)
+        {
+            persisted.Version.Should().Be(1);
+            approvalCount.Should().Be(1);
+        }
+        else
+        {
+            persisted.Version.Should().Be(2);
+            approvalCount.Should().Be(0);
+        }
+    }
+
+    [Fact]
     public async Task Decide_ShouldMakeConcurrentApproveApproveIdempotentWithOneResumeQueue()
     {
         await using var database = await CreateMigratedDatabaseAsync();
@@ -425,6 +547,17 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
             .SingleAsync(item => item.SourceApprovalRequestId == seeded.ApprovalId);
         poison.Status.Should().Be(AgentTaskRunQueueStatus.DeadLetter);
         poison.FailureCode.Should().Be(AppProblemCodes.AgentFinalizationStateConflict);
+        await using (var audit = new AuditDbContext(
+                         PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString)))
+        {
+            (await audit.AuditLogs
+                    .AsNoTracking()
+                    .CountAsync(entry =>
+                        entry.ActionCode == "Agent.FinalizationReconciliationRequired" &&
+                        entry.TargetType == "AgentTaskRunQueueItem" &&
+                        entry.TargetId == poison.Id.Value.ToString()))
+                .Should().Be(1);
+        }
 
         using var nextClaimScope = host.Services.CreateScope();
         var nextClaim = await nextClaimScope.ServiceProvider
@@ -434,6 +567,84 @@ public sealed class FinalOutputApprovalPersistenceTests(PostgresPersistenceFixtu
                 TimeSpan.FromMinutes(5));
         nextClaim.Should().NotBeNull();
         nextClaim!.Task.Id.Should().Be(laterTaskId);
+    }
+
+    [Fact]
+    public async Task ApprovalResumeClaim_ShouldRollbackRetirementWhenReconciliationAuditFails()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var fileStore = new ToolRegistryGovernanceTestBase.InMemoryArtifactWorkspaceFileStore();
+        var seeded = await SeedAndPrepareAsync(database.ConnectionString, fileStore);
+        using var host = CreateStoreHost(database.ConnectionString, fileStore);
+        using (var approvalScope = host.Services.CreateScope())
+        {
+            var approved = await approvalScope.ServiceProvider
+                .GetRequiredService<IFinalOutputApprovalStore>()
+                .DecideAsync(new FinalOutputApprovalDecision(
+                    seeded.ApprovalId,
+                    Guid.NewGuid(),
+                    IsApproved: true,
+                    "approve before atomic audit failure",
+                    seeded.Proof,
+                    DateTimeOffset.UtcNow));
+            approved.Status.Should().Be(FinalOutputApprovalCommandStatus.Approved);
+        }
+
+        await using (var mutation = CreateAiGatewayContext(database.ConnectionString))
+        {
+            (await mutation.Database.ExecuteSqlInterpolatedAsync($$"""
+                UPDATE aigateway.agent_task_run_queue_items
+                SET requested_by = {{Guid.NewGuid()}}
+                WHERE source_approval_request_id = {{seeded.ApprovalId.Value}}
+                """)).Should().Be(1);
+            await mutation.Database.ExecuteSqlRawAsync(
+                """
+                CREATE FUNCTION public.reject_finalization_reconciliation_audit()
+                RETURNS trigger
+                LANGUAGE plpgsql
+                AS $function$
+                BEGIN
+                    RAISE EXCEPTION 'simulated non-transient reconciliation audit failure'
+                        USING ERRCODE = '23514';
+                END;
+                $function$;
+
+                CREATE TRIGGER reject_finalization_reconciliation_audit
+                BEFORE INSERT ON public.audit_logs
+                FOR EACH ROW
+                WHEN (NEW.action_code = 'Agent.FinalizationReconciliationRequired')
+                EXECUTE FUNCTION public.reject_finalization_reconciliation_audit();
+                """);
+        }
+
+        using (var claimScope = host.Services.CreateScope())
+        {
+            var claim = () => claimScope.ServiceProvider
+                .GetRequiredService<IAgentDurableTaskClaimStore>()
+                .TryClaimNextAsync(
+                    "final-output-atomic-audit-test",
+                    TimeSpan.FromMinutes(5));
+            await claim.Should().ThrowAsync<DbUpdateException>();
+        }
+
+        await using var verification = CreateAiGatewayContext(database.ConnectionString);
+        (await verification.AgentTasks
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == seeded.TaskId))
+            .Status.Should().Be(AgentTaskStatus.WaitingFinalApproval);
+        (await verification.AgentTaskRunAttempts
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == seeded.RunAttemptId))
+            .Status.Should().Be(AgentTaskRunAttemptStatus.WaitingApproval);
+        (await verification.AgentTaskRunQueueItems
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.SourceApprovalRequestId == seeded.ApprovalId))
+            .Status.Should().Be(AgentTaskRunQueueStatus.Queued);
+        await using var audit = new AuditDbContext(
+            PostgresPersistenceTestOptions.CreateAudit(database.ConnectionString));
+        (await audit.AuditLogs.CountAsync(entry =>
+                entry.ActionCode == "Agent.FinalizationReconciliationRequired"))
+            .Should().Be(0);
     }
 
     [Fact]

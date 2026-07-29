@@ -41,6 +41,14 @@ public sealed record ArtifactFileSetAuthority(
     long TaskFencingToken,
     long NodeFencingToken);
 
+public sealed class ArtifactFinalReviewMutationConflictException(Guid taskId)
+    : InvalidOperationException("Artifact drafts are locked after final review submission.")
+{
+    public Guid TaskId { get; } = taskId != Guid.Empty
+        ? taskId
+        : throw new ArgumentException("Agent task id cannot be empty.", nameof(taskId));
+}
+
 public sealed record ArtifactFileSetStage(
     Guid CommitId,
     string WorkspaceCode,

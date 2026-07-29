@@ -78,6 +78,9 @@ public sealed class RepositoryPersistenceCommitter(
         {
             if (businessDbContext is AiGatewayDbContext aiGatewayDbContext)
             {
+                await ArtifactFinalReviewMutationGuard.ValidateAsync(
+                    aiGatewayDbContext,
+                    cancellationToken);
                 await MessageTimelineSequenceCoordinator.AllocateAsync(
                     aiGatewayDbContext,
                     cancellationToken);

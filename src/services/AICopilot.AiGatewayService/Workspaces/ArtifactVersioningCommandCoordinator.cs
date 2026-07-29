@@ -123,16 +123,23 @@ public sealed class ArtifactVersioningCommandCoordinator(
                 NodeRunId: null,
                 context.Task.RunFencingToken,
                 NodeFencingToken: 0));
-        await CommitVersionUpdateAsync(
-            context,
-            stage,
-            fileSetDraft.Value.CurrentRelativePath,
-            oldVersion,
-            ArtifactVersioningFiles.ComputeSha256(content),
-            comment,
-            isRestore,
-            restoredVersion,
-            cancellationToken);
+        try
+        {
+            await CommitVersionUpdateAsync(
+                context,
+                stage,
+                fileSetDraft.Value.CurrentRelativePath,
+                oldVersion,
+                ArtifactVersioningFiles.ComputeSha256(content),
+                comment,
+                isRestore,
+                restoredVersion,
+                cancellationToken);
+        }
+        catch (ArtifactFinalReviewMutationConflictException exception)
+        {
+            return Result.Invalid(exception.Message);
+        }
 
         var files = await fileStore.ListAsync(context.Workspace.WorkspaceCode, cancellationToken);
         return Result.Success(ArtifactWorkspaceMapper.Map(context.Workspace, context.Task, files));

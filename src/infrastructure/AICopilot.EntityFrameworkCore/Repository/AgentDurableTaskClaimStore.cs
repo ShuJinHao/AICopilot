@@ -1,6 +1,7 @@
 using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
+using AICopilot.EntityFrameworkCore.AuditLogs;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
@@ -77,8 +78,12 @@ internal sealed class AgentDurableTaskClaimStore(
                     (queueItem.TriggerType != AgentTaskRunTriggerType.ApprovalResume ||
                      attempt is null))
                 {
-                    RetireInvalidApprovalResume(queueItem, task, attempt, now);
-                    return Attempt<DurableTaskClaim?>(null);
+                    var auditEntry = RetireInvalidApprovalResume(
+                        queueItem,
+                        task,
+                        attempt,
+                        now);
+                    return Attempt<DurableTaskClaim?>(null, auditEntry);
                 }
 
                 if (attempt is null)
@@ -115,8 +120,12 @@ internal sealed class AgentDurableTaskClaimStore(
                     if (queueItem.SourceApprovalRequestId is not null &&
                         !preserveFinalOutputFence)
                     {
-                        RetireInvalidApprovalResume(queueItem, task, attempt, now);
-                        return Attempt<DurableTaskClaim?>(null);
+                        var auditEntry = RetireInvalidApprovalResume(
+                            queueItem,
+                            task,
+                            attempt,
+                            now);
+                        return Attempt<DurableTaskClaim?>(null, auditEntry);
                     }
 
                     attempt.AcquireLease(Guid.NewGuid(), leaseOwner, now, leaseDuration);
@@ -187,7 +196,7 @@ internal sealed class AgentDurableTaskClaimStore(
                queueItem.AvailableAt == approval.ApprovedAt;
     }
 
-    private static void RetireInvalidApprovalResume(
+    private static AuditLogEntry RetireInvalidApprovalResume(
         AgentTaskRunQueueItem queueItem,
         AgentTask task,
         AgentTaskRunAttempt? attempt,
@@ -213,6 +222,31 @@ internal sealed class AgentDurableTaskClaimStore(
         {
             attempt.RequireReconciliation(nowUtc, safeMessage);
         }
+
+        return new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            ActionGroup = AuditActionGroups.AiGateway,
+            ActionCode = "Agent.FinalizationReconciliationRequired",
+            TargetType = "AgentTaskRunQueueItem",
+            TargetId = queueItem.Id.Value.ToString(),
+            TargetName = AgentTaskRunTriggerType.ApprovalResume.ToString(),
+            OperatorUserId = null,
+            OperatorUserName = "System",
+            OperatorRoleName = null,
+            Result = AuditResults.Rejected,
+            Summary = safeMessage,
+            ChangedFields = AuditMetadataCodec.Combine(
+                changedFields: null,
+                new Dictionary<string, string>
+                {
+                    ["taskId"] = task.Id.Value.ToString(),
+                    ["taskCode"] = task.TaskCode,
+                    ["targetId"] = queueItem.SourceApprovalRequestId?.Value.ToString() ?? string.Empty,
+                    ["failureReason"] = AppProblemCodes.AgentFinalizationStateConflict
+                }),
+            CreatedAt = nowUtc.UtcDateTime
+        };
     }
 
     public Task<AgentFencedWriteResult> TryMarkStartedAsync(
@@ -553,5 +587,10 @@ internal sealed class AgentDurableTaskClaimStore(
             cancellationToken);
     }
 
-    private static AgentExecutionTransactionAttempt<T> Attempt<T>(T value) => new(value);
+    private static AgentExecutionTransactionAttempt<T> Attempt<T>(
+        T value,
+        AuditLogEntry? auditEntry = null) =>
+        new(
+            value,
+            AuditEntries: auditEntry is null ? null : [auditEntry]);
 }
