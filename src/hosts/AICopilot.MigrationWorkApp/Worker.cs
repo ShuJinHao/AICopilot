@@ -2,6 +2,7 @@ using AICopilot.EntityFrameworkCore;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.Services.Contracts;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System.Diagnostics;
 
@@ -27,6 +28,10 @@ public class Worker(
             var identityStoreDbContext = scope.ServiceProvider.GetRequiredService<IdentityStoreDbContext>();
             var aiGatewayDbContext = scope.ServiceProvider.GetRequiredService<AiGatewayDbContext>();
             var ragDbContext = scope.ServiceProvider.GetRequiredService<RagDbContext>();
+            var aiGatewayDbContextOptions = scope.ServiceProvider
+                .GetRequiredService<DbContextOptions<AiGatewayDbContext>>();
+            var ragDbContextOptions = scope.ServiceProvider
+                .GetRequiredService<DbContextOptions<RagDbContext>>();
             var dataAnalysisDbContext = scope.ServiceProvider.GetRequiredService<DataAnalysisDbContext>();
             var mcpServerDbContext = scope.ServiceProvider.GetRequiredService<McpServerDbContext>();
             var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
@@ -66,8 +71,8 @@ public class Worker(
 
                     case MigrationWorkerStage.MigrateSecrets:
                         await MigrationWorkerSecretMigrator.MigrateAsync(
-                            aiGatewayDbContext,
-                            ragDbContext,
+                            aiGatewayDbContextOptions,
+                            ragDbContextOptions,
                             stageCancellationToken);
                         break;
 
