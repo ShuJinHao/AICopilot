@@ -114,14 +114,25 @@ Cloud 只读正式能力为：
 - 前端 SSE、错误、runtime details 与 Widget：`src/vues/AICopilot.Web/src/protocol`、`src/vues/AICopilot.Web/src/stores`、`src/vues/AICopilot.Web/src/components/chat`。
 - Architecture Analyzer 继续以不可降级 Error 执行。任何受影响的 .NET filtered test 必须先用完全相同 filter 的 `--list-tests` 证明命中；默认不追加全量、coverage、mutation、duplication、Quality、CrossProject、数据库应用或部署。
 
-## 9. 活动错误码目录
+## 9. 后端错误码目录
 
-前端必须为以下后端 code 提供明确、安全的用户文案；新增、删除或重命名活动错误码时同步更新本节和对应目录测试。
+前端必须为以下活动 HTTP / SSE code 提供明确、安全的用户文案；新增、删除或重命名后端错误码时同步更新本节和对应目录测试。
 
 | Code | 前端语义 |
 |---|---|
+| `account_disabled` | 账号已禁用 |
+| `session_revoked` | 当前会话已撤销 |
+| `user_missing` | 当前用户不存在 |
 | `unauthorized` | 请求未认证 |
 | `missing_permission` | 缺少所需权限 |
+| `invalid_credentials` | 登录凭据无效 |
+| `cloud_oidc_not_configured` | Cloud OIDC 未配置 |
+| `cloud_oidc_invalid_principal` | Cloud OIDC 身份无效 |
+| `cloud_identity_inactive` | Cloud 身份未启用 |
+| `cloud_identity_unverified` | Cloud 身份未验证 |
+| `external_identity_confirmation_required` | 外部身份绑定需要确认 |
+| `external_identity_conflict` | 外部身份绑定冲突 |
+| `last_enabled_admin_required` | 必须保留至少一个启用的管理员 |
 | `request_validation_failed` | 请求校验失败 |
 | `internal_server_error` | 意外错误 |
 | `persistence_commit_outcome_unknown` | 写入结果未知，禁止自动重试 |
@@ -140,6 +151,9 @@ Cloud 只读正式能力为：
 | `capability_not_allowed` | 请求能力不允许 |
 | `control_action_blocked` | 控制或写操作被硬阻断 |
 | `token_budget_exceeded` | 模型调用预算已用尽 |
+| `onsite_presence_required` | 工具批准要求有效的现场在岗声明 |
+| `onsite_presence_expired` | 现场在岗声明已过期 |
+| `approval_reconfirmation_required` | 工具批准需要再次显式确认 |
 | `tool_not_registered` | Tool 未精确注册 |
 | `tool_disabled` | Tool 已禁用 |
 | `tool_blocked` | Tool 被安全策略阻断 |
@@ -159,5 +173,38 @@ Cloud 只读正式能力为：
 | `cloud_ai_read_rate_limited` | Cloud AiRead 被限流 |
 | `cloud_ai_read_unavailable` | Cloud AiRead 不可用 |
 | `cloud_ai_read_missing_required_parameter` | Cloud AiRead 缺少必填参数 |
+
+以下 code 仅因对应内部类型延后到 B2 物理删除而仍存在于当前二进制；活动 UI、HTTP API 和主聊天不得产生或依赖它们，列在这里不构成活动契约：
+
+| Code | 非活动来源 |
+|---|---|
+| `agent_approval_state_conflict` | 不可达的旧 AgentTask 业务审批状态冲突 |
+| `agent_approval_rejected` | 不可达的旧 AgentTask 业务审批拒绝 |
+| `planner_tool_schema_unsupported` | 不可达的旧 Planner Tool schema |
+| `agent_plan_invalid` | 不可达的旧 Agent Plan 校验 |
+| `plan_payload_too_large` | 不可达的旧 canonical Plan v2 大小门禁 |
+| `evidence_payload_too_large` | 不可达的旧 inline Evidence 大小门禁 |
+| `agent_plan_tool_denied` | 不可达的旧 Plan Tool 授权 |
+| `agent_plan_schema_invalid` | 不可达的旧 Plan schema 校验 |
+| `tool_execution_not_found` | 不可达的旧 durable Tool 执行记录 |
+| `artifact_finalized` | 不可达的旧 Artifact 状态 |
+| `artifact_generation_failed` | 不可达的旧 Artifact 生成 |
+| `workspace_manifest_invalid` | 不可达的旧 ArtifactWorkspace manifest |
+| `agent_task_run_in_progress` | 不可达的旧 AgentTask attempt |
+| `agent_task_retry_not_allowed` | 不可达的旧 AgentTask 重试 |
+| `agent_task_run_lease_expired` | 不可达的旧 AgentTask lease |
+| `agent_task_cancellation_requested` | 不可达的旧 AgentTask 取消 |
+| `agent_task_run_queued` | 不可达的旧 AgentTask 队列 |
+| `agent_task_run_queue_not_found` | 不可达的旧 AgentTask 队列项 |
+| `agent_task_run_queue_lease_expired` | 不可达的旧 AgentTask 队列 lease |
+| `agent_task_run_fence_stale` | 不可达的旧 AgentTask fencing |
+| `agent_node_run_fence_stale` | 不可达的旧 node run fencing |
+| `agent_node_run_state_conflict` | 不可达的旧 node run 状态机 |
+| `agent_run_budget_exceeded` | 不可达的旧 AgentTask 封存预算 |
+| `agent_worker_unavailable` | 不可达的旧 AgentTask worker |
+| `agent_worker_workspace_mismatch` | 不可达的旧 worker/workspace 绑定 |
+| `agent_finalization_state_conflict` | 不可达的旧 Artifact 最终关单 |
+| `agent_run_queue_dead_letter_not_allowed` | 不可达的旧 AgentTask dead-letter 操作 |
+| `agent_run_queue_operation_denied` | 不可达的旧 AgentTask 队列操作 |
 
 Cloud typed GET 的路径、参数、结果 envelope 与 no-fallback 规则只在[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)维护，本文件不复制接口表。
