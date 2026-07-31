@@ -21,6 +21,8 @@ public static class DependencyInjection
             provider.GetRequiredService<InMemoryModelEndpointPoolScheduler>());
         builder.Services.AddSingleton<IModelPoolSnapshotReader>(provider =>
             provider.GetRequiredService<InMemoryModelEndpointPoolScheduler>());
+        builder.Services.AddSingleton<ModelChatClientFactory>();
         builder.Services.AddSingleton<IAgentRuntimeFactory, AgentRuntimeFactory>();
+        builder.Services.AddSingleton<IHarnessAgentRuntimeFactory, HarnessAgentRuntimeFactory>();
     }
 }

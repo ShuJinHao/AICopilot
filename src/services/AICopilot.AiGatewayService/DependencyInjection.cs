@@ -110,6 +110,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<ITokenBudgetPolicy, ChatTokenBudgetPolicy>();
         builder.Services.AddSingleton<IChatTokenTelemetry, ChatTokenTelemetry>();
         builder.Services.AddScoped<ApprovalRequirementResolver>();
+        builder.Services.AddScoped<MainChatToolCatalog>();
         builder.Services.AddScoped<IAgentStreamRuntime, AgentStreamRuntime>();
         builder.Services.AddScoped<IApprovalRequirementReadService, ApprovalRequirementReadService>();
         builder.Services.AddScoped<ApprovalToolResolver>();

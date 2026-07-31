@@ -600,15 +600,28 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         hiddenTools.Should().ContainSingle()
             .Which.Name.Should().Be(registeredLocalTool.Name);
 
+        var governedMcpTool = new ToolRegistration(
+            mcpTool.Name,
+            mcpTool.Name,
+            "governed MCP read",
+            ToolProviderType.Mcp,
+            ToolRegistrationTargetType.McpServer,
+            pluginName,
+            """{"type":"object","properties":{},"additionalProperties":false}""",
+            """{"type":"object","properties":{},"additionalProperties":false}""",
+            AiToolRiskLevel.RequiresApproval,
+            "AiGateway.Chat",
+            requiresApproval: true,
+            isEnabled: true,
+            timeoutSeconds: 120,
+            auditLevel: ToolAuditLevel.Verbose,
+            nowUtc: DateTimeOffset.UtcNow,
+            dataBoundary: ToolDataBoundary.GovernedBusinessReadOnly,
+            schemaVersion: 7);
         var allowedResolver = new ApprovalToolResolver(
             loader,
             approvalRequirementResolver,
-            CreateGuard(CreateTool(
-                mcpTool.Name,
-                ToolProviderType.Mcp,
-                ToolRegistrationTargetType.McpServer,
-                pluginName,
-                requiresApproval: true)),
+            CreateGuard(governedMcpTool, "AiGateway.Chat"),
             new TestCurrentUser(UserId));
         var allowedTools = await allowedResolver.GetToolsForPluginsAsync([pluginName], CancellationToken.None);
 
@@ -617,6 +630,11 @@ public sealed class ToolRegistryApplicationTests : ToolRegistryGovernanceTestBas
         var exposed = allowedTools.Should().ContainSingle(tool => tool.Name == mcpTool.Name).Which;
         exposed.Name.Should().Be(mcpTool.Name);
         exposed.RequiresApproval.Should().BeTrue();
+        exposed.RiskLevel.Should().Be(AiToolRiskLevel.RequiresApproval);
+        exposed.RequiredPermission.Should().Be("AiGateway.Chat");
+        exposed.AuditLevel.Should().Be(nameof(ToolAuditLevel.Verbose));
+        exposed.DataBoundary.Should().Be(nameof(ToolDataBoundary.GovernedBusinessReadOnly));
+        exposed.SchemaVersion.Should().Be(7);
     }
     [Fact]
     public async Task AgentPlanToolGuard_ShouldNotExposeMockMcpTools_WhenMockRuntimeIsDisabled()

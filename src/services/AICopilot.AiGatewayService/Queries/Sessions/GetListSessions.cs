@@ -18,6 +18,11 @@ public record SessionDto
     public DateTimeOffset? OnsiteConfirmedAt { get; set; }
     public string? OnsiteConfirmedBy { get; set; }
     public DateTimeOffset? OnsiteConfirmationExpiresAt { get; set; }
+    public string? AgentMode { get; set; }
+    public long? AgentSessionVersion { get; set; }
+    public string? AgentSessionStatus { get; set; }
+    public bool AgentSessionResetRequired { get; set; }
+    public bool HasPendingApproval { get; set; }
 }
 
 [AuthorizeRequirement("AiGateway.GetListSessions")]

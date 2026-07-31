@@ -1,8 +1,13 @@
 using System.ComponentModel;
+using System.Text.Json;
 using AICopilot.AgentPlugin;
 using AICopilot.AiRuntime;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AICopilot.UnitTests;
 
@@ -69,6 +74,160 @@ public sealed class AiRuntimeAdapterTests
         contents.OfType<AiUsageContent>().Single().Details.TotalTokenCount.Should().Be(8);
     }
 
+    [Fact]
+    public async Task ToolSurfaceGuard_ShouldExposeOnlyHarnessPlanningToolsInPlanMode()
+    {
+        var inner = new CapturingChatClient();
+        var policy = new HarnessToolSurfacePolicy(["BusinessQuery"]);
+        var guarded = new ToolSurfaceGuardChatClient(inner, policy);
+        var options = RuntimeToolAdapter.ToChatOptions(new AiChatOptions
+        {
+            Tools =
+            [
+                CreateTool("BusinessQuery"),
+                CreateTool("mode_get"),
+                CreateTool("mode_set"),
+                CreateTool("todos_add")
+            ]
+        });
+
+        _ = await guarded.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "plan")],
+            options);
+
+        inner.LastToolNames.Should().BeEquivalentTo(["mode_get", "todos_add"]);
+    }
+
+    [Fact]
+    public async Task ToolSurfaceGuard_ShouldExposeAuthorizedBusinessToolsOnlyInExecuteMode()
+    {
+        var inner = new CapturingChatClient();
+        var policy = new HarnessToolSurfacePolicy(["BusinessQuery", "shell_execute"]);
+        policy.SetMode(RuntimeAgentMode.Execute);
+        var guarded = new ToolSurfaceGuardChatClient(inner, policy);
+        var options = RuntimeToolAdapter.ToChatOptions(new AiChatOptions
+        {
+            Tools =
+            [
+                CreateTool("BusinessQuery"),
+                CreateTool("mode_get"),
+                CreateTool("mode_set"),
+                CreateTool("shell_execute")
+            ]
+        });
+
+        _ = await guarded.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "execute")],
+            options);
+
+        inner.LastToolNames.Should().BeEquivalentTo(["BusinessQuery", "mode_get"]);
+    }
+
+    [Fact]
+    public async Task ToolSurfaceGuard_ShouldFailClosedForForgedModeSetCall()
+    {
+        var inner = new CapturingChatClient(
+            new FunctionCallContent(
+                "call-1",
+                "mode_set",
+                new Dictionary<string, object?> { ["mode"] = "execute" }));
+        var guarded = new ToolSurfaceGuardChatClient(
+            inner,
+            new HarnessToolSurfacePolicy(["BusinessQuery"]));
+
+        var act = () => guarded.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "switch modes")]);
+
+        await act.Should().ThrowAsync<HarnessToolSurfaceViolationException>();
+    }
+
+    [Fact]
+    public async Task ToolSurfaceGuard_ShouldRejectAlwaysApproveResponsesBeforeProviderDispatch()
+    {
+        var inner = new CapturingChatClient();
+        var guarded = new ToolSurfaceGuardChatClient(
+            inner,
+            new HarnessToolSurfacePolicy(["BusinessQuery"]));
+        var approval = new ToolApprovalRequestContent(
+            "approval-1",
+            new FunctionCallContent(
+                "call-1",
+                "BusinessQuery",
+                new Dictionary<string, object?>()));
+        var message = new ChatMessage(
+            ChatRole.User,
+            [approval.CreateAlwaysApproveToolResponse()]);
+
+        var act = () => guarded.GetResponseAsync([message]);
+
+        await act.Should().ThrowAsync<HarnessAlwaysApproveRejectedException>();
+        inner.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task HarnessSession_ShouldInitializePlanMode_AndRoundTrip()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+#pragma warning disable MAAI001
+        var agent = new CapturingChatClient().AsHarnessAgent(
+            new HarnessAgentOptions
+            {
+                Name = "session-test",
+                ChatHistoryProvider = new CheckpointingChatHistoryProvider(null),
+                MaximumIterationsPerRequest = 8,
+                DisableToolAutoApproval = false,
+                ToolApprovalAgentOptions = new ToolApprovalAgentOptions
+                {
+                    AutoApprovalRules =
+                        Array.Empty<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>()
+                },
+                DisableApprovalNotRequiredFunctionBypassing = false,
+                DisableApprovalResponseBinding = false,
+                DisableFileMemory = true,
+                DisableWebSearch = true,
+                DisableTodoProvider = false,
+                DisableAgentModeProvider = false,
+                AgentModeProviderOptions = new AgentModeProviderOptions
+                {
+                    DefaultMode = "plan",
+                    Modes =
+                    [
+                        new AgentModeProviderOptions.AgentMode("plan", "Plan."),
+                        new AgentModeProviderOptions.AgentMode("execute", "Execute.")
+                    ]
+                },
+                DisableAgentSkillsProvider = true,
+                BackgroundAgents = Array.Empty<AIAgent>(),
+                LoopEvaluators = Array.Empty<LoopEvaluator>(),
+                DisableCompaction = true
+            },
+            NullLoggerFactory.Instance,
+            services);
+#pragma warning restore MAAI001
+        var modeProvider = agent.GetService<AgentModeProvider>();
+        modeProvider.Should().NotBeNull();
+        var runtimeAgent = new MicrosoftAgentRuntimeChatAgent(agent);
+
+        var session = await runtimeAgent.CreateSessionAsync();
+        var mode = await modeProvider!.GetModeAsync(
+            MicrosoftAgentRuntimeChatAgent.UnwrapSession(session));
+        var serializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var serialized = await runtimeAgent.SerializeSessionAsync(session, serializerOptions);
+        var restored = await runtimeAgent.DeserializeSessionAsync(serialized, serializerOptions);
+
+        mode.Should().Be("plan");
+        (await modeProvider.GetModeAsync(
+            MicrosoftAgentRuntimeChatAgent.UnwrapSession(restored))).Should().Be("plan");
+    }
+
+    private static AiToolDefinition CreateTool(string name) =>
+        new()
+        {
+            Name = name,
+            Description = "test tool",
+            InvokeAsync = (_, _) => ValueTask.FromResult<object?>(null)
+        };
+
     private sealed class EchoPlugin : AgentPluginBase
     {
         [Description("Echo a value.")]
@@ -76,5 +235,46 @@ public sealed class AiRuntimeAdapterTests
         {
             return $"echo:{value}";
         }
+    }
+
+    private sealed class CapturingChatClient(params AIContent[] responseContents) : IChatClient
+    {
+        public IReadOnlyList<string> LastToolNames { get; private set; } = [];
+
+        public int CallCount { get; private set; }
+
+        public void Dispose()
+        {
+        }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            LastToolNames = options?.Tools?
+                .Select(tool => tool is AIFunction function
+                    ? function.Name
+                    : tool.GetService<AIFunction>()?.Name)
+                .Where(name => name is not null)
+                .Cast<string>()
+                .ToArray() ?? [];
+            return Task.FromResult(new ChatResponse(
+                new ChatMessage(ChatRole.Assistant, responseContents)));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) =>
+            serviceType.IsInstanceOfType(this) ? this : null;
     }
 }

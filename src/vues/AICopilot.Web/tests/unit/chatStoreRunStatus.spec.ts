@@ -11,6 +11,8 @@ const chatServiceMock = vi.hoisted(() => ({
   sendApprovalDecisionStream: vi.fn(),
   deleteSession: vi.fn(),
   getSessions: vi.fn(),
+  getSession: vi.fn(),
+  updateAgentMode: vi.fn(),
   getPendingApprovals: vi.fn(),
   getToolCatalog: vi.fn(),
   getHistory: vi.fn(),
@@ -65,6 +67,20 @@ describe('chatStore run status integration', () => {
     vi.stubGlobal('sessionStorage', createSessionStorageMock())
     vi.clearAllMocks()
     chatServiceMock.getSessions.mockResolvedValue([])
+    chatServiceMock.getSession.mockImplementation(async (id: string) => ({
+      id,
+      title: '测试会话',
+      agentMode: 'plan',
+      agentSessionVersion: 1,
+      agentSessionStatus: 'Ready',
+      agentSessionResetRequired: false,
+      hasPendingApproval: false,
+    }))
+    chatServiceMock.updateAgentMode.mockResolvedValue({
+      sessionId: 'session-1',
+      mode: 'execute',
+      version: 2,
+    })
     chatServiceMock.getPendingApprovals.mockResolvedValue([])
     chatServiceMock.getToolCatalog.mockResolvedValue({ tools: [] })
     chatServiceMock.getHistory.mockResolvedValue({
@@ -78,6 +94,52 @@ describe('chatStore run status integration', () => {
     chatServiceMock.getAgentTaskApprovals.mockResolvedValue([])
     chatServiceMock.getAgentTaskAuditSummary.mockResolvedValue([])
     chatServiceMock.getTimeline.mockResolvedValue({ items: [] })
+  })
+
+  it('changes Harness mode with the authoritative session version', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.upsertSession({
+      id: 'session-1',
+      title: '测试会话',
+      agentMode: 'plan',
+      agentSessionVersion: 7,
+      agentSessionStatus: 'Ready',
+      hasPendingApproval: false,
+    })
+    sessionStore.persistCurrentSession('session-1')
+    sessionStore.activateSession('session-1')
+    chatServiceMock.updateAgentMode.mockResolvedValue({
+      sessionId: 'session-1',
+      mode: 'execute',
+      version: 8,
+    })
+
+    const store = useChatStore()
+    const changed = await store.changeAgentMode('execute')
+
+    expect(changed).toBe(true)
+    expect(chatServiceMock.updateAgentMode).toHaveBeenCalledWith('session-1', 'execute', 7)
+    expect(store.agentMode).toBe('execute')
+    expect(store.currentSession?.agentSessionVersion).toBe(8)
+  })
+
+  it('blocks mode changes for interrupted sessions', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.upsertSession({
+      id: 'session-1',
+      title: '中断会话',
+      agentMode: 'plan',
+      agentSessionVersion: 3,
+      agentSessionStatus: 'Interrupted',
+      hasPendingApproval: false,
+    })
+    sessionStore.persistCurrentSession('session-1')
+    sessionStore.activateSession('session-1')
+
+    const store = useChatStore()
+    expect(store.canChangeAgentMode).toBe(false)
+    expect(await store.changeAgentMode('execute')).toBe(false)
+    expect(chatServiceMock.updateAgentMode).not.toHaveBeenCalled()
   })
 
   it('starts run status before stream chunks and completes it when chat stream closes', async () => {

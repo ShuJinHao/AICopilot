@@ -5,6 +5,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 
 const chatServiceMock = vi.hoisted(() => ({
   getHistory: vi.fn(),
+  getSession: vi.fn(),
   getPendingApprovals: vi.fn(),
   getTimeline: vi.fn(),
   decideAgentApproval: vi.fn(),
@@ -50,6 +51,15 @@ describe('chatStore timeline', () => {
     vi.stubGlobal('sessionStorage', createSessionStorageMock())
     vi.clearAllMocks()
     chatServiceMock.getPendingApprovals.mockResolvedValue([])
+    chatServiceMock.getSession.mockImplementation(async (id: string) => ({
+      id,
+      title: '测试会话',
+      agentMode: 'plan',
+      agentSessionVersion: 1,
+      agentSessionStatus: 'Ready',
+      agentSessionResetRequired: false,
+      hasPendingApproval: false,
+    }))
     chatServiceMock.getAgentTaskApprovals.mockResolvedValue([])
     chatServiceMock.getAgentTasksBySession.mockResolvedValue([])
     chatServiceMock.getWorkspace.mockResolvedValue({

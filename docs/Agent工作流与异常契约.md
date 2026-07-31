@@ -2,19 +2,39 @@
 
 本文档约束 AICopilot Agent workflow、Plan/Chat 模式、MCP/Tool/Human-in-the-loop 边界、后端异常、前端错误展示和后端拥有的错误码目录。未完成架构方向见 `docs/AI架构路线图.md`；历史治理状态只通过 Git 追溯。
 
-## 1. 统一工作流主干
+## 1. 运行主干
 
-- `AgentWorkflowPipeline` 是用户输入的统一工作流主干，负责意图理解、上下文编排和能力发现。
-- Chat 模式和 Plan 模式必须复用统一管线；区别只在出口。
-- Chat 出口可以直接回答，或按安全策略执行已允许的低风险只读动作。
-- Plan 出口只能生成 `PlanDraft` 草案；用户确认前不得执行 Cloud 查询、MCP 工具、Tool 调用、Worker 入队或其他真实业务动作。
-- 用户确认无 gap 的 `PlanDraft` 后才允许转换为 `ExecutablePlan` / `AgentTask`，进入 Tool、Schema、Guard、审批和 Worker 执行链路。
+- 当前主聊天 SSE 与批准续流只允许构造一个 `HarnessAgent`；`ChatStreamHandler`、`ApprovalDecisionStreamHandler` 不得再调用 `AgentWorkflowPipeline` 或保留双活兼容路由。旧 workflow 源码在物理删除前只服务仍有明确 owner 的非主聊天路径，不能重新接回当前聊天。
+- Harness 的 `Plan` / `Execute` 是同一对话 AgentSession 的运行模式，不能与 durable `PlanDraft` / `ExecutablePlan` / `AgentTask` 状态机混用。新会话默认 `Plan`；Plan 只允许 Harness Todo 与 `mode_get`，不得向模型发送 Cloud、RAG、MCP、`BusinessQuery` 或其它外部/业务工具。
+- `Execute` 只能根据当前认证用户、会话和实时安全门禁动态提供工具；Chat 可以直接回答，或执行已允许的低风险只读动作。模式切换不能扩大工具注册、安全元数据、权限或审批边界。
+- Durable Plan 出口仍只能生成 `PlanDraft` 草案；用户确认前不得执行 Cloud 查询、MCP 工具、Tool 调用、Worker 入队或其他真实业务动作。用户确认无 gap 后才允许转换为 `ExecutablePlan` / `AgentTask`，进入 Tool、Schema、Guard、审批和 Worker 执行链路。
 - Tool、MCP、Knowledge、DataSource、Provider 或资源未匹配时，不能阻断服务端能力发现形成 `PlanDraft`；必须形成显式 capability gap，带 gap 的草案保持 node-free、不可确认且不得入队。
 - Plan v2 公共请求的 `pluginSelectionMode/capabilitySelectionMode` 只接受大小写精确的字符串 enum 名；数字 token、未知字符串和大小写变体必须在 HTTP model binding 阶段拒绝，不得进入 stream handler、session/repository、Tool、Cloud 或消息持久化。
 - Plan v1 只读兼容保留至 `2026-12-31`：已完成的 v1 历史任务必须仍可读取、展示和审计，但不得执行、重试、克隆、重新确认或转换成 v2。非终态 v1 任务只能取消后以 v2 重建；到期删除读取兼容前必须另行完成生产存量盘点与迁移裁决，不能因新执行轨已是 v2 就提前删除。
 - `SkillDefinition`、`IAgentDynamicPlanner` 及其兼容字段/API 已从生产轨物理退役。Plan 请求只允许 `pluginSelectionMode/selectedPluginIds/capabilitySelectionMode/requestedCapabilityCodes/knowledgeBaseIds/uploadIds/artifactTargets`；这些选择是编译上限，唯一 `AgentPlanCompiler` 与安全门禁必须取交集，不得恢复 Skill 选择、preferred ToolCode、alias/wrapper 或第二套影子编译器。
 - Plan v2 的 `262144` UTF-8 byte 上限按“最终含 64 位 SHA-256 digest 的 canonical payload”计算。`AgentCanonicalJsonV1` 是排序、JavaScript 转义、数字规范化、root exclusion、共享结构限制与 byte count 的唯一 owner；Seal 必须先以同长度 64-hex placeholder 做 bounded canonical measure，正好上限允许，首次越界以专用内部信号短路为 `max+1` 并映射 `plan_payload_too_large`，不得让通用 canonical preflight 把业务超限泛化成 `agent_plan_invalid`，也不得放宽现有全局 `Canonicalize` 预检。
 - Plan 能力发现和真实 Tool 分支必须共用同一生产安全门禁；只有通过 `AiToolSafetyPolicy` 的 tool 才能进入草案或执行上下文。`GoldenEvalTests` 必须穿过真实 `AgentWorkflowPipeline` 或其正式生产组件，数据集必须版本化并记录变更理由；不得直接调用 leaf policy 自证。
+
+### 1.1 Harness 与模型调用边界
+
+- 主聊天固定使用 `Microsoft.Agents.AI.Harness` / `Microsoft.Agents.AI` `1.16.0`；每轮最多 8 次模型调用。必须关闭 FileMemory、WebSearch、AgentSkills、BackgroundAgents、LoopEvaluators 与 compaction，不注册 FileAccessStore、Shell 或文件 Artifact；聊天只保留 inline 文本和图表。
+- 运行时必须分为“模型端点/认证/配额/熔断/遥测的轻量 `IChatClient` 工厂”和“仅供主聊天使用的 Harness 工厂”。Text-to-SQL、分类与结构化生成继续直接使用轻量客户端，禁止嵌套 Harness；主聊天依赖不得恢复 `Microsoft.Agents.AI.Workflows`。
+- `ToolSurfaceGuardChatClient` 是发给真实模型前和收到模型工具调用后的最内层强制边界：请求侧按当前模式过滤工具并始终删除 `mode_set`，响应侧对未公开工具、`mode_set`、伪造批准响应或模式不允许的调用 fail-closed。该安全性不能依赖系统提示词。
+- 模型供应商健康、endpoint pool、认证、配额、熔断与遥测必须作用于每一次真实 `IChatClient` 调用；构造 Agent 不能记录熔断成功，外层一次聊天 invocation 也不能只预约一次配额。流式中断或结果未知必须以已派发、用量未知的保守状态结算预留额度。
+
+### 1.2 AgentSession 与模式
+
+- 每个新 Session 必须同步创建一条 `agent_session_states` 一对一状态：绑定 `session_id + user_id + tenant_id`，`agent_schema_version=1`，保存受 ASP.NET Core Data Protection 固定用途字符串认证加密的完整 AgentSession、`Ready|Running|Interrupted`、`active_turn_id`、乐观并发版本与创建/更新/过期时间。单条明文状态上限 2 MiB，30 天滑动 TTL；状态、密钥和解密错误不得写入日志。
+- 运行前必须在会话锁内写 `Running + turn id`；ChatHistoryProvider 在每次真实模型调用后 checkpoint。正常完成、等待批准和模式切换都必须序列化完整 AgentSession。取得锁后发现遗留 `Running` 时只允许转为 `Interrupted`，不得自动恢复、重放模型或重放工具。
+- 缺失旧状态、schema 不匹配、损坏、超限或过期统一返回 `agent_session_reset_required` 并提示新建会话；`Interrupted` 必须显式展示且不能自动继续。暂时缺少可用模型配置不能把结构有效的状态误标为损坏。
+- 模式切换唯一入口为认证的 `PUT /api/aigateway/session/{sessionId}/agent-mode`，请求必须携带 `plan|execute` 与 `expectedVersion`；仅 owner 可调用，并通过 Harness 官方 `SetModeAsync` 修改。活跃 turn、待批准、Interrupted 或版本冲突必须拒绝，竞争返回 `agent_session_version_conflict`。前端展示服务端真实模式，活跃 turn 或待批准期间禁用切换。
+
+### 1.3 主聊天工具批准
+
+- 工具从注册表到模型包装必须保留 `RequiresApproval`、`RiskLevel`、`RequiredPermission`、`AuditLevel`、`DataBoundary` 和 `SchemaVersion`；经过当前用户权限、安全门禁后才可包装为批准中间件可识别的函数。删除旧审批实现不得删除或弱化这些元数据。
+- Harness 必须设置 `DisableToolAutoApproval=false`、`AutoApprovalRules=[]`；禁止“不再询问”，后端必须拒绝 `AlwaysApproveToolApprovalResponseContent` 或任何等价永久批准信号。
+- 每次批准必须绑定用户、租户、session、request id、toolCallId、规范工具身份、工具 schema 版本和 canonical 参数 SHA-256 摘要；续流前重新验证全部绑定。参数摘要漂移、跨用户/租户/session、重复/外来 toolCall 或 Interrupted 后的旧批准全部 fail-closed。
+- 主聊天只允许批准 AICopilot 自身、可逆、幂等或结果可查询的动作。Cloud/MES/ERP 写入、设备启停、生产控制、不可逆或结果不可查询动作即使用户点击批准也继续硬阻断。
 
 ## 2. 能力边界
 
@@ -225,6 +245,9 @@ HTTP `ProblemDetails.extensions.code` 与 `traceId` 是保留键；descriptor ex
 | `chat_context_expired` | 对话上下文已过期 |
 | `chat_configuration_missing` | 对话运行配置缺失 |
 | `chat_stream_failed` | 对话流失败 |
+| `agent_session_reset_required` | 会话状态缺失、损坏、不兼容、超限或过期；必须新建会话 |
+| `agent_session_interrupted` | 上一轮运行中断；禁止自动恢复或重放工具 |
+| `agent_session_version_conflict` | 会话正在运行或乐观并发版本已变化 |
 | `model_provider_unavailable` | 模型服务不可用或暂时失败 |
 | `model_request_timeout` | 模型请求超时 |
 | `approval_stream_failed` | 审批流失败 |

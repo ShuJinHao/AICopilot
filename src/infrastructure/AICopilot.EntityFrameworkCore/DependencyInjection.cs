@@ -24,6 +24,7 @@ using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -33,6 +34,7 @@ public static class DependencyInjection
 {
     public static void AddEfCore(this IHostApplicationBuilder builder)
     {
+        builder.Services.AddDataProtection();
         SecretStringEncryptor.EnsureConfigured();
         builder.AddNpgsqlDbContext<AiCopilotDbContext>(
             "ai-copilot",
@@ -69,6 +71,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IRepository<RoutingModelConfiguration>>(provider => provider.GetRequiredService<AiGatewayRepository<RoutingModelConfiguration>>());
         builder.Services.AddScoped<IReadRepository<Session>>(provider => provider.GetRequiredService<AiGatewayRepository<Session>>());
         builder.Services.AddScoped<IRepository<Session>>(provider => provider.GetRequiredService<AiGatewayRepository<Session>>());
+        builder.Services.AddScoped<IAgentSessionStateStore, ProtectedAgentSessionStateStore>();
         builder.Services.AddScoped<IMessageTimelineProjectionStore, MessageTimelineProjectionStore>();
         builder.Services.AddScoped<IReadRepository<AgentTask>>(provider => provider.GetRequiredService<AiGatewayRepository<AgentTask>>());
         builder.Services.AddScoped<IRepository<AgentTask>>(provider => provider.GetRequiredService<AiGatewayRepository<AgentTask>>());

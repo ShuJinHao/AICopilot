@@ -141,4 +141,12 @@ public class Result : Result<Result>
             Errors = [problem]
         };
     }
+
+    public static Result Conflict(ApiProblemDescriptor problem)
+    {
+        return new Result(ResultStatus.Conflict)
+        {
+            Errors = [problem]
+        };
+    }
 }

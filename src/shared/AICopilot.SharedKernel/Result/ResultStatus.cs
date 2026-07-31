@@ -11,5 +11,6 @@ public enum ResultStatus
     Forbidden,
     Unauthorized,
     NotFound,
-    Invalid
+    Invalid,
+    Conflict
 }

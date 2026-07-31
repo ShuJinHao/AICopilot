@@ -9,7 +9,7 @@ internal readonly record struct AgentExecutionTransactionAttempt<TResult>(
     int DirectAffectedRows = 0);
 
 internal sealed class AgentExecutionTransactionRunner(
-    AiGatewayDbContext dbContext,
+    DbContextOptions<AiGatewayDbContext> dbContextOptions,
     PersistenceCommitEngine commitEngine,
     IPersistenceCommitScope commitScope,
     IEnumerable<IRepositoryPersistenceAttemptValidator> attemptValidators)
@@ -22,9 +22,13 @@ internal sealed class AgentExecutionTransactionRunner(
         var reservedCommitId = commitScope.CurrentCommitId;
         try
         {
+            await using var isolatedDbContext = new AiGatewayDbContext(dbContextOptions);
             return await commitEngine.CommitAsync(
                 operationName,
-                new Participant<TResult>(dbContext, action, attemptValidators.ToArray()),
+                new Participant<TResult>(
+                    isolatedDbContext,
+                    action,
+                    attemptValidators.ToArray()),
                 cancellationToken,
                 reservedCommitId);
         }
@@ -44,6 +48,7 @@ internal sealed class AgentExecutionTransactionRunner(
         : IPersistenceCommitParticipant<TResult>
     {
         private AgentExecutionTransactionAttempt<TResult> attempt;
+        private int attemptCount;
 
         public DbContext TransactionOwner => dbContext;
 
@@ -51,37 +56,50 @@ internal sealed class AgentExecutionTransactionRunner(
             PersistenceAttemptContext context,
             CancellationToken cancellationToken)
         {
-            attempt = await action(dbContext, cancellationToken);
-            var affectedRows = await dbContext.SaveChangesAsync(
-                acceptAllChangesOnSuccess: false,
-                cancellationToken);
-
-            var hasAgentTaskWrites = dbContext.ChangeTracker
-                .Entries()
-                .Any(entry =>
-                    entry.Entity is AgentTask or AgentStep &&
-                    entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted);
-            if (hasAgentTaskWrites)
+            if (Interlocked.Increment(ref attemptCount) > 1)
             {
-                var applicableValidators = attemptValidators
-                    .Where(validator => validator.Supports(dbContext))
-                    .ToArray();
-                if (applicableValidators.Length != 1)
-                {
-                    throw new InvalidOperationException(
-                        $"AgentTask execution transaction requires exactly one validator; configured={applicableValidators.Length}.");
-                }
-
-                foreach (var validator in applicableValidators)
-                {
-                    await validator.ValidateAsync(dbContext, context, cancellationToken);
-                }
+                dbContext.ChangeTracker.Clear();
             }
 
-            var totalAffectedRows = checked(affectedRows + attempt.DirectAffectedRows);
-            return new PersistenceAttemptResult<TResult>(
-                attempt.Result,
-                HasPersistentChanges: totalAffectedRows > 0);
+            try
+            {
+                attempt = await action(dbContext, cancellationToken);
+                var affectedRows = await dbContext.SaveChangesAsync(
+                    acceptAllChangesOnSuccess: false,
+                    cancellationToken);
+
+                var hasAgentTaskWrites = dbContext.ChangeTracker
+                    .Entries()
+                    .Any(entry =>
+                        entry.Entity is AgentTask or AgentStep &&
+                        entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted);
+                if (hasAgentTaskWrites)
+                {
+                    var applicableValidators = attemptValidators
+                        .Where(validator => validator.Supports(dbContext))
+                        .ToArray();
+                    if (applicableValidators.Length != 1)
+                    {
+                        throw new InvalidOperationException(
+                            $"AgentTask execution transaction requires exactly one validator; configured={applicableValidators.Length}.");
+                    }
+
+                    foreach (var validator in applicableValidators)
+                    {
+                        await validator.ValidateAsync(dbContext, context, cancellationToken);
+                    }
+                }
+
+                var totalAffectedRows = checked(affectedRows + attempt.DirectAffectedRows);
+                return new PersistenceAttemptResult<TResult>(
+                    attempt.Result,
+                    HasPersistentChanges: totalAffectedRows > 0);
+            }
+            catch
+            {
+                dbContext.ChangeTracker.Clear();
+                throw;
+            }
         }
 
         public void CommitConfirmed(TResult result)

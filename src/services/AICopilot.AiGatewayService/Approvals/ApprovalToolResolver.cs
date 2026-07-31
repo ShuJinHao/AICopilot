@@ -126,7 +126,13 @@ public class ApprovalToolResolver(
             var decision = await toolRegistryGuard.ValidateAsync(tool.Name, userId.Value, cancellationToken);
             if (decision.IsAllowed && decision.Tool is not null)
             {
-                result.Add(tool.WithRequiresApproval(tool.RequiresApproval || decision.Tool.RequiresApproval));
+                result.Add(tool.WithGovernance(
+                    tool.RequiresApproval || decision.Tool.RequiresApproval,
+                    decision.Tool.RiskLevel,
+                    decision.Tool.RequiredPermission,
+                    decision.Tool.AuditLevel.ToString(),
+                    decision.Tool.DataBoundary.ToString(),
+                    decision.Tool.SchemaVersion));
             }
         }
 

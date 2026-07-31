@@ -6,7 +6,7 @@ using Microsoft.Agents.AI;
 
 namespace AICopilot.AiRuntime;
 
-internal sealed class MicrosoftAgentRuntimeChatAgent(ChatClientAgent agent) : IRuntimeChatAgent
+internal sealed class MicrosoftAgentRuntimeChatAgent(AIAgent agent) : IRuntimeChatAgent
 {
     public async Task<IRuntimeAgentSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {
@@ -19,9 +19,12 @@ internal sealed class MicrosoftAgentRuntimeChatAgent(ChatClientAgent agent) : IR
         JsonSerializerOptions serializerOptions,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(serializerOptions);
+        // A null SDK option selects its source-generated AgentSession contract.
+        // Application Web options have no metadata when reflection is disabled.
         var serialized = await agent.SerializeSessionAsync(
             UnwrapSession(session),
-            serializerOptions,
+            jsonSerializerOptions: null,
             cancellationToken);
 
         return serialized.GetRawText();
@@ -32,10 +35,12 @@ internal sealed class MicrosoftAgentRuntimeChatAgent(ChatClientAgent agent) : IR
         JsonSerializerOptions serializerOptions,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(serializerOptions);
         using var document = JsonDocument.Parse(serializedSessionState);
+        // Keep deserialization on the same SDK-owned contract as serialization.
         var session = await agent.DeserializeSessionAsync(
             document.RootElement,
-            serializerOptions,
+            jsonSerializerOptions: null,
             cancellationToken);
 
         return new MicrosoftAgentRuntimeSession(session);
@@ -100,7 +105,7 @@ internal sealed class MicrosoftAgentRuntimeChatAgent(ChatClientAgent agent) : IR
             };
     }
 
-    private static AgentSession UnwrapSession(IRuntimeAgentSession session)
+    internal static AgentSession UnwrapSession(IRuntimeAgentSession session)
     {
         return session is MicrosoftAgentRuntimeSession runtimeSession
             ? runtimeSession.Session

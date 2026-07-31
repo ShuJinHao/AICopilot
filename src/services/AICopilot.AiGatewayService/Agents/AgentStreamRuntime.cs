@@ -148,6 +148,7 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         {
             Id = session.Id,
             UserId = session.UserId,
+            TemplateId = session.TemplateId.Value,
             Title = session.Title,
             OnsiteConfirmedAt = session.OnsiteConfirmedAt,
             OnsiteConfirmedBy = session.OnsiteConfirmedBy,

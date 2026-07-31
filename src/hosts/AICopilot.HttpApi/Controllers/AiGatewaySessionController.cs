@@ -48,6 +48,17 @@ public class AiGatewaySessionController(ISender sender) : ApiControllerBase(send
         return ReturnResult(await Sender.Send(command));
     }
 
+    [HttpPut("session/{sessionId:guid}/agent-mode")]
+    public async Task<IActionResult> UpdateAgentSessionMode(
+        Guid sessionId,
+        UpdateAgentSessionModeRequest request)
+    {
+        return ReturnResult(await Sender.Send(new UpdateAgentSessionModeCommand(
+            sessionId,
+            request.Mode,
+            request.ExpectedVersion)));
+    }
+
     [HttpGet("chat-message/list")]
     public async Task<IActionResult> GetListChatMessages([FromQuery] GetListChatMessageHistoryQuery query)
     {

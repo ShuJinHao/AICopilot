@@ -1,4 +1,6 @@
 using System.Reflection;
+using AICopilot.AiGatewayService.Agents;
+using AICopilot.AiGatewayService.Commands.Sessions;
 using AICopilot.AiGatewayService.Queries.Runtime;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.EntityFrameworkCore;
@@ -40,6 +42,88 @@ public sealed class SecurityBoundaryArchitectureTests
         typeof(DataAnalysisController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(McpController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(RagController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AgentModeEndpoint_ShouldKeepAuthenticatedVersionedPutContract()
+    {
+        var method = typeof(AiGatewaySessionController)
+            .GetMethod(nameof(AiGatewaySessionController.UpdateAgentSessionMode));
+
+        method.Should().NotBeNull();
+        method!.GetCustomAttribute<HttpPutAttribute>()?.Template
+            .Should().Be("session/{sessionId:guid}/agent-mode");
+        method.GetParameters().Select(parameter => parameter.ParameterType)
+            .Should().Equal(typeof(Guid), typeof(UpdateAgentSessionModeRequest));
+        typeof(UpdateAgentSessionModeCommand)
+            .GetCustomAttribute<AuthorizeRequirementAttribute>()?
+            .Permission.Should().Be("AiGateway.Chat");
+        typeof(UpdateAgentSessionModeRequest).GetProperties()
+            .Select(property => property.Name)
+            .Should().BeEquivalentTo(
+                nameof(UpdateAgentSessionModeRequest.Mode),
+                nameof(UpdateAgentSessionModeRequest.ExpectedVersion));
+    }
+
+    [Fact]
+    public void MainChat_ShouldUseHarnessBoundaryWithoutLegacyWorkflowDependency()
+    {
+        var chatHandlerParameters = typeof(ChatStreamHandler)
+            .GetConstructors()
+            .Should().ContainSingle().Subject
+            .GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+        var approvalHandlerParameters = typeof(ApprovalDecisionStreamHandler)
+            .GetConstructors()
+            .Should().ContainSingle().Subject
+            .GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+        var configuredFactoryParameters = typeof(ConfiguredAgentRuntimeFactory)
+            .GetConstructors()
+            .Should().ContainSingle().Subject
+            .GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+
+        chatHandlerParameters.Should().Contain(typeof(ConfiguredAgentRuntimeFactory))
+            .And.Contain(typeof(MainChatToolCatalog));
+        approvalHandlerParameters.Should().Contain(typeof(ConfiguredAgentRuntimeFactory))
+            .And.Contain(typeof(MainChatToolCatalog));
+        chatHandlerParameters.Concat(approvalHandlerParameters)
+            .Should().NotContain(type =>
+                string.Equals(
+                    type.FullName,
+                    "AICopilot.AiGatewayService.Workflows.AgentWorkflowPipeline",
+                    StringComparison.Ordinal));
+        configuredFactoryParameters.Should().Contain(typeof(IAgentRuntimeFactory))
+            .And.Contain(typeof(IHarnessAgentRuntimeFactory));
+    }
+
+    [Fact]
+    public void MainChatToolCatalog_ShouldKeepTextToSqlBehindBusinessQuery()
+    {
+        var isPermitted = typeof(MainChatToolCatalog).GetMethod(
+            "IsPermittedMainChatTool",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        var directTextToSql = new AICopilot.SharedKernel.Ai.AiToolDefinition
+        {
+            Name = "business_readonly",
+            ToolName = "business_readonly",
+            TargetType = AICopilot.SharedKernel.Ai.AiToolTargetType.McpServer,
+            TargetName = "builtin",
+            ExternalSystemType = AICopilot.SharedKernel.Ai.AiToolExternalSystemType.CloudReadOnly,
+            CapabilityKind = AICopilot.SharedKernel.Ai.AiToolCapabilityKind.ReadOnlyQuery,
+            RiskLevel = AICopilot.SharedKernel.Ai.AiToolRiskLevel.Low,
+            ReadOnlyDeclared = true,
+            McpReadOnlyHint = true,
+            RequiredPermission = "DataSource.TextToSql"
+        };
+
+        isPermitted.Should().NotBeNull();
+        ((bool)isPermitted!.Invoke(null, [directTextToSql])!)
+            .Should().BeFalse("Text-to-SQL is an internal BusinessQuery fallback, not a model-visible tool");
     }
 
     [Theory]

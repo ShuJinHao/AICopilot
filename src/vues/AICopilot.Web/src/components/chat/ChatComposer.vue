@@ -1,20 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onClickOutside, useEventListener } from '@vueuse/core'
-import {
-  FolderOpen,
-  ListChecks,
-  MessageCircle,
-  Plus,
-  Send,
-  Sparkles,
-  X,
-} from 'lucide-vue-next'
+import { FolderOpen, ListChecks, MessageCircle, Plus, Send, Sparkles, X } from 'lucide-vue-next'
 import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useChatStore } from '@/stores/chatStore'
 import { shouldResetComposerForSessionChange } from '@/utils/composerSession'
 
 type ComposerMode = 'plan' | 'chat'
+type AgentMode = 'plan' | 'execute'
 
 const store = useChatStore()
 const { canCreatePlan } = useAgentWorkbench()
@@ -22,6 +15,7 @@ const { canCreatePlan } = useAgentWorkbench()
 const inputValue = ref('')
 const agentGoal = ref('')
 const composerMode = ref<ComposerMode>('chat')
+const isAgentModeChanging = ref(false)
 const planAdvancedOpen = ref(false)
 const planAdvancedButton = ref<HTMLElement | null>(null)
 const planAdvancedPanel = ref<HTMLElement | null>(null)
@@ -48,6 +42,9 @@ const planPathSummary = computed(() => '自动生成执行路径')
 const composerPrimaryLabel = computed(() => (composerMode.value === 'plan' ? '生成计划' : '发送'))
 const composerPrimaryIcon = computed(() => (composerMode.value === 'plan' ? ListChecks : Send))
 const composerPlaceholder = computed(() => {
+  if (store.isAgentSessionUnavailable) {
+    return '当前会话不可恢复，请新建会话'
+  }
   if (store.hasPendingApproval) {
     return '请先处理待审批请求'
   }
@@ -55,9 +52,9 @@ const composerPlaceholder = computed(() => {
     return '正在确认待审批状态，可继续编辑'
   }
 
-  return composerMode.value === 'plan'
-    ? '输入目标，先生成可确认的计划'
-    : '输入一个简单问题，直接回答'
+  return store.agentMode === 'plan'
+    ? 'Plan 模式：描述目标，助手仅规划与整理待办'
+    : 'Execute 模式：输入问题，助手可按权限使用只读业务工具'
 })
 const isComposerSubmitDisabled = computed(
   () =>
@@ -79,11 +76,6 @@ function handleComposerKeydown(event: KeyboardEvent) {
     event.preventDefault()
     void submitComposer()
   }
-}
-
-function openFilePicker() {
-  if (!isSessionReady.value) return
-  fileInput.value?.click()
 }
 
 function handleKnowledgeBaseChange(event: Event) {
@@ -121,15 +113,18 @@ async function submitComposer() {
   await createAgentPlan()
 }
 
-function setComposerMode(mode: ComposerMode) {
-  if (!store.canEditComposerContext) return
+async function setAgentMode(mode: AgentMode) {
+  if (!store.canChangeAgentMode || isAgentModeChanging.value || store.agentMode === mode) return
 
-  composerMode.value = mode
-  if (mode === 'plan') {
-    store.clearReferencedAgentTask()
-  }
+  isAgentModeChanging.value = true
+  store.clearReferencedAgentTask()
   planAdvancedOpen.value = false
   store.clearCurrentSessionError()
+  try {
+    await store.changeAgentMode(mode)
+  } finally {
+    isAgentModeChanging.value = false
+  }
 }
 
 onClickOutside(
@@ -169,31 +164,31 @@ watch(
 <template>
   <footer class="command-composer">
     <div class="composer-mode-bar">
-      <div class="mode-switch" role="group" aria-label="输入模式">
+      <div class="mode-switch" role="group" aria-label="Agent 运行模式">
         <button
           type="button"
-          :class="{ active: composerMode === 'chat' }"
-          :disabled="!store.canEditComposerContext"
-          @click="setComposerMode('chat')"
+          :class="{ active: store.agentMode === 'plan' }"
+          :disabled="!store.canChangeAgentMode || isAgentModeChanging"
+          @click="setAgentMode('plan')"
         >
-          <MessageCircle :size="16" />
-          聊天模式
+          <ListChecks :size="16" />
+          Plan · 规划
         </button>
         <button
           type="button"
-          :class="{ active: composerMode === 'plan' }"
-          :disabled="!store.canEditComposerContext"
-          @click="setComposerMode('plan')"
+          :class="{ active: store.agentMode === 'execute' }"
+          :disabled="!store.canChangeAgentMode || isAgentModeChanging"
+          @click="setAgentMode('execute')"
         >
-          <ListChecks :size="16" />
-          计划模式
+          <MessageCircle :size="16" />
+          Execute · 执行
         </button>
       </div>
       <button
         class="composer-add-button"
         type="button"
-        :disabled="!isSessionReady || store.isAgentBusy"
-        @click="openFilePicker"
+        disabled
+        title="Harness 主聊天本批仅支持内联文本"
       >
         <Plus :size="17" />
         添加
@@ -203,9 +198,11 @@ watch(
           {{ planPathSummary }} · {{ attachmentSummary }}
         </template>
         <template v-else-if="referencedTaskDigestLabel">
-          基于已完成任务证据 {{ referencedTaskDigestLabel }} · {{ attachmentSummary }}
+          基于已完成任务证据 {{ referencedTaskDigestLabel }} · 仅内联文本
         </template>
-        <template v-else>普通聊天 · {{ attachmentSummary }}</template>
+        <template v-else>
+          服务端模式：{{ store.agentMode === 'execute' ? 'Execute' : 'Plan' }} · 仅内联文本
+        </template>
       </span>
       <button
         v-if="composerMode === 'chat' && store.referencedAgentTaskId"
@@ -245,10 +242,7 @@ watch(
       ref="planAdvancedPanel"
       class="composer-options-panel"
     >
-      <section
-        v-if="store.availableKnowledgeBases.length"
-        class="composer-option-group"
-      >
+      <section v-if="store.availableKnowledgeBases.length" class="composer-option-group">
         <div class="option-title">
           <FolderOpen :size="17" />
           <span>知识库</span>
@@ -272,7 +266,6 @@ watch(
         </label>
         <p>{{ store.selectedKnowledgeBase?.description || '需要限定资料范围时再手动选择。' }}</p>
       </section>
-
     </div>
 
     <div class="composer-input-row">

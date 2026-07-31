@@ -2164,6 +2164,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
 
         var messages = messagesElement.EnumerateArray().ToArray();
         Array.Reverse(messages);
+        string? syntheticFallback = null;
 
         foreach (var message in messages)
         {
@@ -2174,7 +2175,14 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
 
             if (message.TryGetProperty("content", out var contentElement) && contentElement.ValueKind == JsonValueKind.String)
             {
-                return contentElement.GetString() ?? string.Empty;
+                var text = contentElement.GetString() ?? string.Empty;
+                syntheticFallback ??= text;
+                if (!IsHarnessContextMessage(text))
+                {
+                    return text;
+                }
+
+                continue;
             }
 
             if (message.TryGetProperty("content", out contentElement) && contentElement.ValueKind == JsonValueKind.Array)
@@ -2184,11 +2192,23 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                     .Select(part => part.GetProperty("text").GetString() ?? string.Empty)
                     .ToArray();
 
-                return string.Join(" ", parts);
+                var text = string.Join(" ", parts);
+                syntheticFallback ??= text;
+                if (!IsHarnessContextMessage(text))
+                {
+                    return text;
+                }
             }
         }
 
-        return string.Empty;
+        return syntheticFallback ?? string.Empty;
+    }
+
+    private static bool IsHarnessContextMessage(string text)
+    {
+        var trimmed = text.TrimStart();
+        return trimmed.StartsWith("[Mode changed:", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("### Current todo list", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HasToolResultMessage(JsonElement root)

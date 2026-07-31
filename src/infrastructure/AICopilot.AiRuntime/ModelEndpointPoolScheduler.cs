@@ -68,7 +68,7 @@ internal sealed class InMemoryModelEndpointPoolScheduler : IModelEndpointPoolSch
     {
         if (!options.Value.EndpointPools.TryGetValue(poolName, out var pool))
         {
-            throw new InvalidOperationException($"Model endpoint pool '{poolName}' is not configured.");
+            throw new ModelEndpointPoolNotConfiguredException(poolName);
         }
 
         lock (gate)

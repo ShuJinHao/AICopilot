@@ -25,11 +25,18 @@ const preserveScrollAnchor = ref(false)
 const currentTitle = computed(() => store.currentSession?.title || '新会话')
 const workbenchStatusLabel = computed(() => {
   if (store.isSessionActivating) return '初始化中'
+  if (store.agentSessionStatus === 'Interrupted') return '已中断'
+  if (store.isAgentSessionUnavailable) return '需重建'
+  if (store.agentSessionStatus === 'Running' && !store.isStreaming) return '中断检查'
   if (!store.resolvedSessionId && store.errorMessage) return '不可用'
   return store.isStreaming ? '生成中' : '就绪'
 })
-const workbenchStatusTone = computed(() =>
-  workbenchStatusLabel.value === '就绪' ? 'success' : 'warning',
+const workbenchStatusTone = computed(() => {
+  if (store.isAgentSessionUnavailable) return 'danger'
+  return workbenchStatusLabel.value === '就绪' ? 'success' : 'warning'
+})
+const agentModeLabel = computed(() =>
+  store.agentMode === 'execute' ? 'Execute · 执行' : 'Plan · 规划',
 )
 const hasInlineAgentRun = computed(() =>
   Boolean(
@@ -47,7 +54,7 @@ async function createPlanFromSuggestion(text: string) {
   }
 
   store.clearCurrentSessionError()
-  await store.planAgentTask(text)
+  await store.sendMessage(text)
 }
 
 async function loadOlderMessages() {
@@ -162,8 +169,19 @@ onBeforeUnmount(() => {
           <AiTag :tone="workbenchStatusTone">
             {{ workbenchStatusLabel }}
           </AiTag>
-          <AiTag :tone="latestPlanIsSimulation || latestPlanIsCloudReadonly ? 'warning' : 'success'">
-            {{ latestPlanIsSimulation ? 'Simulation · 只读' : latestPlanIsCloudReadonly ? 'Cloud 只读' : '只读分析' }}
+          <AiTag :tone="store.agentMode === 'execute' ? 'blue' : 'teal'">
+            {{ agentModeLabel }}
+          </AiTag>
+          <AiTag
+            :tone="latestPlanIsSimulation || latestPlanIsCloudReadonly ? 'warning' : 'success'"
+          >
+            {{
+              latestPlanIsSimulation
+                ? 'Simulation · 只读'
+                : latestPlanIsCloudReadonly
+                  ? 'Cloud 只读'
+                  : '只读分析'
+            }}
           </AiTag>
           <button
             class="soft-action"
@@ -185,6 +203,10 @@ onBeforeUnmount(() => {
         <div v-if="store.errorMessage" class="canvas-error" role="alert">
           <TriangleAlert :size="18" />
           {{ store.errorMessage }}
+        </div>
+        <div v-if="store.agentSessionNotice" class="canvas-error" role="alert">
+          <TriangleAlert :size="18" />
+          {{ store.agentSessionNotice }}
         </div>
 
         <div v-if="store.isLoadingHistory" class="loading-lines">

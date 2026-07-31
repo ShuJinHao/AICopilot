@@ -11,6 +11,7 @@ namespace AICopilot.HttpApi.Infrastructure;
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
@@ -52,6 +53,11 @@ public abstract class ApiControllerBase(ISender sender) : ControllerBase
                 return StatusCode(
                     StatusCodes.Status401Unauthorized,
                     CreateProblemDetails(StatusCodes.Status401Unauthorized, result.Errors));
+
+            case ResultStatus.Conflict:
+                return StatusCode(
+                    StatusCodes.Status409Conflict,
+                    CreateProblemDetails(StatusCodes.Status409Conflict, result.Errors));
 
             default:
                 return StatusCode(

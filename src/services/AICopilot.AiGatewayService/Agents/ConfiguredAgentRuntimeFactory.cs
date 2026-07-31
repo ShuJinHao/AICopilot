@@ -19,6 +19,7 @@ public class ConfiguredAgentRuntimeFactory(
     IReadRepository<ConversationTemplate> templateRepository,
     IReadRepository<LanguageModel> modelRepository,
     IAgentRuntimeFactory runtimeFactory,
+    IHarnessAgentRuntimeFactory? harnessRuntimeFactory = null,
     ICurrentUser? currentUser = null)
 {
     private async Task<(LanguageModel, ConversationTemplate)> GetModelAndTemplateAsync(
@@ -90,6 +91,66 @@ public class ConfiguredAgentRuntimeFactory(
             runtime.Agent,
             runtime,
             CreateConfigurationSnapshot(model, template, chatOptions));
+    }
+
+    public ScopedRuntimeAgent CreateHarnessAgent(
+        LanguageModel model,
+        ConversationTemplate template,
+        IReadOnlyCollection<AiToolDefinition> tools,
+        IAgentSessionCheckpointSink? checkpointSink = null)
+    {
+        ValidateConfiguration(model, template);
+        if (harnessRuntimeFactory is null ||
+            !harnessRuntimeFactory.CanCreate(model.ProtocolType))
+        {
+            throw new AgentWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                $"No Harness chat client provider is registered for protocol '{model.ProtocolType}'.",
+                "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
+        }
+
+        var chatOptions = BuildChatOptions(
+            model,
+            template,
+            options => options.Tools = tools.ToArray(),
+            instructionsOverride: null);
+        ScopedRuntimeAgent runtime;
+        try
+        {
+            runtime = harnessRuntimeFactory.Create(
+                new HarnessAgentRuntimeCreateRequest(
+                    new AgentRuntimeCreateRequest(
+                        model,
+                        template,
+                        chatOptions,
+                        CreateCallerContext()),
+                    checkpointSink));
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or ArgumentException)
+        {
+            throw new AgentWorkflowException(
+                AppProblemCodes.ChatConfigurationMissing,
+                $"The Harness runtime could not be constructed ({exception.GetType().Name}).",
+                "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
+        }
+
+        return new ScopedRuntimeAgent(
+            runtime.Agent,
+            runtime,
+            CreateConfigurationSnapshot(model, template, chatOptions));
+    }
+
+    public async Task<ScopedRuntimeAgent> CreateHarnessAgentAsync(
+        ConversationTemplateId templateId,
+        IReadOnlyCollection<AiToolDefinition> tools,
+        IAgentSessionCheckpointSink? checkpointSink = null,
+        CancellationToken cancellationToken = default)
+    {
+        var (model, template) = await GetModelAndTemplateAsync(
+            new ConversationTemplateByIdSpec(templateId),
+            cancellationToken);
+        return CreateHarnessAgent(model, template, tools, checkpointSink);
     }
 
     private AgentRuntimeCallerContext? CreateCallerContext()

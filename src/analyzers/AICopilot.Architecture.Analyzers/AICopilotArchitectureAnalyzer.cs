@@ -144,6 +144,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         public const string Store = "AICopilot.EntityFrameworkCore.Repository.PostgresModelQuotaReservationStore";
         public const string TransactionRunner = "AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner";
         public const string DbContext = "AICopilot.EntityFrameworkCore.AiGatewayDbContext";
+        public const string DbContextOptions = "Microsoft.EntityFrameworkCore.DbContextOptions<TContext>";
     }
     private const int MaximumEffectSummaryEntries = 4096;
     private const int CrossProjectIdentityEffect = 1;
@@ -500,20 +501,25 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             .Select(parameter => parameter.Type as INamedTypeSymbol)
             .SingleOrDefault(parameterType =>
                 HasExpectedTypeIdentity(parameterType, FormalQuotaTypes.TransactionRunner));
-        var runnerDatabaseContexts = transactionRunner?.InstanceConstructors
+        var runnerDependencies = transactionRunner?.InstanceConstructors
             .SelectMany(constructor => constructor.Parameters)
             .Select(parameter => parameter.Type)
+            .ToArray() ?? [];
+        var runnerDatabaseContexts = runnerDependencies
             .Where(parameterType =>
                 DerivesFromFullyQualified(parameterType, "Microsoft.EntityFrameworkCore.DbContext"))
-            .ToArray() ?? [];
-        var hasOnlyExactAiGatewayContext = runnerDatabaseContexts.Length == 1 &&
-                                           HasExpectedTypeIdentity(
-                                               runnerDatabaseContexts[0] as INamedTypeSymbol,
-                                               FormalQuotaTypes.DbContext);
+            .ToArray();
+        var runnerDatabaseContextOptions = runnerDependencies
+            .Where(IsDbContextOptions)
+            .ToArray();
+        var hasOnlyIsolatedAiGatewayContext = runnerDatabaseContexts.Length == 0 &&
+                                              runnerDatabaseContextOptions.Length == 1 &&
+                                              IsExactAiGatewayDbContextOptions(
+                                                  runnerDatabaseContextOptions[0]);
 
         if (HasExpectedTypeIdentity(type, FormalQuotaTypes.Store) &&
             hasExactStoreConstructor &&
-            hasOnlyExactAiGatewayContext)
+            hasOnlyIsolatedAiGatewayContext)
         {
             return;
         }
@@ -522,8 +528,20 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             CloudReadOnlyBoundaryRule,
             FirstSourceLocation(type),
             type.ToDisplayString(),
-            $"{FormalQuotaTypes.Contract} has one approved production implementation: {FormalQuotaTypes.Store}, using only {FormalQuotaTypes.TransactionRunner} backed by {FormalQuotaTypes.DbContext}"));
+            $"{FormalQuotaTypes.Contract} has one approved production implementation: {FormalQuotaTypes.Store}, using only {FormalQuotaTypes.TransactionRunner} with an isolated {FormalQuotaTypes.DbContext} created from typed DbContextOptions"));
     }
+
+    private static bool IsDbContextOptions(ITypeSymbol type) =>
+        type is INamedTypeSymbol namedType &&
+        HasExpectedTypeIdentity(namedType, FormalQuotaTypes.DbContextOptions);
+
+    private static bool IsExactAiGatewayDbContextOptions(ITypeSymbol type) =>
+        type is INamedTypeSymbol namedType &&
+        namedType.TypeArguments.Length == 1 &&
+        IsDbContextOptions(namedType) &&
+        HasExpectedTypeIdentity(
+            namedType.TypeArguments[0] as INamedTypeSymbol,
+            FormalQuotaTypes.DbContext);
 
     private static bool IsConcreteProductionImplementation(
         INamedTypeSymbol type,
@@ -3714,6 +3732,11 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         if (fullyQualifiedTypeName is "Microsoft.Extensions.DependencyInjection.ActivatorUtilities")
         {
             return "Microsoft.Extensions.DependencyInjection.Abstractions";
+        }
+
+        if (fullyQualifiedTypeName is FormalQuotaTypes.DbContextOptions)
+        {
+            return "Microsoft.EntityFrameworkCore";
         }
 
         if (fullyQualifiedTypeName is "Microsoft.AspNetCore.Identity.UserManager" or

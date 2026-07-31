@@ -1,7 +1,10 @@
 ﻿using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using System.Text.Json;
+using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Queries.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Runtime.AgentSessions;
 using AICopilot.Core.AiGateway.Specifications.ConversationTemplate;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.Services.Contracts;
@@ -16,7 +19,10 @@ public record CreatedSessionDto(
     string Title,
     DateTimeOffset? OnsiteConfirmedAt,
     string? OnsiteConfirmedBy,
-    DateTimeOffset? OnsiteConfirmationExpiresAt);
+    DateTimeOffset? OnsiteConfirmationExpiresAt,
+    string AgentMode,
+    long AgentSessionVersion,
+    string AgentSessionStatus);
 
 [AuthorizeRequirement("AiGateway.CreateSession")]
 public record CreateSessionCommand(Guid? TemplateId) : ICommand<Result<CreatedSessionDto>>;
@@ -24,6 +30,8 @@ public record CreateSessionCommand(Guid? TemplateId) : ICommand<Result<CreatedSe
 public class CreateSessionCommandHandler(
     IRepository<Session> repo,
     IReadRepository<ConversationTemplate> templateRepository,
+    ConfiguredAgentRuntimeFactory configuredAgentRuntimeFactory,
+    IAgentSessionStateStore agentSessionStateStore,
     ICurrentUser user)
     : ICommandHandler<CreateSessionCommand, Result<CreatedSessionDto>>
 {
@@ -70,6 +78,33 @@ public class CreateSessionCommandHandler(
 
         var session = new Session(userId, new ConversationTemplateId(templateId.Value));
         repo.Add(session);
+        await using (var runtime = await configuredAgentRuntimeFactory.CreateHarnessAgentAsync(
+                         session.TemplateId,
+                         [],
+                         cancellationToken: ct))
+        {
+            var harnessAgent = runtime.Agent as IHarnessRuntimeChatAgent
+                ?? throw new InvalidOperationException(
+                    "Configured main chat runtime did not create a Harness agent.");
+            var agentSession = await harnessAgent.CreateSessionAsync(ct);
+            var mode = await harnessAgent.GetModeAsync(agentSession, ct);
+            if (mode != RuntimeAgentMode.Plan)
+            {
+                throw new InvalidOperationException(
+                    "New Harness sessions must initialize in Plan mode.");
+            }
+
+            var serialized = await harnessAgent.SerializeSessionAsync(
+                agentSession,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web),
+                ct);
+            agentSessionStateStore.AddNew(
+                session.Id.Value,
+                userId,
+                user.CloudTenantId,
+                serialized);
+        }
+
         await repo.SaveChangesAsync(ct);
 
         return Result.Success(new CreatedSessionDto(
@@ -77,6 +112,9 @@ public class CreateSessionCommandHandler(
             session.Title,
             session.OnsiteConfirmedAt,
             session.OnsiteConfirmedBy,
-            session.OnsiteConfirmationExpiresAt));
+            session.OnsiteConfirmationExpiresAt,
+            "plan",
+            1,
+            AgentSessionRuntimeStatus.Ready.ToString()));
     }
 }

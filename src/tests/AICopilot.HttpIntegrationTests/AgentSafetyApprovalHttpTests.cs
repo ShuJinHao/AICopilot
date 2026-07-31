@@ -5,6 +5,7 @@ using System.Text.Json;
 using AICopilot.AgentPlugin;
 using AICopilot.AiGatewayService.Plugins;
 using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using AICopilot.Core.AiGateway.Runtime.AgentSessions;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.Services.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -66,6 +67,14 @@ public sealed class AgentSafetyApprovalHttpTests
                 requiresOnsiteAttestation: true);
 
             sessionId = await CreateSessionAsync(generalTemplateId);
+            var executeMode = await PutJsonAsync<AgentSessionModeDto>(
+                $"/api/aigateway/session/{sessionId}/agent-mode",
+                new
+                {
+                    mode = "execute",
+                    expectedVersion = 1
+                });
+            executeMode.Should().Be(new AgentSessionModeDto(sessionId, "execute", 2));
 
             var approvalEvents = await PostChatAsync(new
             {
@@ -164,7 +173,7 @@ public sealed class AgentSafetyApprovalHttpTests
                 item.ActionCode == "AiGateway.SetOnsiteAttestation"
                 && item.TargetType == "Session"
                 && item.TargetId == sessionId.ToString());
-            approvalAuditLogs.Items.Should().Contain(item =>
+            approvalAuditLogs.Items.Should().ContainSingle(item =>
                 item.ActionCode == "Approval.Approve"
                 && item.TargetType == "ToolApproval"
                 && item.Result == "Succeeded");
@@ -275,6 +284,89 @@ public sealed class AgentSafetyApprovalHttpTests
             if (languageModelId != Guid.Empty)
             {
                 await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ChatStream_ShouldInterruptLeftoverRunningSessionWithoutReplay()
+    {
+        await AuthenticateAsAdminAsync();
+
+        Guid languageModelId = Guid.Empty;
+        Guid templateId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+
+        try
+        {
+            languageModelId = await CreateLanguageModelAsync(
+                $"interrupted-session-lm-{Guid.NewGuid():N}");
+            templateId = await CreateConversationTemplateAsync(
+                $"interrupted-session-template-{Guid.NewGuid():N}",
+                languageModelId,
+                "interrupted session",
+                "You are a concise manufacturing copilot.");
+            sessionId = await CreateSessionAsync(templateId);
+
+            await using (var dbContext = await CreateAiGatewayDbContextAsync())
+            {
+                var persistedState = await dbContext.AgentSessionStates.SingleAsync(
+                    item => item.SessionId == sessionId);
+                var nowUtc = DateTimeOffset.UtcNow;
+                persistedState.BeginTurn(
+                    Guid.NewGuid(),
+                    nowUtc,
+                    nowUtc.AddDays(30));
+                await dbContext.SaveChangesAsync();
+            }
+
+            var events = await PostChatAsync(new
+            {
+                sessionId,
+                message = "do not replay the abandoned turn"
+            });
+
+            ReadSingleError(events).Code.Should().Be("agent_session_interrupted");
+            events.Should().NotContain(item =>
+                item.Type == "FunctionCall" ||
+                item.Type == "FunctionResult" ||
+                item.Type == "ApprovalRequest");
+
+            var projection = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            projection.AgentSessionStatus.Should().Be(nameof(AgentSessionRuntimeStatus.Interrupted));
+            projection.AgentSessionResetRequired.Should().BeFalse();
+            projection.AgentSessionVersion.Should().Be(3);
+        }
+        finally
+        {
+            await AuthenticateAsAdminAsync();
+
+            if (sessionId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/session",
+                    new { id = sessionId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (templateId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/conversation-template",
+                    new { id = templateId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (languageModelId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/language-model",
+                    new { id = languageModelId },
+                    HttpStatusCode.NoContent);
             }
         }
     }
@@ -549,12 +641,20 @@ public sealed class AgentSafetyApprovalHttpTests
 
     private sealed record CreatedSessionDto(Guid Id, string Title);
 
+    private sealed record AgentSessionModeDto(Guid SessionId, string Mode, long Version);
+
     private sealed record SessionDto(
         Guid Id,
         string Title,
         DateTimeOffset? OnsiteConfirmedAt,
         string? OnsiteConfirmedBy,
         DateTimeOffset? OnsiteConfirmationExpiresAt);
+
+    private sealed record AgentSessionProjectionDto(
+        Guid Id,
+        long? AgentSessionVersion,
+        string? AgentSessionStatus,
+        bool AgentSessionResetRequired);
 
     private sealed record PendingApprovalDto(
         string CallId,

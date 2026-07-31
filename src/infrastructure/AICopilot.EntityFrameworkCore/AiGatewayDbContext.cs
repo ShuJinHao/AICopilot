@@ -10,6 +10,7 @@ using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.AiGateway.Runtime.AgentExecution;
+using AICopilot.Core.AiGateway.Runtime.AgentSessions;
 using AICopilot.EntityFrameworkCore.Configuration.AiGateway;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
@@ -52,6 +53,8 @@ public sealed partial class AiGatewayDbContext(DbContextOptions<AiGatewayDbConte
 
     public DbSet<ToolExecutionRecord> ToolExecutionRecords => Set<ToolExecutionRecord>();
 
+    public DbSet<AgentSessionState> AgentSessionStates => Set<AgentSessionState>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         builder.HasDefaultSchema("aigateway");
@@ -76,6 +79,7 @@ public sealed partial class AiGatewayDbContext(DbContextOptions<AiGatewayDbConte
         builder.ApplyConfiguration(new UploadRecordConfiguration());
         builder.ApplyConfiguration(new ToolRegistrationConfiguration());
         builder.ApplyConfiguration(new ToolExecutionRecordConfiguration());
+        builder.ApplyConfiguration(new AgentSessionStateConfiguration());
     }
 }
 

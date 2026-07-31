@@ -11,6 +11,17 @@ public sealed record AgentRuntimeCreateRequest(
     AiChatOptions Options,
     AgentRuntimeCallerContext? Caller = null);
 
+public sealed record HarnessAgentRuntimeCreateRequest(
+    AgentRuntimeCreateRequest Runtime,
+    IAgentSessionCheckpointSink? CheckpointSink = null);
+
+public interface IAgentSessionCheckpointSink
+{
+    ValueTask PersistAsync(
+        string serializedSessionState,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record AgentRuntimeCallerContext(
     Guid? UserId,
     string? UserName,
@@ -37,6 +48,12 @@ public sealed record ModelProviderReliabilityDto(
     IReadOnlyList<string> FallbackBlockedScopes);
 
 public interface IRuntimeAgentSession;
+
+public enum RuntimeAgentMode
+{
+    Plan = 0,
+    Execute = 1
+}
 
 public interface IRuntimeChatAgent
 {
@@ -69,6 +86,18 @@ public interface IRuntimeChatAgent
         string input,
         IRuntimeAgentSession session,
         RuntimeAgentRunOptions? options = null,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IHarnessRuntimeChatAgent : IRuntimeChatAgent
+{
+    Task<RuntimeAgentMode> GetModeAsync(
+        IRuntimeAgentSession session,
+        CancellationToken cancellationToken = default);
+
+    Task SetModeAsync(
+        IRuntimeAgentSession session,
+        RuntimeAgentMode mode,
         CancellationToken cancellationToken = default);
 }
 
@@ -113,6 +142,13 @@ public interface IAgentRuntimeFactory
     bool CanCreate(string providerName);
 
     ScopedRuntimeAgent Create(AgentRuntimeCreateRequest request);
+}
+
+public interface IHarnessAgentRuntimeFactory
+{
+    bool CanCreate(string providerName);
+
+    ScopedRuntimeAgent Create(HarnessAgentRuntimeCreateRequest request);
 }
 
 public interface IModelProviderReliabilitySnapshotReader

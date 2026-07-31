@@ -4,11 +4,22 @@ export interface Session {
   onsiteConfirmedAt?: string | null
   onsiteConfirmedBy?: string | null
   onsiteConfirmationExpiresAt?: string | null
+  agentMode?: 'plan' | 'execute' | null
+  agentSessionVersion?: number | null
+  agentSessionStatus?: 'Ready' | 'Running' | 'Interrupted' | 'ResetRequired' | string | null
+  agentSessionResetRequired?: boolean
+  hasPendingApproval?: boolean
+}
+
+export interface AgentSessionModeResponse {
+  sessionId: string
+  mode: 'plan' | 'execute'
+  version: number
 }
 
 export enum MessageRole {
   User = 'User',
-  Assistant = 'Assistant'
+  Assistant = 'Assistant',
 }
 
 export enum ChunkType {
@@ -21,7 +32,7 @@ export enum ChunkType {
   FunctionCall = 'FunctionCall',
   ApprovalRequest = 'ApprovalRequest',
   AgentEvent = 'AgentEvent',
-  AgentTask = 'AgentTask'
+  AgentTask = 'AgentTask',
 }
 
 export interface ChatChunk {
@@ -78,6 +89,11 @@ export interface AgentEventPayload {
   recoverable: boolean
   suggestedAction?: string | null
   metadata: Record<string, string>
+  sessionId?: string
+  mode?: 'plan' | 'execute'
+  status?: 'Ready' | 'Running' | 'Interrupted' | string
+  version?: number
+  pendingApproval?: boolean
 }
 
 export interface UploadRecord {
@@ -183,7 +199,13 @@ export interface AgentRuntimeEvidence {
   nodeId: string
   nodeLabel: string
   evidenceKind: string
-  truthClass: 'ObservedFact' | 'DerivedFact' | 'ModelPrediction' | 'LlmInference' | 'Recommendation' | string
+  truthClass:
+    | 'ObservedFact'
+    | 'DerivedFact'
+    | 'ModelPrediction'
+    | 'LlmInference'
+    | 'Recommendation'
+    | string
   truthLabel: string
   sourceLabel: string
   sourceMode: string
@@ -256,7 +278,16 @@ export interface ArtifactRecord {
   mimeType: string
   version: number
   updatedAt: string
-  previewKind: 'chart' | 'json' | 'table' | 'markdown' | 'html' | 'pdf' | 'spreadsheet' | 'download' | string
+  previewKind:
+    | 'chart'
+    | 'json'
+    | 'table'
+    | 'markdown'
+    | 'html'
+    | 'pdf'
+    | 'spreadsheet'
+    | 'download'
+    | string
   downloadUrl: string
   generatedByStepOrder?: number | null
   requiresApproval?: boolean
