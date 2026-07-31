@@ -1,16 +1,6 @@
 using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Reflection;
-using System.Text;
 using System.Text.Json;
-using AICopilot.AiGatewayService.AgentTasks;
-using AICopilot.AiGatewayService.Tools;
-using AICopilot.AiGatewayService.Workspaces;
-using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
 using AICopilot.HttpApi.Infrastructure;
-using AICopilot.RagService.EmbeddingModels;
-using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Http;
 
@@ -32,25 +22,14 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/aigateway/runtime-settings", "get");
         AssertPath(document, "/api/aigateway/session", "post");
         AssertPath(document, "/api/aigateway/session/list", "get");
-        AssertPath(document, "/api/aigateway/upload", "post");
-        AssertPath(document, "/api/aigateway/agent/task/plan-stream", "post");
-        AssertPath(document, "/api/aigateway/agent/task/run", "post");
-        AssertPath(document, "/api/aigateway/agent/task/retry", "post");
-        AssertPath(document, "/api/aigateway/agent/task/cancel", "post");
-        AssertPath(document, "/api/aigateway/agent/task/{id}/approvals", "get");
-        AssertPath(document, "/api/aigateway/agent/task/{id}/audit-summary", "get");
-        AssertPath(document, "/api/aigateway/agent/task/{id}/tool-executions", "get");
-        AssertPath(document, "/api/aigateway/agent/task/{id}/run-attempts", "get");
-        AssertPath(document, "/api/aigateway/agent/task/{id}/runtime-snapshot", "get");
+        AssertPath(document, "/api/aigateway/session/{sessionId}/agent-mode", "put");
+        AssertPath(document, "/api/aigateway/chat-message/list", "get");
+        AssertPath(document, "/api/aigateway/chat", "post");
+        AssertPath(document, "/api/aigateway/approval/pending", "get");
+        AssertPath(document, "/api/aigateway/approval/decision", "post");
         AssertPath(document, "/api/aigateway/tools", "get");
         AssertPath(document, "/api/aigateway/tools/{toolCode}", "get");
         AssertPath(document, "/api/aigateway/tools/{toolCode}", "patch");
-        AssertPath(document, "/api/aigateway/workspace/{code}", "get");
-        AssertPath(document, "/api/aigateway/artifact/{id}/download", "get");
-        AssertPath(document, "/api/aigateway/artifact/{id}/preview", "get");
-        AssertPath(document, "/api/aigateway/artifact/{id}/revision-comment", "post");
-        AssertPath(document, "/api/aigateway/artifact/{id}/regenerate-draft", "post");
-        AssertPath(document, "/api/aigateway/artifact/{id}/submit-final-approval", "post");
         AssertPath(document, "/api/aigateway/cloud-readonly/status", "get");
         AssertPath(document, "/api/identity/login", "post");
         AssertPath(document, "/api/identity/cloud-oidc/status", "get");
@@ -76,6 +55,21 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
 
         AssertMissingPath(document, "/api/aigateway/agent/trial-scenarios");
         AssertMissingPath(document, "/api/aigateway/agent/trial-scenarios/create-task");
+        AssertMissingPath(document, "/api/aigateway/upload");
+        AssertMissingPath(document, "/api/aigateway/upload/list");
+        AssertMissingPath(document, "/api/aigateway/agent/task/plan-stream");
+        AssertMissingPath(document, "/api/aigateway/agent/task/run");
+        AssertMissingPath(document, "/api/aigateway/agent/task/retry");
+        AssertMissingPath(document, "/api/aigateway/agent/task/cancel");
+        AssertMissingPath(document, "/api/aigateway/agent/approval/pending");
+        AssertMissingPath(document, "/api/aigateway/workspace/{code}");
+        AssertMissingPath(document, "/api/aigateway/workspace-settings");
+        AssertMissingPath(document, "/api/aigateway/artifact/{id}/download");
+        AssertMissingPath(document, "/api/aigateway/artifact/{id}/preview");
+        AssertMissingPath(document, "/api/aigateway/approval-policy");
+        AssertMissingPath(document, "/api/aigateway/approval-policy/list");
+        AssertMissingPath(document, "/api/aigateway/session/timeline");
+        AssertMissingPath(document, "/api/aigateway/session/safety-attestation");
         AssertMissingPath(document, "/api/aigateway/agent/task/plan");
         AssertMissingPath(document, "/api/aigateway/agent/cloud-sandbox-controlled-trial/plan");
         AssertMissingPath(document, "/api/aigateway/agent/cloud-production-controlled-pilot/plan");
@@ -141,17 +135,23 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
             "password");
         AssertRequestSchemaProperties(
             document,
-            "/api/aigateway/agent/task/plan-stream",
+            "/api/aigateway/chat",
             "post",
             "sessionId",
-            "goal",
-            "taskType",
-            "modelId",
-            "uploadIds",
-            "knowledgeBaseIds",
-            "dataSourceIds",
-            "requiresDataApproval",
-            "artifactTargets");
+            "message");
+        AssertRequestSchemaProperties(
+            document,
+            "/api/aigateway/session/{sessionId}/agent-mode",
+            "put",
+            "mode",
+            "expectedVersion");
+        AssertRequestSchemaProperties(
+            document,
+            "/api/aigateway/approval/decision",
+            "post",
+            "sessionId",
+            "callId",
+            "decision");
         AssertRequestSchemaProperties(
             document,
             "/api/aigateway/tools/{toolCode}",
@@ -189,7 +189,6 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         foreach (var (path, method) in new[]
                  {
                      ("/api/identity/login", "post"),
-                     ("/api/aigateway/agent/task/run", "post"),
                      ("/api/data-analysis/business-database/query-readonly", "post"),
                      ("/api/mcp/server", "post"),
                      ("/api/mcp/server", "put"),
@@ -198,70 +197,24 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         {
             AssertProblemDetailsResponses(document, path, method);
         }
+    }
 
+    [Theory]
+    [InlineData("/api/aigateway/agent/task/plan-stream")]
+    [InlineData("/api/aigateway/agent/approval/pending")]
+    [InlineData("/api/aigateway/upload")]
+    [InlineData("/api/aigateway/workspace/legacy")]
+    [InlineData("/api/aigateway/artifact/00000000-0000-0000-0000-000000000001/preview")]
+    [InlineData("/api/aigateway/approval-policy")]
+    [InlineData("/api/aigateway/session/timeline")]
+    [InlineData("/api/aigateway/session/safety-attestation")]
+    public async Task LegacyAgentRuntimeRoutes_ShouldReturnNotFound(string route)
+    {
         fixture.HttpClient.DefaultRequestHeaders.Authorization = null;
-        using var loginResponse = await fixture.HttpClient.PostAsJsonAsync(
-            "/api/identity/login",
-            new
-            {
-                username = fixture.BootstrapAdminUserName,
-                password = fixture.BootstrapAdminPassword
-            });
-        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        using var loginDocument = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
-        fixture.HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer",
-            loginDocument.RootElement.GetProperty("token").GetString());
 
-        try
-        {
-            var sessionId = Guid.NewGuid();
-            var validPayload = $$"""
-            {
-              "sessionId": "{{sessionId:D}}",
-              "goal": "生成只读计划草案",
-              "taskType": "ReportGeneration",
-              "pluginSelectionMode": "BuiltInOnly",
-              "selectedPluginIds": [],
-              "capabilitySelectionMode": "InferredFromGoal",
-              "requestedCapabilityCodes": []
-            }
-            """;
-            var invalidSelectionPayloads = new[]
-            {
-                validPayload.Replace(
-                    "\"pluginSelectionMode\": \"BuiltInOnly\"",
-                    "\"pluginSelectionMode\": 1",
-                    StringComparison.Ordinal),
-                validPayload.Replace(
-                    "\"pluginSelectionMode\": \"BuiltInOnly\"",
-                    "\"pluginSelectionMode\": \"Unknown\"",
-                    StringComparison.Ordinal),
-                validPayload.Replace(
-                    "\"capabilitySelectionMode\": \"InferredFromGoal\"",
-                    "\"capabilitySelectionMode\": 1",
-                    StringComparison.Ordinal),
-                validPayload.Replace(
-                    "\"capabilitySelectionMode\": \"InferredFromGoal\"",
-                    "\"capabilitySelectionMode\": \"Unknown\"",
-                    StringComparison.Ordinal)
-            };
+        using var response = await fixture.HttpClient.GetAsync(route);
 
-            foreach (var invalidPayload in invalidSelectionPayloads)
-            {
-                using var invalidResponse = await SendPlanStreamAsync(invalidPayload);
-                var invalidBody = await invalidResponse.Content.ReadAsStringAsync();
-                invalidResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-                invalidResponse.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
-                invalidBody.Should().NotContain("session_not_found");
-                invalidBody.Should().NotContain("plan_draft_started");
-            }
-
-        }
-        finally
-        {
-            fixture.HttpClient.DefaultRequestHeaders.Authorization = null;
-        }
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -300,17 +253,6 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         pathElement.TryGetProperty(method, out _)
             .Should()
             .BeTrue($"OpenAPI should expose {method.ToUpperInvariant()} {path}");
-    }
-
-    private async Task<HttpResponseMessage> SendPlanStreamAsync(string payload)
-    {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            "/api/aigateway/agent/task/plan-stream")
-        {
-            Content = new StringContent(payload, Encoding.UTF8, "application/json")
-        };
-        return await fixture.HttpClient.SendAsync(request);
     }
 
     private static void AssertMissingPath(JsonDocument document, string path)

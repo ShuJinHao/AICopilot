@@ -144,12 +144,25 @@ AICOPILOT_PRIVATE_MODEL_TEMPERATURE=0.2
 `enterprise-ai-aicopilot-data` 挂到 `/var/lib/aicopilot`，并将文件上传和 artifact workspace 根目录固定为
 `/var/lib/aicopilot/storage` 与 `/var/lib/aicopilot/artifact-workspaces`。这两个根目录不允许用 `.env`
 覆盖到共享挂载点外；不要让生产容器依赖 `/app`、容器层或 `LocalApplicationData` 默认路径写运行产物。
+同一持久卷还必须预先包含 `/var/lib/aicopilot/data-protection-keys`，其 owner/group 为容器运行用户
+`app:app`、mode 为 `0700`。HttpApi 使用固定 `ApplicationName=AICopilot.AgentSessions` 在该目录保存
+AgentSession Data Protection key ring；目录缺失、符号链接、owner 不符或 group/other 可写都会在启动时
+fail-fast。首次创建或既有卷升级时，在启动 HttpApi 前执行：
+
+```bash
+docker compose run --rm --no-deps --user root --entrypoint /usr/bin/install \
+  aicopilot-httpapi -d -o app -g app -m 0700 /var/lib/aicopilot/data-protection-keys
+```
+
+当前只允许 `AiGateway__Deployment__Mode=SingleInstance`；不得横向启动多个 HttpApi 实例共享本地 key
+目录。多实例必须先引入独立共享 key provider 并更新本契约，不能用复制目录或临时 key 绕过。
 HttpApi 与 DataWorker 必须挂载同一个 `enterprise-ai-aicopilot-data` 卷：RAG/AiGateway 数据库绑定上传文件在写入前会先产生对账日志，请求侧与 DataWorker 通过同一 commit id 的 PostgreSQL advisory lease 互斥，DataWorker 取得 lease 后再按提交标记决定保留或删除文件。默认每 `300` 秒扫描，只对至少 `10` 分钟前的日志对账，提交标记保留 `30` 天，单轮最多 `100` 条。可通过 `.env.example` 中的 `AICOPILOT_PERSISTENCE_*` 变量调整，但不得将对账延迟设为 `0`，不得让标记保留期短于对账延迟。日志损坏时标记清理会 fail-closed，不得手工批量删除 `.persistence/file-reconciliation`。`ArtifactWorkspace` 的多文件/覆盖/复制一致性另由 `AI-PERSIST-01d` 治理，不在本上传对账器的已完成范围内。
 RagWorker 也必须挂载同一卷；文档删除 consumer 会按 storage path 查询 pending journal 并争用同一 commit lease，不可读或 active 时让消息重试，禁止从容器或 cron 直接删除文件。共享卷只允许这些受信任的 AICopilot 后端容器写入；若要接入其他写入者，必须先增加权限隔离或 dirfd 级路径操作。
 durable local file/journal backend 只支持 Linux 与 macOS；本 compose 的 Linux 容器是标准生产运行方式。Windows 不在该 backend 的支持矩阵内，禁止用缺少父目录 durability barrier 的实现冒充等价支持。
 `base-dotnet-aspnet:10.0-noble` 由 `mirror-base-images.sh` 生成时必须内置
 `libgssapi-krb5-2`、`tzdata`，并预创建 `/app`、`/var/lib/aicopilot/storage`
-和 `/var/lib/aicopilot/artifact-workspaces` 的 `app:app` 权限；应用 Dockerfile
+、`/var/lib/aicopilot/artifact-workspaces` 与 mode `0700` 的
+`/var/lib/aicopilot/data-protection-keys`，全部归属 `app:app`；应用 Dockerfile
 不得再用 `USER root` 或临时 `apt-get` 修运行环境。
 
 Cloud OIDC 首部署管理员收编由 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED` 控制，生产模板和 compose fallback 均默认关闭。只有在已核对目标本地 emergency Admin 与 Cloud `employee_no` 的短时首部署窗口中才能显式设为 `true`，绑定完成后必须立即恢复 `false`。它只允许复用 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME` 指定的本地 Admin；普通同名用户仍拒绝自动绑定，Cloud role 也不会映射为 AI role。

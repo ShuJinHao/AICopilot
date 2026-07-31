@@ -13,6 +13,7 @@ using AICopilot.Services.CrossCutting.Attributes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -29,9 +30,7 @@ public sealed class SecurityBoundaryArchitectureTests
         [
             typeof(AiGatewayController),
             typeof(AiGatewayToolController),
-            typeof(AiGatewaySessionController),
-            typeof(AiGatewayAgentTaskController),
-            typeof(AiGatewayWorkspaceArtifactController)
+            typeof(AiGatewaySessionController)
         ];
 
         foreach (var controller in aiGatewayControllers)
@@ -42,6 +41,35 @@ public sealed class SecurityBoundaryArchitectureTests
         typeof(DataAnalysisController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(McpController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
         typeof(RagController).GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void LegacyAgentRuntimeEndpoints_ShouldRemainWithdrawn()
+    {
+        string[] withdrawnPrefixes =
+        [
+            "agent/task",
+            "agent/approval",
+            "upload",
+            "workspace",
+            "artifact",
+            "approval-policy",
+            "session/safety-attestation",
+            "session/timeline"
+        ];
+        var routeTemplates = typeof(AiGatewayController).Assembly
+            .GetTypes()
+            .Where(type => typeof(ControllerBase).IsAssignableFrom(type))
+            .SelectMany(type => type.GetMethods(BindingFlags.Instance | BindingFlags.Public))
+            .SelectMany(method => method.GetCustomAttributes<HttpMethodAttribute>())
+            .Select(attribute => attribute.Template)
+            .Where(template => !string.IsNullOrWhiteSpace(template))
+            .Cast<string>()
+            .ToArray();
+
+        routeTemplates.Should().NotContain(template => withdrawnPrefixes.Any(prefix =>
+            template.Equals(prefix, StringComparison.OrdinalIgnoreCase) ||
+            template.StartsWith($"{prefix}/", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
@@ -104,8 +132,8 @@ public sealed class SecurityBoundaryArchitectureTests
     [Fact]
     public void MainChatToolCatalog_ShouldKeepTextToSqlBehindBusinessQuery()
     {
-        var isPermitted = typeof(MainChatToolCatalog).GetMethod(
-            "IsPermittedMainChatTool",
+        var isPermitted = typeof(MainChatToolGate).GetMethod(
+            "IsSafeForMainChat",
             BindingFlags.NonPublic | BindingFlags.Static);
         var directTextToSql = new AICopilot.SharedKernel.Ai.AiToolDefinition
         {

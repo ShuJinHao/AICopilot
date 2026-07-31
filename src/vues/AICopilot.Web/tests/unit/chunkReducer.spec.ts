@@ -36,6 +36,53 @@ describe('chunkReducer', () => {
     expect(message.chunks[0]?.content).toBe('hello world')
   })
 
+  it('keeps model-authored widget JSON as ordinary text', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn(),
+    }
+    const content = JSON.stringify({ type: 'Chart', data: [{ secret: 'model-authored' }] })
+
+    processChunk(
+      message,
+      { source: 'assistant', type: ChunkType.Text, content },
+      callbacks,
+    )
+
+    expect(message.chunks).toContainEqual(
+      expect.objectContaining({ type: ChunkType.Text, content }),
+    )
+    expect(message.chunks).not.toContainEqual(
+      expect.objectContaining({ type: ChunkType.Widget }),
+    )
+  })
+
+  it('renders only an explicit server widget chunk as a widget', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn(),
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'BusinessQuery',
+        type: ChunkType.Widget,
+        content: JSON.stringify({ type: 'Chart', data: [{ label: '设备 A', value: 3 }] }),
+      },
+      callbacks,
+    )
+
+    expect(message.chunks).toContainEqual(
+      expect.objectContaining({
+        type: ChunkType.Widget,
+        widget: expect.objectContaining({ type: 'Chart' }),
+      }),
+    )
+  })
+
   it('matches function results back to the original function call', () => {
     const message = createMessage()
     const callbacks = {

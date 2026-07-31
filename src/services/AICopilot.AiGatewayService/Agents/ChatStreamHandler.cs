@@ -136,6 +136,7 @@ public class ChatStreamHandler(
             IRuntimeAgentSession? harnessSession = null;
             IHarnessRuntimeChatAgent? harnessAgent = null;
             AiToolDefinition[] tools = [];
+            var trustedRenderChunks = new TrustedRenderChunkBuffer();
             Exception? failure = null;
             ChatChunk? setupError = null;
 
@@ -151,6 +152,7 @@ public class ChatStreamHandler(
                 tools = await mainChatToolCatalog.BuildAsync(
                     runtimeSession,
                     request.Message,
+                    trustedRenderChunks,
                     ct);
                 var checkpointSink = new AgentSessionCheckpointSink(
                     agentSessionStateStore,
@@ -277,6 +279,18 @@ public class ChatStreamHandler(
                         assistantRenderChunks.Add(chunk);
                         yield return chunk;
                     }
+
+                    foreach (var trustedChunk in trustedRenderChunks.Drain())
+                    {
+                        assistantRenderChunks.Add(trustedChunk);
+                        yield return trustedChunk;
+                    }
+                }
+
+                foreach (var trustedChunk in trustedRenderChunks.Drain())
+                {
+                    assistantRenderChunks.Add(trustedChunk);
+                    yield return trustedChunk;
                 }
 
                 AgentSessionStateSnapshot? completedState = null;

@@ -1,7 +1,4 @@
-using System.ComponentModel;
 using AICopilot.AgentPlugin;
-using AICopilot.AiGatewayService.Approvals;
-using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Workflows;
 using AICopilot.AiGatewayService.Workflows.Executors;
 using AICopilot.Services.Contracts;
@@ -11,12 +8,15 @@ namespace AICopilot.AiGatewayService.Agents;
 
 public sealed class MainChatToolCatalog(
     IAgentPluginCatalog pluginCatalog,
-    ApprovalToolResolver approvalToolResolver,
-    SemanticAnalysisRunner semanticAnalysisRunner)
+    MainChatToolGate toolGate,
+    SemanticAnalysisRunner semanticAnalysisRunner,
+    IKnowledgeBaseReadService knowledgeBaseReadService,
+    IKnowledgeRetrievalService knowledgeRetrievalService)
 {
     public async Task<AiToolDefinition[]> BuildAsync(
         SessionRuntimeSnapshot session,
         string userMessage,
+        TrustedRenderChunkBuffer renderChunkBuffer,
         CancellationToken cancellationToken)
     {
         BusinessQueryContext? confirmedQuery = null;
@@ -28,119 +28,42 @@ public sealed class MainChatToolCatalog(
             confirmedQuery = restoredConfirmation;
         }
 
-        var pluginNames = pluginCatalog.GetAllPlugin()
+        var pluginTools = pluginCatalog.GetAllPlugin()
             .Where(plugin => plugin.ChatExposureMode.CanExposeInChat())
-            .Select(plugin => plugin.Name)
+            .SelectMany(plugin => pluginCatalog.GetPluginTools(plugin.Name))
             .ToArray();
-        var pluginTools = await approvalToolResolver.GetToolsForPluginsAsync(
-            pluginNames,
-            cancellationToken);
-        var permittedPluginTools = pluginTools
-            .Where(IsPermittedMainChatTool)
+        var permittedTools = (await toolGate.FilterRegisteredAsync(
+                pluginTools,
+                cancellationToken))
             .ToList();
-        permittedPluginTools.Add(CreateBusinessQueryTool(
-            new MainChatBusinessQueryTool(
-                semanticAnalysisRunner,
-                session,
-                confirmedQuery)));
-        return permittedPluginTools.ToArray();
-    }
 
-    private static bool IsPermittedMainChatTool(AiToolDefinition tool)
-    {
-        if (tool.RiskLevel == AiToolRiskLevel.Blocked ||
-            tool.ExternalSystemType == AiToolExternalSystemType.Unknown ||
-            tool.CapabilityKind == AiToolCapabilityKind.SideEffecting ||
-            string.Equals(
-                tool.RequiredPermission,
-                "DataSource.TextToSql",
-                StringComparison.Ordinal))
+        if (await toolGate.CanExposeFixedAsync(cancellationToken))
         {
-            return false;
+            permittedTools.Add(MainChatBusinessQueryTool.CreateDefinition(
+                new MainChatBusinessQueryTool(
+                    semanticAnalysisRunner,
+                    session,
+                    confirmedQuery,
+                    renderChunkBuffer)));
         }
 
-        if (tool.TargetType == AiToolTargetType.McpServer)
+        if (await toolGate.CanExposeFixedAsync(
+                cancellationToken,
+                "Rag.SearchKnowledgeBase"))
         {
-            return AiToolSafetyPolicy.EvaluateConfiguredMcp(tool).IsAllowed;
-        }
-
-        return tool.CapabilityKind is
-            AiToolCapabilityKind.ReadOnlyQuery or
-            AiToolCapabilityKind.Diagnostics or
-            AiToolCapabilityKind.LocalSuggestion;
-    }
-
-    private static AiToolDefinition CreateBusinessQueryTool(
-        MainChatBusinessQueryTool target)
-    {
-        var method = typeof(MainChatBusinessQueryTool).GetMethod(
-                         nameof(MainChatBusinessQueryTool.BusinessQuery))
-                     ?? throw new InvalidOperationException(
-                         "BusinessQuery tool method is missing.");
-        var definition = AiToolDefinition.FromMethod(method, target);
-        return new AiToolDefinition
-        {
-            Name = "BusinessQuery",
-            ToolName = "BusinessQuery",
-            Description = definition.Description,
-            Method = definition.Method,
-            Target = definition.Target,
-            ExternalSystemType = AiToolExternalSystemType.CloudReadOnly,
-            CapabilityKind = AiToolCapabilityKind.ReadOnlyQuery,
-            RiskLevel = AiToolRiskLevel.Low,
-            ReadOnlyDeclared = true,
-            RequiredPermission = "AiGateway.Chat",
-            AuditLevel = "Standard",
-            DataBoundary = "CloudReadOnly",
-            SchemaVersion = 1
-        };
-    }
-}
-
-internal sealed class MainChatBusinessQueryTool(
-    SemanticAnalysisRunner semanticAnalysisRunner,
-    SessionRuntimeSnapshot session,
-    BusinessQueryContext? confirmedQuery)
-{
-    [Description(
-        "Query authorized manufacturing business data. The server always tries the typed BusinessQuery provider first and permits only same-source governed Text-to-SQL fallback for Unsupported or Unavailable outcomes. Text-to-SQL is not a model-visible tool.")]
-    public async Task<object> BusinessQuery(
-        string semanticIntent,
-        string question,
-        CancellationToken cancellationToken)
-    {
-        var intent = new IntentResult
-        {
-            Intent = confirmedQuery?.SemanticPlan?.Intent ?? semanticIntent,
-            Query = confirmedQuery?.Question ?? question,
-            Confidence = 1,
-            BusinessDataSourceExplicitlySelected = confirmedQuery?.SourceExplicitlySelected == true,
-            ConfirmedBusinessQueryContext =
-                confirmedQuery is null ? null : BusinessQueryConfirmation.Complete,
-            ConfirmedBusinessQuery = confirmedQuery
-        };
-        var result = await semanticAnalysisRunner.RunAsync(
-            intent,
-            sink: null,
-            session,
-            cancellationToken);
-        return result.Status switch
-        {
-            BranchExecutionStatus.Succeeded or BranchExecutionStatus.Empty => new
+            var authorizedKnowledgeBases = await knowledgeBaseReadService.ListAsync(
+                cancellationToken);
+            if (authorizedKnowledgeBases.Count > 0)
             {
-                status = result.Status.ToString().ToLowerInvariant(),
-                context = result.Evidence?.SafeContext,
-                provider = result.Evidence?.Provider,
-                sourceMode = result.Evidence?.SourceMode,
-                isSimulation = result.Evidence?.IsSimulation
-            },
-            _ => new
-            {
-                status = "failed",
-                code = result.FailureCode,
-                message = result.SafeMessage
+                permittedTools.Add(MainChatKnowledgeQueryTool.CreateDefinition(
+                    new MainChatKnowledgeQueryTool(
+                        knowledgeRetrievalService,
+                        authorizedKnowledgeBases),
+                    authorizedKnowledgeBases));
             }
-        };
+        }
+
+        return permittedTools.ToArray();
     }
 }
 

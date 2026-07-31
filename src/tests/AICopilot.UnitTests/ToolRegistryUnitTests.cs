@@ -97,7 +97,7 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
     [Fact]
     public void BuiltInToolCatalog_ShouldOwnExactStrictInputSchemasForEveryRuntimeTool()
     {
-        BuiltInToolRegistrations.CurrentCatalogVersion.Should().Be(19);
+        BuiltInToolRegistrations.CurrentCatalogVersion.Should().Be(20);
         BuiltInToolRegistrations.CurrentSchemaVersion.Should().Be(3);
 
         foreach (var tool in BuiltInToolRegistrations.AgentRuntimeTools)
@@ -107,7 +107,17 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
             tool.SchemaVersion.Should().Be(BuiltInToolRegistrations.CurrentSchemaVersion);
             tool.CatalogVersion.Should().Be(BuiltInToolRegistrations.CurrentCatalogVersion);
 
-            if (tool.ProviderType != ToolProviderType.MockMcp)
+            if (tool.ToolCode ==
+                "plugin__diagnosticadvisorplugin__generatediagnosticchecklist")
+            {
+                ToolInputSchemaValidator.ValidateAndParse(
+                        """{"issueSummary":"motor overload"}""",
+                        tool.InputSchemaJson)
+                    .IsValid.Should().BeTrue(tool.ToolCode);
+                ToolInputSchemaValidator.ValidateAndParse("{}", tool.InputSchemaJson)
+                    .IsValid.Should().BeFalse(tool.ToolCode);
+            }
+            else if (tool.ProviderType != ToolProviderType.MockMcp)
             {
                 ToolInputSchemaValidator.ValidateAndParse("{}", tool.InputSchemaJson).IsValid
                     .Should().BeTrue(tool.ToolCode);
@@ -1257,6 +1267,11 @@ public sealed class ToolRegistryUnitTests : ToolRegistryGovernanceTestBase
                 previewOnly = true,
                 externalSystem = "mock-ticket-system"
             }),
+            "plugin__diagnosticadvisorplugin__generatediagnosticchecklist" => new
+            {
+                status = "advisory",
+                checklist = new[] { "Inspect the device logs." }
+            },
             _ => throw new InvalidOperationException($"No declared output sample for {toolCode}.")
         };
 

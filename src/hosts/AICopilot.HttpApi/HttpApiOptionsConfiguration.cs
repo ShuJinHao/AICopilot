@@ -15,6 +15,7 @@ internal static class HttpApiOptionsConfiguration
     public static HttpApiValidatedOptions ConfigureAndValidate(IHostApplicationBuilder builder)
     {
         ApplyIntranetHttpOidcEnvironmentOverride(builder.Configuration);
+        AgentSessionStateDataProtectionDirectoryValidator.EnsureValid(builder);
 
         var configurationSection = builder.Configuration.GetSection("JwtSettings");
         var jwtSettings = configurationSection.Get<JwtSettings>();

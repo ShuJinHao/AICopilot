@@ -78,13 +78,14 @@ public sealed class AiRuntimeAdapterTests
     public async Task ToolSurfaceGuard_ShouldExposeOnlyHarnessPlanningToolsInPlanMode()
     {
         var inner = new CapturingChatClient();
-        var policy = new HarnessToolSurfacePolicy(["BusinessQuery"]);
+        var policy = new HarnessToolSurfacePolicy(["BusinessQuery", "KnowledgeQuery"]);
         var guarded = new ToolSurfaceGuardChatClient(inner, policy);
         var options = RuntimeToolAdapter.ToChatOptions(new AiChatOptions
         {
             Tools =
             [
                 CreateTool("BusinessQuery"),
+                CreateTool("KnowledgeQuery"),
                 CreateTool("mode_get"),
                 CreateTool("mode_set"),
                 CreateTool("todos_add")
@@ -102,7 +103,8 @@ public sealed class AiRuntimeAdapterTests
     public async Task ToolSurfaceGuard_ShouldExposeAuthorizedBusinessToolsOnlyInExecuteMode()
     {
         var inner = new CapturingChatClient();
-        var policy = new HarnessToolSurfacePolicy(["BusinessQuery", "shell_execute"]);
+        var policy = new HarnessToolSurfacePolicy(
+            ["BusinessQuery", "KnowledgeQuery", "shell_execute"]);
         policy.SetMode(RuntimeAgentMode.Execute);
         var guarded = new ToolSurfaceGuardChatClient(inner, policy);
         var options = RuntimeToolAdapter.ToChatOptions(new AiChatOptions
@@ -110,6 +112,7 @@ public sealed class AiRuntimeAdapterTests
             Tools =
             [
                 CreateTool("BusinessQuery"),
+                CreateTool("KnowledgeQuery"),
                 CreateTool("mode_get"),
                 CreateTool("mode_set"),
                 CreateTool("shell_execute")
@@ -120,7 +123,8 @@ public sealed class AiRuntimeAdapterTests
             [new ChatMessage(ChatRole.User, "execute")],
             options);
 
-        inner.LastToolNames.Should().BeEquivalentTo(["BusinessQuery", "mode_get"]);
+        inner.LastToolNames.Should().BeEquivalentTo(
+            ["BusinessQuery", "KnowledgeQuery", "mode_get"]);
     }
 
     [Fact]

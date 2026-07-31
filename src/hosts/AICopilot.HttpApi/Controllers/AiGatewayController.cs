@@ -1,4 +1,3 @@
-using AICopilot.AiGatewayService.ApprovalPolicies;
 using AICopilot.AiGatewayService.Commands.ConversationTemplates;
 using AICopilot.AiGatewayService.Commands.LanguageModels;
 using AICopilot.AiGatewayService.Queries.ConversationTemplates;
@@ -160,33 +159,4 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(command));
     }
 
-    [HttpPost("approval-policy")]
-    public async Task<IActionResult> CreateApprovalPolicy(CreateApprovalPolicyCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpPut("approval-policy")]
-    public async Task<IActionResult> UpdateApprovalPolicy(UpdateApprovalPolicyCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpDelete("approval-policy")]
-    public async Task<IActionResult> DeleteApprovalPolicy(DeleteApprovalPolicyCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpGet("approval-policy")]
-    public async Task<IActionResult> GetApprovalPolicy([FromQuery] GetApprovalPolicyQuery query)
-    {
-        return ReturnResult(await Sender.Send(query));
-    }
-
-    [HttpGet("approval-policy/list")]
-    public async Task<IActionResult> GetListApprovalPolicies()
-    {
-        return ReturnResult(await Sender.Send(new GetListApprovalPoliciesQuery()));
-    }
 }

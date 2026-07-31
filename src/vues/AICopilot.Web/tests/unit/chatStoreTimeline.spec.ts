@@ -238,6 +238,8 @@ describe('chatStore timeline', () => {
     })
     expect(store.currentMessages.map((message) => message.sequence)).toEqual([1, 2])
     expect(store.hasMoreHistoryBefore).toBe(false)
+    expect(chatServiceMock.getAgentTasksBySession).not.toHaveBeenCalled()
+    expect(chatServiceMock.getTimeline).not.toHaveBeenCalled()
   })
 
   it('clears timeline events when the timeline endpoint fails', async () => {

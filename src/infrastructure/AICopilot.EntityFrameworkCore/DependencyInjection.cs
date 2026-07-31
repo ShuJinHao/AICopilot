@@ -24,7 +24,6 @@ using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Repository;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -34,7 +33,7 @@ public static class DependencyInjection
 {
     public static void AddEfCore(this IHostApplicationBuilder builder)
     {
-        builder.Services.AddDataProtection();
+        AgentSessionStateDataProtection.Configure(builder.Services, builder.Configuration);
         SecretStringEncryptor.EnsureConfigured();
         builder.AddNpgsqlDbContext<AiCopilotDbContext>(
             "ai-copilot",

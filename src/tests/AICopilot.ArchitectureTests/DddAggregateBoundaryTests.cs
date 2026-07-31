@@ -85,6 +85,7 @@ public sealed class DddAggregateBoundaryTests
             ["MessageEvent"] = "Projection",
             ["AgentTaskRunQueueItem"] = "Queue",
             ["AgentTaskRunAttempt"] = "RuntimeRecord",
+            ["AgentSessionState"] = "RuntimeRecord",
             ["AgentNodeRun"] = "RuntimeRecord",
             ["ModelQuotaReservation"] = "RuntimeRecord",
             ["ArtifactFileSetOperation"] = "RuntimeRecord",

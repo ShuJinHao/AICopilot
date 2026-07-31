@@ -28,7 +28,7 @@ public sealed record ToolRegistrationSeed(
 
 public static class BuiltInToolRegistrations
 {
-    public const int CurrentCatalogVersion = 19;
+    public const int CurrentCatalogVersion = 20;
     public const int CurrentSchemaVersion = 3;
     public const string FinalizationCheckpointToolCode = "finalize_artifacts";
 
@@ -97,7 +97,8 @@ public static class BuiltInToolRegistrations
         MockMcp("mock_mcp_health_check", "Mock MCP 健康检查", "Validate the in-process Mock MCP provider is available.", ToolDataBoundary.NoData, AiToolRiskLevel.Low, requiresApproval: false, inputSchema: MockHealthInputSchema),
         MockMcp("mock_mcp_kpi_formula_lookup", "Mock MCP KPI 公式查询", "Return deterministic KPI formula notes for capacity, quality, and inventory analysis.", ToolDataBoundary.RagContextOnly, AiToolRiskLevel.Low, requiresApproval: false, inputSchema: MockKpiInputSchema),
         MockMcp("mock_mcp_artifact_quality_check", "Mock MCP 产物质量检查", "Check that draft artifacts keep SimulationBusiness source markers.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.Medium, requiresApproval: false, inputSchema: MockArtifactInputSchema),
-        MockMcp("mock_mcp_external_ticket_preview", "Mock MCP 外部工单预览", "Create an external ticket preview without sending it to any real external system.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.High, requiresApproval: true, inputSchema: MockTicketInputSchema)
+        MockMcp("mock_mcp_external_ticket_preview", "Mock MCP 外部工单预览", "Create an external ticket preview without sending it to any real external system.", ToolDataBoundary.ArtifactDraftOnly, AiToolRiskLevel.High, requiresApproval: true, inputSchema: MockTicketInputSchema),
+        DiagnosticAdvisor()
     ];
 
     public static IReadOnlyCollection<string> ObsoleteAgentRuntimeToolCodes { get; } =
@@ -272,6 +273,33 @@ public static class BuiltInToolRegistrations
             SchemaVersion: CurrentSchemaVersion,
             CatalogVersion: CurrentCatalogVersion,
             ApprovalPolicy: requiresApproval ? "ToolApproval" : "None");
+    }
+
+    private static ToolRegistrationSeed DiagnosticAdvisor()
+    {
+        return new ToolRegistrationSeed(
+            "plugin__diagnosticadvisorplugin__generatediagnosticchecklist",
+            "设备诊断清单",
+            "Generate a read-only diagnostic checklist for human review without executing control actions.",
+            ToolProviderType.BuiltIn,
+            ToolRegistrationTargetType.Plugin,
+            "DiagnosticAdvisorPlugin",
+            """{"type":"object","properties":{"issueSummary":{"type":"string"}},"required":["issueSummary"],"additionalProperties":false}""",
+            """{"type":"object","properties":{"status":{"type":"string","enum":["advisory"]},"checklist":{"type":"array","items":{"type":"string"}}},"required":["status","checklist"],"additionalProperties":false}""",
+            AiToolRiskLevel.RequiresApproval,
+            "AiGateway.Chat",
+            RequiresApproval: true,
+            IsEnabled: true,
+            TimeoutSeconds: 30,
+            ToolAuditLevel.Standard,
+            "Diagnostics",
+            BusinessDomains: ["Production", "Maintenance"],
+            ToolDataBoundary.NoData,
+            IsVisibleToPlanner: false,
+            IsExecutableByAgent: true,
+            SchemaVersion: CurrentSchemaVersion,
+            CatalogVersion: CurrentCatalogVersion,
+            ApprovalPolicy: "ToolApproval");
     }
 
     private static string ResolveOutputSchema(string code)

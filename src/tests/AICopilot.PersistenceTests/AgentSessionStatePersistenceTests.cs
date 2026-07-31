@@ -6,12 +6,62 @@ using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EntityFrameworkCore.Repository;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace AICopilot.PersistenceTests;
 
 [Collection(PostgresPersistenceTestCollection.Name)]
 public sealed class AgentSessionStatePersistenceTests(PostgresPersistenceFixture fixture)
 {
+    [Fact]
+    public async Task PersistentKeyRing_ShouldRestoreStateAcrossIndependentProviders()
+    {
+        await using var database = await CreateMigratedDatabaseAsync();
+        var ownerId = Guid.NewGuid();
+        var sessionId = await SeedSessionAsync(database.ConnectionString, ownerId);
+        var keyDirectoryPath = Path.Combine(
+            Path.GetTempPath(),
+            $"aicopilot-agent-session-keys-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(keyDirectoryPath);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                keyDirectoryPath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        const string serialized =
+            """{"mode":"execute","restartMarker":"independent-provider"}""";
+        try
+        {
+            await using (var firstServices = CreatePersistentDataProtectionServices(keyDirectoryPath))
+            {
+                var firstProvider = firstServices.GetRequiredService<IDataProtectionProvider>();
+                await using var write = CreateContext(database.ConnectionString);
+                var store = new ProtectedAgentSessionStateStore(write, firstProvider);
+                store.AddNew(sessionId, ownerId, "tenant-restart", serialized);
+                await write.SaveChangesAsync();
+            }
+
+            Directory.EnumerateFiles(keyDirectoryPath, "*.xml")
+                .Should().NotBeEmpty("the first provider must persist a key ring before restart");
+
+            await using (var secondServices = CreatePersistentDataProtectionServices(keyDirectoryPath))
+            {
+                var secondProvider = secondServices.GetRequiredService<IDataProtectionProvider>();
+                await using var read = CreateContext(database.ConnectionString);
+                var restored = await new ProtectedAgentSessionStateStore(read, secondProvider)
+                    .LoadOwnedAsync(sessionId, ownerId, "tenant-restart");
+
+                restored.SerializedSessionState.Should().Be(serialized);
+            }
+        }
+        finally
+        {
+            Directory.Delete(keyDirectoryPath, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ProtectedState_ShouldRoundTripWithoutPersistingPlaintext()
     {
@@ -258,5 +308,20 @@ public sealed class AgentSessionStatePersistenceTests(PostgresPersistenceFixture
         var store = new ProtectedAgentSessionStateStore(context, provider);
         store.AddNew(sessionId, ownerId, null, """{"mode":"plan"}""");
         await context.SaveChangesAsync();
+    }
+
+    private static ServiceProvider CreatePersistentDataProtectionServices(
+        string keyDirectoryPath)
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{AgentSessionStateDataProtection.SectionName}:{AgentSessionStateDataProtection.KeyPathConfigurationName}"] =
+                    keyDirectoryPath
+            })
+            .Build();
+        AgentSessionStateDataProtection.Configure(services, configuration);
+        return services.BuildServiceProvider();
     }
 }

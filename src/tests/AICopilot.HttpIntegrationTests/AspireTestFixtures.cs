@@ -11,6 +11,17 @@ public sealed class CoreAICopilotAppFixture : AICopilotAppFixture
     protected override bool EnableRagWorker => false;
 
     protected override bool EnableDataWorker => true;
+
+    protected override void ConfigureAdditionalEnvironment()
+    {
+        SetEnvironmentVariable("CloudAiRead__Enabled", "true");
+        SetEnvironmentVariable(
+            "CloudAiRead__BaseUrl",
+            FakeAiBaseUri.ToString().TrimEnd('/'));
+        SetEnvironmentVariable(
+            "CloudAiRead__ServiceAccountToken",
+            "test-cloud-ai-read-token");
+    }
 }
 
 public sealed class CloudOidcHttpAppFixture : AICopilotAppFixture

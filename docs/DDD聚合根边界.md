@@ -55,7 +55,7 @@ MediatR handler 直接注入 3 个及以上 repository/store/file store/query se
 - `Projection`：由权威状态派生的查询投影，例如 session timeline。
 - `Queue`：后台执行队列和入队记录。
 - `Audit`：审计、执行结果或 outbox 记录。
-- `RuntimeRecord`：运行过程记录，不直接承载业务不变量。
+- `RuntimeRecord`：运行过程记录，不直接承载业务不变量；当前包括受 Harness AgentSession 所有权、TTL、版本与中断规则约束的持久化 `AgentSessionState`。
 - `WorkerState`：worker 心跳或健康状态。
 - `IdentityRecord`：身份基础设施记录。
 

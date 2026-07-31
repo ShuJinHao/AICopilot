@@ -15,6 +15,10 @@ namespace AICopilot.AspireIntegrationTestKit;
 public sealed class FakeAiProviderHost : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Guid CloudDeviceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid CloudProcessId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid CloudLogId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private const string CloudAiReadToken = "test-cloud-ai-read-token";
 
     private WebApplication? _app;
 
@@ -43,6 +47,8 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         app.MapPost("/chat/completions", HandleChatCompletionsAsync);
         app.MapPost("/v1/embeddings", HandleEmbeddingsAsync);
         app.MapPost("/embeddings", HandleEmbeddingsAsync);
+        app.MapGet("/api/v1/ai/read/devices", HandleCloudDevices);
+        app.MapGet("/api/v1/ai/read/device-logs", HandleCloudDeviceLogs);
 
         await app.StartAsync(cancellationToken);
 
@@ -80,7 +86,12 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
 
             if (hasToolResult)
             {
-                await WriteTextStreamAsync(context, "已批准并执行工具。");
+                var toolResultText = TryExtractBusinessQueryConfirmation(
+                    messageTexts,
+                    out var confirmation)
+                    ? $"请回复“{confirmation}”以确认本次查询范围。"
+                    : "已批准并执行工具。";
+                await WriteTextStreamAsync(context, toolResultText);
                 return;
             }
 
@@ -100,6 +111,24 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             {
                 var toolName = ExtractDiagnosticToolName(root) ?? "GenerateDiagnosticChecklist";
                 await WriteToolCallStreamAsync(context, toolName);
+                return;
+            }
+
+            if (ShouldTriggerBusinessQuery(latestUserText) &&
+                ExtractToolName(root, "BusinessQuery") is { } businessQueryToolName)
+            {
+                await WriteToolCallStreamAsync(
+                    context,
+                    businessQueryToolName,
+                    new
+                    {
+                        semanticIntent = "Analysis.DeviceLog.Latest",
+                        question = latestUserText.StartsWith(
+                            "确认查询 ",
+                            StringComparison.Ordinal)
+                            ? latestUserText
+                            : """{"queryText":"查看设备 DEV-001 最新日志","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"}],"sort":{"field":"occurredAt","direction":"desc"},"limit":10}"""
+                    });
                 return;
             }
 
@@ -172,6 +201,90 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         await context.Response.WriteAsync(JsonSerializer.Serialize(payload, JsonOptions));
     }
 
+    private static IResult HandleCloudDevices(HttpContext context)
+    {
+        if (!HasCloudAiReadAuthorization(context))
+        {
+            return Results.Unauthorized();
+        }
+
+        var requestedCode = context.Request.Query["deviceCode"].ToString();
+        var items = string.IsNullOrWhiteSpace(requestedCode) ||
+                    string.Equals(requestedCode, "DEV-001", StringComparison.OrdinalIgnoreCase)
+            ? new object[]
+            {
+                new
+                {
+                    id = CloudDeviceId,
+                    deviceCode = "DEV-001",
+                    deviceName = "Cutter A",
+                    processId = CloudProcessId
+                }
+            }
+            : [];
+        return Results.Json(CreateCloudAiReadEnvelope(
+            items,
+            "devices",
+            $"deviceCode={requestedCode}"));
+    }
+
+    private static IResult HandleCloudDeviceLogs(HttpContext context)
+    {
+        if (!HasCloudAiReadAuthorization(context))
+        {
+            return Results.Unauthorized();
+        }
+
+        var requestedDeviceId = context.Request.Query["deviceId"].ToString();
+        var items = string.Equals(
+                requestedDeviceId,
+                CloudDeviceId.ToString("D"),
+                StringComparison.OrdinalIgnoreCase)
+            ? new object[]
+            {
+                new
+                {
+                    id = CloudLogId,
+                    deviceId = CloudDeviceId,
+                    deviceName = "Cutter A",
+                    level = "WARN",
+                    message = "Temperature high",
+                    logTime = "2026-07-31T08:00:00Z",
+                    receivedAt = "2026-07-31T08:00:01Z"
+                }
+            }
+            : [];
+        return Results.Json(CreateCloudAiReadEnvelope(
+            items,
+            "device_logs",
+            $"deviceId={requestedDeviceId}"));
+    }
+
+    private static bool HasCloudAiReadAuthorization(HttpContext context)
+    {
+        return string.Equals(
+            context.Request.Headers.Authorization.ToString(),
+            $"Bearer {CloudAiReadToken}",
+            StringComparison.Ordinal);
+    }
+
+    private static object CreateCloudAiReadEnvelope(
+        IReadOnlyCollection<object> items,
+        string source,
+        string queryScope)
+    {
+        return new
+        {
+            items,
+            asOfUtc = "2026-07-31T08:00:02Z",
+            source,
+            queryScope,
+            rowCount = items.Count,
+            truncated = false,
+            nextCursor = (string?)null
+        };
+    }
+
     private static async Task WriteTextStreamAsync(HttpContext context, string text)
     {
         var chunks = text.Chunk(Math.Max(1, Math.Min(12, text.Length))).Select(chars => new string(chars)).ToArray();
@@ -221,10 +334,13 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         await WriteDoneAsync(context);
     }
 
-    private static async Task WriteToolCallStreamAsync(HttpContext context, string toolName)
+    private static async Task WriteToolCallStreamAsync(
+        HttpContext context,
+        string toolName,
+        object? arguments = null)
     {
         var callId = $"call_{Guid.NewGuid():N}";
-        var argumentsJson = JsonSerializer.Serialize(new { });
+        var argumentsJson = JsonSerializer.Serialize(arguments ?? new { });
 
         await WriteSseAsync(context, new
         {
@@ -301,6 +417,36 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         return latestUserText.Contains("diagnostic checklist", StringComparison.OrdinalIgnoreCase)
                || latestUserText.Contains("诊断清单", StringComparison.OrdinalIgnoreCase)
                || latestUserText.Contains("排查清单", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldTriggerBusinessQuery(string latestUserText)
+    {
+        return latestUserText.Contains("inline business widget", StringComparison.OrdinalIgnoreCase)
+               || Regex.IsMatch(
+                   latestUserText,
+                   @"^确认查询 [0-9a-f]{32}$",
+                   RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool TryExtractBusinessQueryConfirmation(
+        IEnumerable<string> messageTexts,
+        out string confirmation)
+    {
+        foreach (var messageText in messageTexts.Reverse())
+        {
+            var match = Regex.Match(
+                messageText,
+                @"确认查询 [0-9a-f]{32}",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (match.Success)
+            {
+                confirmation = match.Value;
+                return true;
+            }
+        }
+
+        confirmation = string.Empty;
+        return false;
     }
 
     private static bool ShouldBlockControlRequest(string latestUserText)
@@ -2218,12 +2364,53 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             return false;
         }
 
-        return messagesElement.EnumerateArray().Any(message =>
-            message.TryGetProperty("role", out var roleElement)
-            && roleElement.GetString() == "tool");
+        var messages = messagesElement.EnumerateArray().ToArray();
+        for (var index = messages.Length - 1; index >= 0; index--)
+        {
+            var message = messages[index];
+            if (!message.TryGetProperty("role", out var roleElement))
+            {
+                continue;
+            }
+
+            var role = roleElement.GetString();
+            if (role == "tool")
+            {
+                return true;
+            }
+
+            if (role != "user" ||
+                !message.TryGetProperty("content", out var contentElement))
+            {
+                continue;
+            }
+
+            var text = contentElement.ValueKind switch
+            {
+                JsonValueKind.String => contentElement.GetString() ?? string.Empty,
+                JsonValueKind.Array => string.Join(
+                    " ",
+                    contentElement.EnumerateArray()
+                        .Where(part => part.ValueKind == JsonValueKind.Object &&
+                                       part.TryGetProperty("text", out _))
+                        .Select(part => part.GetProperty("text").GetString() ?? string.Empty)),
+                _ => string.Empty
+            };
+            if (!IsHarnessContextMessage(text))
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private static string? ExtractDiagnosticToolName(JsonElement root)
+    {
+        return ExtractToolName(root, "GenerateDiagnosticChecklist");
+    }
+
+    private static string? ExtractToolName(JsonElement root, string expectedName)
     {
         if (!root.TryGetProperty("tools", out var toolsElement) || toolsElement.ValueKind != JsonValueKind.Array)
         {
@@ -2248,7 +2435,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             }
 
             var name = nameElement.GetString();
-            if (name != null && name.Contains("GenerateDiagnosticChecklist", StringComparison.OrdinalIgnoreCase))
+            if (name != null && name.Contains(expectedName, StringComparison.OrdinalIgnoreCase))
             {
                 return name;
             }

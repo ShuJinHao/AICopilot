@@ -467,8 +467,6 @@ export const useChatStore = defineStore('chat', () => {
       } else {
         approvalStore.reconcilePendingApprovalCards(sessionId, [])
       }
-      await loadAgentTasks(sessionId)
-      await loadTimeline(sessionId)
       return
     }
 
@@ -482,8 +480,6 @@ export const useChatStore = defineStore('chat', () => {
       } else {
         approvalStore.reconcilePendingApprovalCards(sessionId, [])
       }
-      await loadAgentTasks(sessionId)
-      await loadTimeline(sessionId)
     } finally {
       sessionStore.isLoadingHistory = false
     }

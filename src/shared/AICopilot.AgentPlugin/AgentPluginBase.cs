@@ -22,7 +22,7 @@ public abstract class AgentPluginBase : IAgentPlugin
             .Where(method => method.GetCustomAttribute<DescriptionAttribute>() != null);
     }
 
-    public IEnumerable<AiToolDefinition>? GetTools()
+    public virtual IEnumerable<AiToolDefinition>? GetTools()
     {
         return GetToolMethods()
             .Select(method => AiToolDefinition.FromMethod(method, this));

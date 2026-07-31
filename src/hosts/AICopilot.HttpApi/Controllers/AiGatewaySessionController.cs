@@ -42,12 +42,6 @@ public class AiGatewaySessionController(ISender sender) : ApiControllerBase(send
         return ReturnResult(await Sender.Send(new GetListSessionsQuery()));
     }
 
-    [HttpPut("session/safety-attestation")]
-    public async Task<IActionResult> UpdateSessionSafetyAttestation(UpdateSessionSafetyAttestationCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
     [HttpPut("session/{sessionId:guid}/agent-mode")]
     public async Task<IActionResult> UpdateAgentSessionMode(
         Guid sessionId,
@@ -61,12 +55,6 @@ public class AiGatewaySessionController(ISender sender) : ApiControllerBase(send
 
     [HttpGet("chat-message/list")]
     public async Task<IActionResult> GetListChatMessages([FromQuery] GetListChatMessageHistoryQuery query)
-    {
-        return ReturnResult(await Sender.Send(query));
-    }
-
-    [HttpGet("session/timeline")]
-    public async Task<IActionResult> GetSessionTimeline([FromQuery] GetSessionTimelineQuery query)
     {
         return ReturnResult(await Sender.Send(query));
     }

@@ -33,12 +33,19 @@ public sealed class SemanticAnalysisRunnerTests
             isEnabled: true,
             resultFactory: plan => CreateCloudResult(plan.Target, []));
         var runner = CreateRunner(cloudClient, planner);
+        var sink = new AgentWorkflowSink();
 
         var result = await runner.RunAsync(
             CreateConfirmedIntent(intent, "查询正式业务数据"),
-            sink: null,
+            sink,
             CreateSession(),
             CancellationToken.None);
+        sink.Complete();
+        var chunks = new List<ChatChunk>();
+        await foreach (var chunk in sink.ReadAllAsync(CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
         var safeOutput = GetSafeOutput(result);
 
         AssertCloudReadRequested(planner, cloudClient, target);
@@ -49,6 +56,7 @@ public sealed class SemanticAnalysisRunnerTests
         resultDocument.RootElement.GetProperty("business_data_preview").GetArrayLength().Should().Be(0);
         safeOutput.Should().NotContain("DataAnalysis/Text-to-SQL 补充分析");
         safeOutput.Should().NotContain("Simulation");
+        chunks.Should().BeEmpty("empty business results must not emit trusted widgets");
     }
 
     [Fact]

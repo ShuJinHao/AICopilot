@@ -19,7 +19,6 @@ import type {
 } from '@/types/models'
 import { resolveChatErrorMessage } from '@/stores/chatErrorStore'
 import { stripThinkingTags } from './modelOutputSanitizer'
-import { parseWidgetFromTextChunk } from './widgetPayloadParser'
 import { formatPlanDraftFailure } from './agentEventDisplay'
 
 export interface ChunkReducerCallbacks {
@@ -34,15 +33,6 @@ export function processChunk(
   chunk: ChatChunk,
   callbacks: ChunkReducerCallbacks,
 ) {
-  const parsedWidget = parseWidgetFromTextChunk(message, chunk)
-  if (parsedWidget) {
-    addWidgetChunk(message, chunk, parsedWidget.widget)
-    if (parsedWidget.remainingText) {
-      addTextChunk(message, { ...chunk, content: parsedWidget.remainingText })
-    }
-    return
-  }
-
   switch (chunk.type) {
     case ChunkType.Text:
       addTextChunk(message, chunk)

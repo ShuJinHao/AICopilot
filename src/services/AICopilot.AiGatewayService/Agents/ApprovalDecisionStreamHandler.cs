@@ -142,9 +142,14 @@ public class ApprovalDecisionStreamHandler(
         }
 
         AiToolDefinition[] tools = [];
+        var trustedRenderChunks = new TrustedRenderChunkBuffer();
         try
         {
-            tools = await mainChatToolCatalog.BuildAsync(session, string.Empty, ct);
+            tools = await mainChatToolCatalog.BuildAsync(
+                session,
+                string.Empty,
+                trustedRenderChunks,
+                ct);
         }
         catch (Exception exception)
         {
@@ -367,6 +372,18 @@ public class ApprovalDecisionStreamHandler(
                 renderChunks.Add(chunk);
                 yield return chunk;
             }
+
+            foreach (var trustedChunk in trustedRenderChunks.Drain())
+            {
+                renderChunks.Add(trustedChunk);
+                yield return trustedChunk;
+            }
+        }
+
+        foreach (var trustedChunk in trustedRenderChunks.Drain())
+        {
+            renderChunks.Add(trustedChunk);
+            yield return trustedChunk;
         }
 
         ChatChunk? stateMetadata = null;

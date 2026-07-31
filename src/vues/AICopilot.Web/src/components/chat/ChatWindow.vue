@@ -2,11 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PanelLeftOpen, RefreshCw, TriangleAlert, X } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
-import { useAgentPlanPreview } from '@/composables/useAgentPlanPreview'
-import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
 import { useChatStore } from '@/stores/chatStore'
 import { useUiLayoutStore } from '@/stores/uiLayoutStore'
-import AgentRunThread from './AgentRunThread.vue'
 import ChatComposer from './ChatComposer.vue'
 import ChatEmptyState from './ChatEmptyState.vue'
 import MessageItem from './MessageItem.vue'
@@ -14,8 +11,6 @@ import SessionList from './SessionList.vue'
 
 const store = useChatStore()
 const uiLayoutStore = useUiLayoutStore()
-const { latestTask, taskSteps, pendingAgentApprovals, taskArtifacts } = useAgentWorkbench()
-const { latestPlanIsCloudReadonly, latestPlanIsSimulation } = useAgentPlanPreview()
 
 const scrollContainer = ref<HTMLElement | null>(null)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
@@ -37,15 +32,6 @@ const workbenchStatusTone = computed(() => {
 })
 const agentModeLabel = computed(() =>
   store.agentMode === 'execute' ? 'Execute · 执行' : 'Plan · 规划',
-)
-const hasInlineAgentRun = computed(() =>
-  Boolean(
-    latestTask.value ||
-    taskSteps.value.length ||
-    pendingAgentApprovals.value.length ||
-    taskArtifacts.value.length ||
-    store.currentWorkspace,
-  ),
 )
 
 async function createPlanFromSuggestion(text: string) {
@@ -94,13 +80,7 @@ function handleResize() {
 }
 
 watch(
-  [
-    () => store.currentMessages,
-    () => latestTask.value?.id,
-    () => taskSteps.value.map((step) => step.status).join(','),
-    () => pendingAgentApprovals.value.length,
-    () => taskArtifacts.value.length,
-  ],
+  () => store.currentMessages,
   () => {
     if (!preserveScrollAnchor.value) {
       void scrollToBottom()
@@ -172,17 +152,7 @@ onBeforeUnmount(() => {
           <AiTag :tone="store.agentMode === 'execute' ? 'blue' : 'teal'">
             {{ agentModeLabel }}
           </AiTag>
-          <AiTag
-            :tone="latestPlanIsSimulation || latestPlanIsCloudReadonly ? 'warning' : 'success'"
-          >
-            {{
-              latestPlanIsSimulation
-                ? 'Simulation · 只读'
-                : latestPlanIsCloudReadonly
-                  ? 'Cloud 只读'
-                  : '只读分析'
-            }}
-          </AiTag>
+          <AiTag tone="success">Harness 主链</AiTag>
           <button
             class="soft-action"
             type="button"
@@ -242,8 +212,6 @@ onBeforeUnmount(() => {
             :message="message"
           />
         </div>
-
-        <AgentRunThread v-if="hasInlineAgentRun" />
       </div>
 
       <ChatComposer />
