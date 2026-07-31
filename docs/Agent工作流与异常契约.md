@@ -114,6 +114,13 @@ Cloud 只读正式能力为：
 - 前端 SSE、错误、runtime details 与 Widget：`src/vues/AICopilot.Web/src/protocol`、`src/vues/AICopilot.Web/src/stores`、`src/vues/AICopilot.Web/src/components/chat`。
 - Architecture Analyzer 继续以不可降级 Error 执行。任何受影响的 .NET filtered test 必须先用完全相同 filter 的 `--list-tests` 证明命中；默认不追加全量、coverage、mutation、duplication、Quality、CrossProject、数据库应用或部署。
 
+API 未处理异常策略发生变化时，定向诊断必须使用实际拥有该测试的 InProcess 项目，并按相同 filter 先列举再执行：
+
+```bash
+dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "UnhandledApiExceptionPolicyTests" --no-restore --list-tests
+dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "UnhandledApiExceptionPolicyTests" --no-restore
+```
+
 ## 9. 后端错误码目录
 
 前端必须为以下活动 HTTP / SSE code 提供明确、安全的用户文案；新增、删除或重命名后端错误码时同步更新本节和对应目录测试。
