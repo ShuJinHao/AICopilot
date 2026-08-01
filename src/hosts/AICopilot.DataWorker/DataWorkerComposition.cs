@@ -1,5 +1,4 @@
 using AICopilot.AiGatewayService;
-using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.DataAnalysisService;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Outbox;
@@ -28,8 +27,6 @@ internal static class DataWorkerComposition
         builder.AddRagService();
         builder.Services.AddScoped<ICurrentUser, WorkerCurrentUser>();
         builder.Services.AddHostedService<OutboxDispatcher>();
-        builder.Services.AddHostedService<AgentTaskRunQueueWorker>();
-        builder.Services.AddHostedService<AgentOutcomeReconciliationWorker>();
         builder.Services.AddScoped<PersistenceFileMaintenanceService>();
         builder.Services.AddOptions<PersistenceMaintenanceOptions>()
             .BindConfiguration(PersistenceMaintenanceOptions.SectionName)

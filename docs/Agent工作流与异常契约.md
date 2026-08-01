@@ -34,7 +34,7 @@
 - 门禁逐项校验 `IsEnabled`、`IsExecutableByAgent`、当前用户 `RequiredPermission`、`RiskLevel`、`RequiresApproval`、`AuditLevel`、`DataBoundary`、`SchemaVersion`、输入/输出 schema 与 `AiToolSafetyPolicy`。
 - 运行时不得用工具名 alias、描述、endpoint、hostname 或调用方自报值替代规范身份和治理元数据。动态 MCP 只有 server 与 tool 都满足 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true`，并携带独立 canonical `ToolName` 时才可继续检查。
 - `DiagnosticAdvisorPlugin/GenerateDiagnosticChecklist` 必须有唯一、精确、版本化登记；不得依赖宽泛插件放行。
-- Harness 必须设置 `DisableToolAutoApproval=false`、`AutoApprovalRules=[]`。禁止“不再询问”及 `AlwaysApproveToolApprovalResponseContent` 等永久批准信号。
+- Harness 必须设置 `DisableToolAutoApproval=true`，且不得配置 `ToolApprovalAgentOptions` / `AutoApprovalRules`。需要批准的工具继续使用 `ApprovalRequiredAIFunction` 逐次询问；禁止“不再询问”及 `AlwaysApproveToolApprovalResponseContent` 等永久批准信号。
 
 ### 2.2 BusinessQuery
 

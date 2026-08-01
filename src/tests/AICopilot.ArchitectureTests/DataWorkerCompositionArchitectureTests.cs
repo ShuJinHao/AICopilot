@@ -1,4 +1,3 @@
-using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.DataWorker;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.Services.Contracts;
@@ -13,7 +12,7 @@ namespace AICopilot.ArchitectureTests;
 public sealed class DataWorkerCompositionArchitectureTests
 {
     [Fact]
-    public void AddDataWorkerRuntime_ShouldRegisterWorkerIdentityMaintenanceAndDispatchers()
+    public void AddDataWorkerRuntime_ShouldRegisterOnlyPersistenceMaintenanceAndOutboxWorkers()
     {
         const string encryptionKeyVariable = "AICopilotSecurity__ApiKeyEncryptionKey";
         var originalEncryptionKey = Environment.GetEnvironmentVariable(encryptionKeyVariable);
@@ -42,9 +41,19 @@ public sealed class DataWorkerCompositionArchitectureTests
             Environment.SetEnvironmentVariable(encryptionKeyVariable, originalEncryptionKey);
         }
 
-        AssertSingleHostedService<OutboxDispatcher>(builder.Services);
-        AssertSingleHostedService<AgentTaskRunQueueWorker>(builder.Services);
-        AssertSingleHostedService<PersistenceMaintenanceWorker>(builder.Services);
+        var hostedServiceTypes = builder.Services
+            .Where(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType?.Namespace?.StartsWith(
+                    "AICopilot.",
+                    StringComparison.Ordinal) == true)
+            .Select(descriptor => descriptor.ImplementationType!)
+            .ToArray();
+        hostedServiceTypes.Should().BeEquivalentTo(
+        [
+            typeof(OutboxDispatcher),
+            typeof(PersistenceMaintenanceWorker)
+        ]);
 
         using (var provider = builder.Services.BuildServiceProvider())
         using (var scope = provider.CreateScope())
@@ -77,14 +86,5 @@ public sealed class DataWorkerCompositionArchitectureTests
             invalidProvider.GetRequiredService<IOptions<PersistenceMaintenanceOptions>>().Value;
         resolveInvalidOptions.Should().Throw<OptionsValidationException>()
             .WithMessage("*IntervalSeconds must be between 10 and 86400*");
-    }
-
-    private static void AssertSingleHostedService<THostedService>(
-        IServiceCollection services)
-        where THostedService : class, IHostedService
-    {
-        services.Should().ContainSingle(descriptor =>
-            descriptor.ServiceType == typeof(IHostedService) &&
-            descriptor.ImplementationType == typeof(THostedService));
     }
 }

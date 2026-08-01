@@ -70,7 +70,7 @@ internal sealed class HarnessAgentRuntimeFactory(
         return chatClientFactory.CanCreate(providerName, scope.ServiceProvider);
     }
 
-    private static HarnessAgentOptions CreateOptions(
+    internal static HarnessAgentOptions CreateOptions(
         AgentRuntimeCreateRequest request,
         ChatHistoryProvider historyProvider)
     {
@@ -82,12 +82,7 @@ internal sealed class HarnessAgentRuntimeFactory(
             ChatOptions = RuntimeToolAdapter.ToChatOptions(request.Options),
             ChatHistoryProvider = historyProvider,
             MaximumIterationsPerRequest = 8,
-            DisableToolAutoApproval = false,
-            ToolApprovalAgentOptions = new ToolApprovalAgentOptions
-            {
-                AutoApprovalRules =
-                    Array.Empty<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>()
-            },
+            DisableToolAutoApproval = true,
             DisableApprovalNotRequiredFunctionBypassing = false,
             DisableApprovalResponseBinding = false,
             DisableFileMemory = true,

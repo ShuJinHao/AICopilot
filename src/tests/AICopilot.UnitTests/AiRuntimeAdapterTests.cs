@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Text.Json;
 using AICopilot.AgentPlugin;
 using AICopilot.AiRuntime;
+using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
+using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.Agents.AI;
@@ -41,6 +43,30 @@ public sealed class AiRuntimeAdapterTests
 
         adaptedTool.Name.Should().Be(nameof(EchoPlugin.Echo));
         adaptedTool.GetType().Name.Should().Contain("ApprovalRequired");
+    }
+
+    [Fact]
+    public void HarnessRuntimeFactory_ShouldDisableToolAutoApprovalWithoutRules()
+    {
+        var model = new LanguageModel(
+            "OpenAI",
+            "test-model",
+            "https://example.test/v1",
+            null,
+            new ModelParameters { MaxTokens = 4096 });
+        var template = new ConversationTemplate(
+            "test-template",
+            "test",
+            "system prompt",
+            model.Id,
+            new TemplateSpecification());
+
+        var options = HarnessAgentRuntimeFactory.CreateOptions(
+            new AgentRuntimeCreateRequest(model, template, new AiChatOptions()),
+            new CheckpointingChatHistoryProvider(null));
+
+        options.DisableToolAutoApproval.Should().BeTrue();
+        options.ToolApprovalAgentOptions.Should().BeNull();
     }
 
     [Fact]
@@ -179,12 +205,7 @@ public sealed class AiRuntimeAdapterTests
                 Name = "session-test",
                 ChatHistoryProvider = new CheckpointingChatHistoryProvider(null),
                 MaximumIterationsPerRequest = 8,
-                DisableToolAutoApproval = false,
-                ToolApprovalAgentOptions = new ToolApprovalAgentOptions
-                {
-                    AutoApprovalRules =
-                        Array.Empty<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>()
-                },
+                DisableToolAutoApproval = true,
                 DisableApprovalNotRequiredFunctionBypassing = false,
                 DisableApprovalResponseBinding = false,
                 DisableFileMemory = true,
