@@ -221,6 +221,27 @@ try {
         throw 'Ordinary documentation-only changes did not skip .NET build and test work.'
     }
 
+    $webManifestFiles = @(
+        'src/vues/AICopilot.Web/package-lock.json',
+        'src/vues/AICopilot.Web/package.json')
+    $webManifestOutput = Join-Path $temporaryRoot 'web-manifest.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles $webManifestFiles `
+        -OutputPath $webManifestOutput `
+        -GitHubOutputPath ''
+    $webManifest = Get-Content $webManifestOutput -Raw | ConvertFrom-Json
+    Assert-ValidCategories $webManifest
+    if (-not [bool]$webManifest.web.affected -or
+        [bool]$webManifest.web.full -or
+        @(Compare-Object $webManifestFiles @($webManifest.web.changedFiles)).Count -ne 0 -or
+        @($webManifest.unclassifiedFiles).Count -ne 0 -or
+        @($webManifest.requiredExplicitModes).Count -ne 0 -or
+        [bool]$webManifest.productionBuildRequired -or
+        [bool]$webManifest.deploymentAffected) {
+        throw 'Web package manifests did not stay in the affected Web lane.'
+    }
+
     foreach ($contractPath in @(
             'AGENTS.md',
             'docs/AICopilot业务规则.md',
@@ -688,6 +709,21 @@ try {
 
 $workflowText = Get-Content (Join-Path $root '.github/workflows/aicopilot-ci.yml') -Raw
 $runnerText = Get-Content (Join-Path $root 'scripts/tests/Invoke-AICopilotCiSelectedTests.ps1') -Raw
+$webRestoreIndex = $workflowText.IndexOf(
+    '- name: Restore web dependencies',
+    [StringComparison]::Ordinal)
+$webAuditIndex = $workflowText.IndexOf(
+    '- name: Audit web dependencies',
+    [StringComparison]::Ordinal)
+$webChecksIndex = $workflowText.IndexOf(
+    '- name: Lint, type-check, build and test affected web scope',
+    [StringComparison]::Ordinal)
+if ($webRestoreIndex -lt 0 -or
+    $webAuditIndex -le $webRestoreIndex -or
+    $webChecksIndex -le $webAuditIndex -or
+    $workflowText -notmatch 'npm audit --audit-level=moderate --registry=https://registry\.npmjs\.org') {
+    throw 'AICopilot default CI does not run the moderate web audit after npm ci.'
+}
 if ($workflowText -notmatch '\$selectorInputs\.Count\s+-gt\s+0[\s\S]*?Test-AICopilotCiTestSelection\.ps1') {
     throw 'AICopilot default CI does not gate selector behavior tests on affected selector inputs.'
 }
@@ -723,4 +759,4 @@ if ($runnerText -notmatch "ForEach-Object\s*\{\s*\[int\]\`$_\['discovered'\]\s*\
     throw 'AICopilot CI discovery aggregation does not safely read ordered result dictionaries.'
 }
 
-Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 activeContract=7 securityMapping=4 securityTest=1 securityProjectFile=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'
+Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 webManifest=1 activeContract=7 securityMapping=4 securityTest=1 securityProjectFile=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 webAuditGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'
