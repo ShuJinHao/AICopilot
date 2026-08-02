@@ -24,8 +24,11 @@ public sealed class AgentSafetyApprovalHttpTests
         _fixture = fixture;
     }
 
-    [Fact]
-    public async Task ApprovalDecision_ShouldUseRegisteredHarnessToolWithoutLegacyPolicyOrOnsite()
+    [Theory]
+    [InlineData("approved")]
+    [InlineData("rejected")]
+    public async Task ApprovalDecision_ShouldResumeSingleRegisteredHarnessToolWithoutLegacyPolicyOrOnsite(
+        string decision)
     {
         await AuthenticateAsAdminAsync();
 
@@ -36,9 +39,9 @@ public sealed class AgentSafetyApprovalHttpTests
         try
         {
             languageModelId = await CreateLanguageModelAsync(
-                $"harness-approval-{Guid.NewGuid():N}");
+                $"harness-approval-{decision}-{Guid.NewGuid():N}");
             generalTemplateId = await CreateConversationTemplateAsync(
-                $"harness-approval-general-{Guid.NewGuid():N}",
+                $"harness-approval-{decision}-general-{Guid.NewGuid():N}",
                 languageModelId,
                 "general assistant",
                 "You are a concise manufacturing copilot.");
@@ -75,22 +78,34 @@ public sealed class AgentSafetyApprovalHttpTests
                 .ContainSingle(item => item.CallId == callId)
                 .Which;
 
-            var approvedEvents = await PostApprovalDecisionAsync(new
+            var toolResultRequestsBeforeDecision = _fixture.FakeAiToolResultRequestCount;
+            var decisionEvents = await PostApprovalDecisionAsync(new
             {
                 sessionId,
                 callId,
-                decision = "approved",
+                decision,
                 onsiteConfirmed = false,
                 targetType = pendingApproval.TargetType,
                 targetName = pendingApproval.TargetName,
                 toolName = pendingApproval.ToolName
             });
 
-            approvedEvents.Should().NotContain(item => item.Type == "Error");
-            string.Concat(approvedEvents
+            decisionEvents.Should().NotContain(item => item.Type == "Error");
+            string.Concat(decisionEvents
                     .Where(item => item.Type == "Text")
                     .Select(item => item.Content))
-                .Should().Contain("已批准并执行工具");
+                .Should().NotBeNullOrWhiteSpace();
+            _fixture.FakeAiToolResultRequestCount
+                .Should().Be(toolResultRequestsBeforeDecision + 1);
+
+            var remainingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+                $"/api/aigateway/approval/pending?sessionId={sessionId}");
+            remainingApprovals.Should().BeEmpty();
+
+            var projection = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            projection.AgentSessionStatus.Should().Be(nameof(AgentSessionRuntimeStatus.Ready));
+            projection.HasPendingApproval.Should().BeFalse();
         }
         finally
         {
@@ -111,6 +126,97 @@ public sealed class AgentSafetyApprovalHttpTests
                     HttpMethod.Delete,
                     "/api/aigateway/conversation-template",
                     new { id = generalTemplateId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (languageModelId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/language-model",
+                    new { id = languageModelId },
+                    HttpStatusCode.NoContent);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ChatStream_ShouldInterruptWithoutExecutingWhenProviderReturnsTwoApprovalCalls()
+    {
+        await AuthenticateAsAdminAsync();
+
+        Guid languageModelId = Guid.Empty;
+        Guid templateId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+
+        try
+        {
+            languageModelId = await CreateLanguageModelAsync(
+                $"multiple-approval-lm-{Guid.NewGuid():N}");
+            templateId = await CreateConversationTemplateAsync(
+                $"multiple-approval-template-{Guid.NewGuid():N}",
+                languageModelId,
+                "provider contract violation",
+                "Use only one governed tool call per response.");
+            sessionId = await CreateSessionAsync(templateId);
+
+            _ = await PutJsonAsync<AgentSessionModeDto>(
+                $"/api/aigateway/session/{sessionId}/agent-mode",
+                new
+                {
+                    mode = "execute",
+                    expectedVersion = 1
+                });
+
+            var toolResultRequestsBeforeTurn = _fixture.FakeAiToolResultRequestCount;
+            var events = await PostChatAsync(new
+            {
+                sessionId,
+                message = "force two diagnostic approvals for device DEV-001"
+            });
+
+            ReadSingleError(events).Code.Should().Be("agent_session_interrupted");
+            events.Should().NotContain(item =>
+                item.Type == "FunctionCall" ||
+                item.Type == "FunctionResult" ||
+                item.Type == "ApprovalRequest");
+            _fixture.FakeAiToolResultRequestCount
+                .Should().Be(toolResultRequestsBeforeTurn);
+
+            await using (var dbContext = await CreateAiGatewayDbContextAsync())
+            {
+                var persistedState = await dbContext.AgentSessionStates.SingleAsync(
+                    item => item.SessionId == sessionId);
+                persistedState.Status.Should().Be(AgentSessionRuntimeStatus.Interrupted);
+                persistedState.ActiveTurnId.Should().BeNull();
+                persistedState.ProtectedApprovalBindings.Should().BeNull();
+            }
+
+            var projection = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            projection.AgentSessionStatus.Should().Be(nameof(AgentSessionRuntimeStatus.Interrupted));
+            projection.AgentSessionResetRequired.Should().BeFalse();
+            projection.HasPendingApproval.Should().BeFalse();
+        }
+        finally
+        {
+            await AuthenticateAsAdminAsync();
+
+            if (sessionId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/session",
+                    new { id = sessionId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (templateId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/conversation-template",
+                    new { id = templateId },
                     HttpStatusCode.NoContent);
             }
 
@@ -617,7 +723,8 @@ public sealed class AgentSafetyApprovalHttpTests
         Guid Id,
         long? AgentSessionVersion,
         string? AgentSessionStatus,
-        bool AgentSessionResetRequired);
+        bool AgentSessionResetRequired,
+        bool HasPendingApproval);
 
     private sealed record PendingApprovalDto(
         string CallId,

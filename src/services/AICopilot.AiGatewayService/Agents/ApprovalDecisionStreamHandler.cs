@@ -92,7 +92,17 @@ public class ApprovalDecisionStreamHandler(
             yield break;
         }
 
-        var binding = state!.PendingApprovals.SingleOrDefault(item =>
+        if (AgentApprovalBindingCollector.HasMultipleDifferentToolCalls(
+                state!.PendingApprovals))
+        {
+            await TryInterruptAsync(session, turnId);
+            yield return ChatStreamHandler.CreateSessionStateErrorChunk(
+                new AgentRuntimeMultipleToolCallsException(),
+                nameof(ApprovalDecisionStreamHandler));
+            yield break;
+        }
+
+        var binding = state.PendingApprovals.FirstOrDefault(item =>
             string.Equals(item.ToolCallId, request.CallId, StringComparison.Ordinal));
         if (binding is null)
         {
@@ -329,7 +339,7 @@ public class ApprovalDecisionStreamHandler(
             var update = updates.Current;
             try
             {
-                CaptureApprovalBindings(
+                AgentApprovalBindingCollector.Capture(
                     update,
                     tools,
                     session,
@@ -527,39 +537,4 @@ public class ApprovalDecisionStreamHandler(
             : $"{binding.TargetType}:{binding.TargetName}/{binding.CanonicalToolName}";
     }
 
-    private static void CaptureApprovalBindings(
-        RuntimeAgentUpdate update,
-        IReadOnlyCollection<AiToolDefinition> tools,
-        SessionRuntimeSnapshot session,
-        string? tenantId,
-        ICollection<AgentApprovalBinding> approvals)
-    {
-        foreach (var approval in update.Contents.OfType<AiToolApprovalRequestContent>())
-        {
-            var call = approval.Request.ToolCall;
-            var definition = tools.SingleOrDefault(
-                tool => string.Equals(tool.Name, call.Name, StringComparison.Ordinal));
-            if (definition is null || !definition.RequiresApproval)
-            {
-                throw new InvalidOperationException(
-                    "Harness surfaced an approval for an unknown or non-approval tool.");
-            }
-
-            approvals.Add(new AgentApprovalBinding(
-                session.Id,
-                session.UserId,
-                string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim(),
-                approval.Request.RequestId,
-                call.CallId,
-                call.Name,
-                call.Kind,
-                call.ServerName,
-                call.TargetType,
-                call.TargetName,
-                call.ToolName,
-                call.Arguments,
-                definition.SchemaVersion,
-                CanonicalJson.ComputeSha256(CanonicalJson.Serialize(call.Arguments))));
-        }
-    }
 }

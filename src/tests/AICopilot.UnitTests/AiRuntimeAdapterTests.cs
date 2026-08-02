@@ -46,7 +46,7 @@ public sealed class AiRuntimeAdapterTests
     }
 
     [Fact]
-    public void HarnessRuntimeFactory_ShouldDisableToolAutoApprovalWithoutRules()
+    public void HarnessRuntimeFactory_ShouldRequireSingleToolCallsWithoutStandingApprovalRules()
     {
         var model = new LanguageModel(
             "OpenAI",
@@ -67,6 +67,8 @@ public sealed class AiRuntimeAdapterTests
 
         options.DisableToolAutoApproval.Should().BeTrue();
         options.ToolApprovalAgentOptions.Should().BeNull();
+        options.ChatOptions.Should().NotBeNull();
+        options.ChatOptions!.AllowMultipleToolCalls.Should().BeFalse();
     }
 
     [Fact]
@@ -151,6 +153,7 @@ public sealed class AiRuntimeAdapterTests
 
         inner.LastToolNames.Should().BeEquivalentTo(
             ["BusinessQuery", "KnowledgeQuery", "mode_get"]);
+        inner.LastAllowMultipleToolCalls.Should().BeFalse();
     }
 
     [Fact]
@@ -169,6 +172,28 @@ public sealed class AiRuntimeAdapterTests
             [new ChatMessage(ChatRole.User, "switch modes")]);
 
         await act.Should().ThrowAsync<HarnessToolSurfaceViolationException>();
+    }
+
+    [Fact]
+    public async Task ToolSurfaceGuard_ShouldRejectMultipleToolCallsFromOneProviderResponse()
+    {
+        var inner = new CapturingChatClient(
+            new FunctionCallContent(
+                "call-1",
+                "BusinessQuery",
+                new Dictionary<string, object?>()),
+            new FunctionCallContent(
+                "call-2",
+                "BusinessQuery",
+                new Dictionary<string, object?>()));
+        var policy = new HarnessToolSurfacePolicy(["BusinessQuery"]);
+        policy.SetMode(RuntimeAgentMode.Execute);
+        var guarded = new ToolSurfaceGuardChatClient(inner, policy);
+
+        var act = () => guarded.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "return two calls")]);
+
+        await act.Should().ThrowAsync<AgentRuntimeMultipleToolCallsException>();
     }
 
     [Fact]
@@ -268,6 +293,8 @@ public sealed class AiRuntimeAdapterTests
 
         public int CallCount { get; private set; }
 
+        public bool? LastAllowMultipleToolCalls { get; private set; }
+
         public void Dispose()
         {
         }
@@ -278,6 +305,7 @@ public sealed class AiRuntimeAdapterTests
             CancellationToken cancellationToken = default)
         {
             CallCount++;
+            LastAllowMultipleToolCalls = options?.AllowMultipleToolCalls;
             LastToolNames = options?.Tools?
                 .Select(tool => tool is AIFunction function
                     ? function.Name

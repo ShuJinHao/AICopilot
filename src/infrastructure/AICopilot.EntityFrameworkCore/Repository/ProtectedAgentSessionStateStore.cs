@@ -81,6 +81,18 @@ internal sealed class ProtectedAgentSessionStateStore(
         }
 
         var pending = UnprotectApprovals(state.ProtectedApprovalBindings);
+        ValidateApprovalBindings(pending);
+        if (HasMultipleDifferentToolCalls(pending))
+        {
+            var expiresAt = now.Add(SlidingTimeToLive);
+            state.BeginTurn(turnId, now, expiresAt);
+            state.InterruptTurn(turnId, now, expiresAt);
+            await SaveAsync(CancellationToken.None);
+            throw new AgentSessionStateException(
+                AgentSessionStateFailure.Interrupted,
+                "The AgentSession contained multiple pending tool calls and was interrupted.");
+        }
+
         if (approvalContinuation)
         {
             if (pending.Count == 0)
@@ -151,6 +163,15 @@ internal sealed class ProtectedAgentSessionStateStore(
         EnsureOwnedAndUsable(state, userId, tenantId, allowRunning: true);
         EnsureTurn(state, turnId);
         var now = DateTimeOffset.UtcNow;
+        if (HasMultipleDifferentToolCalls(pendingApprovals))
+        {
+            state.InterruptTurn(turnId, now, now.Add(SlidingTimeToLive));
+            await SaveAsync(CancellationToken.None);
+            throw new AgentSessionStateException(
+                AgentSessionStateFailure.Interrupted,
+                "The provider returned multiple pending tool calls and the AgentSession was interrupted.");
+        }
+
         state.CompleteTurn(
             turnId,
             stateProtector.Protect(serializedSessionState),
@@ -431,6 +452,16 @@ internal sealed class ProtectedAgentSessionStateStore(
                 AgentSessionStateFailure.Corrupt,
                 "The approval binding is incomplete.");
         }
+    }
+
+    private static bool HasMultipleDifferentToolCalls(
+        IEnumerable<AgentApprovalBinding> approvals)
+    {
+        return approvals
+            .Select(binding => binding.ToolCallId)
+            .Distinct(StringComparer.Ordinal)
+            .Skip(1)
+            .Any();
     }
 
     private static string ComputeArgumentsDigest(

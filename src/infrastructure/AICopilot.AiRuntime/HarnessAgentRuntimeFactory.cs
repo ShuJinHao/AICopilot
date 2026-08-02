@@ -74,12 +74,15 @@ internal sealed class HarnessAgentRuntimeFactory(
         AgentRuntimeCreateRequest request,
         ChatHistoryProvider historyProvider)
     {
+        var chatOptions = RuntimeToolAdapter.ToChatOptions(request.Options);
+        chatOptions.AllowMultipleToolCalls = false;
+
 #pragma warning disable MAAI001
         return new HarnessAgentOptions
         {
             Name = request.Template.Name,
             Description = request.Template.Description,
-            ChatOptions = RuntimeToolAdapter.ToChatOptions(request.Options),
+            ChatOptions = chatOptions,
             ChatHistoryProvider = historyProvider,
             MaximumIterationsPerRequest = 8,
             DisableToolAutoApproval = true,

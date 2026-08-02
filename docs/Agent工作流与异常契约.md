@@ -34,7 +34,7 @@
 - 门禁逐项校验 `IsEnabled`、`IsExecutableByAgent`、当前用户 `RequiredPermission`、`RiskLevel`、`RequiresApproval`、`AuditLevel`、`DataBoundary`、`SchemaVersion`、输入/输出 schema 与 `AiToolSafetyPolicy`。
 - 运行时不得用工具名 alias、描述、endpoint、hostname 或调用方自报值替代规范身份和治理元数据。动态 MCP 只有 server 与 tool 都满足 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true`，并携带独立 canonical `ToolName` 时才可继续检查。
 - `DiagnosticAdvisorPlugin/GenerateDiagnosticChecklist` 必须有唯一、精确、版本化登记；不得依赖宽泛插件放行。
-- Harness 必须设置 `DisableToolAutoApproval=true`，且不得配置 `ToolApprovalAgentOptions` / `AutoApprovalRules`。需要批准的工具继续使用 `ApprovalRequiredAIFunction` 逐次询问；禁止“不再询问”及 `AlwaysApproveToolApprovalResponseContent` 等永久批准信号。
+- 主 Harness 必须设置 `DisableToolAutoApproval=true` 与 `ChatOptions.AllowMultipleToolCalls=false`，且不得配置 `ToolApprovalAgentOptions` / `AutoApprovalRules`。需要批准的工具继续使用官方 `ApprovalRequiredAIFunction` 逐次询问；关闭的是支持 standing rules 和多批准排队的 `ToolApprovalAgent` 中间件。禁止“不再询问”及 `AlwaysApproveToolApprovalResponseContent` 等永久批准信号。单工具限制只属于主聊天；Text-to-SQL、分类和结构化生成等轻量内部 Agent 保持各自现行调用策略。
 
 ### 2.2 BusinessQuery
 
@@ -69,6 +69,7 @@ Cloud 只读正式能力为：
 
 - Tool 从注册表到 Harness wrapper 必须完整保留规范身份、`RequiresApproval`、风险、权限、审计、数据边界、schema version 和 canonical 参数摘要。
 - 每次批准绑定用户、租户、session、request id、toolCallId、规范工具身份、schema version 与 canonical 参数 SHA-256。续流前重新验证全部绑定；漂移、跨 owner/session、重复或外来 call、Interrupted 后旧批准全部 fail-closed。
+- 本版批准协议每个 governed turn 只允许一个不同的工具调用。provider 即使忽略 `AllowMultipleToolCalls=false` 返回第二个不同的待批调用，也不得执行任一工具、不得续批或保存部分绑定；服务端必须清空批准绑定，将 AgentSession 标记为 `Interrupted`，返回既有 `agent_session_interrupted` 并要求用户新建会话。
 - 主聊天只允许批准 AICopilot 自身、可逆、幂等或结果可查询的动作。Cloud/MES/ERP 写入、设备启停、生产控制、不可逆或结果不可查询动作即使用户批准也继续硬阻断。
 - 权威入口只有 `GET /api/aigateway/approval/pending` 与 `POST /api/aigateway/approval/decision`。旧 AgentTask 业务审批和 ApprovalPolicy 管理入口不属于 Harness approval。
 

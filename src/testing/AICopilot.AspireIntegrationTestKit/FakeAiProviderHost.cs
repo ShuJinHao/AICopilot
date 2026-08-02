@@ -21,8 +21,11 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
     private const string CloudAiReadToken = "test-cloud-ai-read-token";
 
     private WebApplication? _app;
+    private int toolResultRequestCount;
 
     public Uri BaseUri { get; private set; } = null!;
+
+    public int ToolResultRequestCount => Volatile.Read(ref toolResultRequestCount);
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -65,7 +68,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         }
     }
 
-    private static async Task HandleChatCompletionsAsync(HttpContext context)
+    private async Task HandleChatCompletionsAsync(HttpContext context)
     {
         using var document = await JsonDocument.ParseAsync(context.Request.Body);
         var root = document.RootElement;
@@ -86,6 +89,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
 
             if (hasToolResult)
             {
+                Interlocked.Increment(ref toolResultRequestCount);
                 var toolResultText = TryExtractBusinessQueryConfirmation(
                     messageTexts,
                     out var confirmation)
@@ -104,6 +108,18 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
             if (ShouldBlockControlRequest(latestUserText))
             {
                 await WriteTextStreamAsync(context, BuildControlBoundaryResponse());
+                return;
+            }
+
+            if (ShouldTriggerMultipleDiagnosticApprovals(latestUserText))
+            {
+                var toolName = ExtractDiagnosticToolName(root) ?? "GenerateDiagnosticChecklist";
+                await WriteToolCallsStreamAsync(
+                    context,
+                    [
+                        new FakeToolCall(toolName, new { deviceCode = "DEV-001" }),
+                        new FakeToolCall(toolName, new { deviceCode = "DEV-002" })
+                    ]);
                 return;
             }
 
@@ -339,8 +355,28 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
         string toolName,
         object? arguments = null)
     {
-        var callId = $"call_{Guid.NewGuid():N}";
-        var argumentsJson = JsonSerializer.Serialize(arguments ?? new { });
+        await WriteToolCallsStreamAsync(
+            context,
+            [new FakeToolCall(toolName, arguments)]);
+    }
+
+    private static async Task WriteToolCallsStreamAsync(
+        HttpContext context,
+        IReadOnlyCollection<FakeToolCall> calls)
+    {
+        var toolCalls = calls
+            .Select((call, index) => new
+            {
+                index,
+                id = $"call_{Guid.NewGuid():N}",
+                type = "function",
+                function = new
+                {
+                    name = call.ToolName,
+                    arguments = JsonSerializer.Serialize(call.Arguments ?? new { })
+                }
+            })
+            .ToArray();
 
         await WriteSseAsync(context, new
         {
@@ -355,20 +391,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                     index = 0,
                     delta = new
                     {
-                        tool_calls = new[]
-                        {
-                            new
-                            {
-                                index = 0,
-                                id = callId,
-                                type = "function",
-                                function = new
-                                {
-                                    name = toolName,
-                                    arguments = argumentsJson
-                                }
-                            }
-                        }
+                        tool_calls = toolCalls
                     },
                     finish_reason = (string?)null
                 }
@@ -419,6 +442,13 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                || latestUserText.Contains("排查清单", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool ShouldTriggerMultipleDiagnosticApprovals(string latestUserText)
+    {
+        return latestUserText.Contains(
+            "force two diagnostic approvals",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool ShouldTriggerBusinessQuery(string latestUserText)
     {
         return latestUserText.Contains("inline business widget", StringComparison.OrdinalIgnoreCase)
@@ -427,6 +457,8 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                    @"^确认查询 [0-9a-f]{32}$",
                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
+
+    private sealed record FakeToolCall(string ToolName, object? Arguments);
 
     private static bool TryExtractBusinessQueryConfirmation(
         IEnumerable<string> messageTexts,

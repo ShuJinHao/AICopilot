@@ -34,6 +34,10 @@ public sealed record RuntimeAgentUpdate(IReadOnlyList<AiRuntimeContent> Contents
 
 public sealed record StructuredAgentResponse<T>(string? Text, T? Result);
 
+public sealed class AgentRuntimeMultipleToolCallsException()
+    : InvalidOperationException(
+        "The provider returned more than one tool call in a single governed response.");
+
 public sealed record ModelProviderFallbackRouteDto(
     string Provider,
     IReadOnlyList<string> FallbackProviders);

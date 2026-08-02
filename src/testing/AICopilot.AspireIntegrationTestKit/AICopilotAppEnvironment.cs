@@ -36,6 +36,8 @@ public class AICopilotAppEnvironment : IAsyncDisposable
 
     public Uri FakeAiBaseUri => _fakeAiProvider.BaseUri;
 
+    public int FakeAiToolResultRequestCount => _fakeAiProvider.ToolResultRequestCount;
+
     public string BootstrapAdminUserName => BootstrapUserName;
 
     public string BootstrapAdminPassword => BootstrapPassword;

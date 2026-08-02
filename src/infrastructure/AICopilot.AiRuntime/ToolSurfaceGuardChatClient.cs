@@ -67,7 +67,9 @@ internal sealed class ToolSurfaceGuardChatClient(
             materialized,
             FilterOptions(options),
             cancellationToken);
-        ValidateModelContents(response.Messages.SelectMany(message => message.Contents));
+        ValidateModelContents(
+            response.Messages.SelectMany(message => message.Contents),
+            new HashSet<string>(StringComparer.Ordinal));
         return response;
     }
 
@@ -78,12 +80,13 @@ internal sealed class ToolSurfaceGuardChatClient(
     {
         var materialized = messages.ToArray();
         RejectAlwaysApprove(materialized);
+        var observedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
         await foreach (var update in base.GetStreamingResponseAsync(
                            materialized,
                            FilterOptions(options),
                            cancellationToken))
         {
-            ValidateModelContents(update.Contents);
+            ValidateModelContents(update.Contents, observedToolCallIds);
             yield return update;
         }
     }
@@ -91,19 +94,31 @@ internal sealed class ToolSurfaceGuardChatClient(
     private ChatOptions FilterOptions(ChatOptions? options)
     {
         var filtered = options?.Clone() ?? new ChatOptions();
+        filtered.AllowMultipleToolCalls = false;
         filtered.Tools = filtered.Tools?
             .Where(tool => ResolveName(tool) is { } name && policy.IsAllowed(name))
             .ToList();
         return filtered;
     }
 
-    private void ValidateModelContents(IEnumerable<AIContent> contents)
+    private void ValidateModelContents(
+        IEnumerable<AIContent> contents,
+        ISet<string> observedToolCallIds)
     {
-        foreach (var toolName in contents.Select(ResolveRequestedToolName).Where(name => name is not null))
+        foreach (var request in contents
+                     .Select(ResolveRequestedTool)
+                     .Where(request => request is not null)
+                     .Select(request => request!.Value))
         {
-            if (!policy.IsAllowed(toolName!))
+            if (!policy.IsAllowed(request.ToolName))
             {
-                throw new HarnessToolSurfaceViolationException(toolName!);
+                throw new HarnessToolSurfaceViolationException(request.ToolName);
+            }
+
+            if (observedToolCallIds.Add(request.ToolCallId) &&
+                observedToolCallIds.Count > 1)
+            {
+                throw new AgentRuntimeMultipleToolCallsException();
             }
         }
     }
@@ -126,13 +141,17 @@ internal sealed class ToolSurfaceGuardChatClient(
         };
     }
 
-    private static string? ResolveRequestedToolName(AIContent content)
+    private static RequestedToolCall? ResolveRequestedTool(AIContent content)
     {
 #pragma warning disable MEAI001
         return content switch
         {
-            FunctionCallContent function => function.Name,
-            ToolApprovalRequestContent approval => ResolveToolCallName(approval.ToolCall),
+            FunctionCallContent function => new RequestedToolCall(
+                function.CallId,
+                function.Name),
+            ToolApprovalRequestContent approval => new RequestedToolCall(
+                approval.ToolCall.CallId,
+                ResolveToolCallName(approval.ToolCall)),
             _ => null
         };
 #pragma warning restore MEAI001
@@ -149,6 +168,10 @@ internal sealed class ToolSurfaceGuardChatClient(
         };
 #pragma warning restore MEAI001
     }
+
+    private readonly record struct RequestedToolCall(
+        string ToolCallId,
+        string ToolName);
 }
 
 internal sealed class HarnessToolSurfaceViolationException(string toolName)

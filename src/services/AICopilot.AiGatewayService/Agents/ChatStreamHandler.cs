@@ -236,7 +236,7 @@ public class ChatStreamHandler(
                     var update = updates.Current;
                     try
                     {
-                        CaptureApprovalBindings(
+                        AgentApprovalBindingCollector.Capture(
                             update,
                             tools,
                             runtimeSession,
@@ -404,42 +404,6 @@ public class ChatStreamHandler(
         }
     }
 
-    private static void CaptureApprovalBindings(
-        RuntimeAgentUpdate update,
-        IReadOnlyCollection<AiToolDefinition> tools,
-        SessionRuntimeSnapshot session,
-        string? tenantId,
-        ICollection<AgentApprovalBinding> approvals)
-    {
-        foreach (var approval in update.Contents.OfType<AiToolApprovalRequestContent>())
-        {
-            var call = approval.Request.ToolCall;
-            var definition = tools.SingleOrDefault(
-                tool => string.Equals(tool.Name, call.Name, StringComparison.Ordinal));
-            if (definition is null || !definition.RequiresApproval)
-            {
-                throw new InvalidOperationException(
-                    "Harness surfaced an approval for an unknown or non-approval tool.");
-            }
-
-            approvals.Add(new AgentApprovalBinding(
-                session.Id,
-                session.UserId,
-                string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim(),
-                approval.Request.RequestId,
-                call.CallId,
-                call.Name,
-                call.Kind,
-                call.ServerName,
-                call.TargetType,
-                call.TargetName,
-                call.ToolName,
-                call.Arguments,
-                definition.SchemaVersion,
-                CanonicalJson.ComputeSha256(CanonicalJson.Serialize(call.Arguments))));
-        }
-    }
-
     private async Task TryInterruptAsync(
         Guid sessionId,
         Guid userId,
@@ -497,6 +461,15 @@ public class ChatStreamHandler(
                 "Persisted AgentSession state cannot be deserialized safely.",
                 source,
                 "当前会话需要重建后才能继续。");
+        }
+
+        if (exception is AgentRuntimeMultipleToolCallsException)
+        {
+            return AgentStreamRuntime.CreateErrorChunk(
+                AppProblemCodes.AgentSessionInterrupted,
+                "The model provider violated the single-tool-call AgentSession contract.",
+                source,
+                "本轮模型返回了不受支持的多个工具调用；会话已中断，请新建会话后继续。");
         }
 
         if (exception is not AgentSessionStateException stateException)
