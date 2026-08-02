@@ -208,6 +208,24 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void AgentFrameworkSdk_ShouldStayOnStableHarnessBom()
+    {
+        var agentFrameworkPackages = EnumeratePackageReferences(Path.Combine(SolutionRoot, "src"))
+            .Where(package => package.Include.StartsWith(
+                "Microsoft.Agents.AI",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(package => $"{package.Include}|{package.Version}")
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        agentFrameworkPackages.Should().Equal(
+        [
+            "Microsoft.Agents.AI.Harness|1.16.0",
+            "Microsoft.Agents.AI|1.16.0"
+        ], "the final main-chat BOM excludes Workflows, preview, and extension packages");
+    }
+
+    [Fact]
     public void McpSdk_ShouldStayOnStableGovernedV2Surface()
     {
         var mcpPackages = EnumeratePackageReferences(Path.Combine(SolutionRoot, "src"))
