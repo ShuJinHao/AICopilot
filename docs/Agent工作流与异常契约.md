@@ -82,7 +82,7 @@ Cloud 只读正式能力为：
 ## 5. 异常、日志与持久化
 
 - 未知 HTTP 异常走稳定 ProblemDetails，返回 canonical `code`、安全 `detail`、`userFacingMessage` 和当前 `traceId`。descriptor extensions 中大小写变体的 `code` / `traceId` 必须丢弃，调用方不能注入伪值。
-- SSE Error / AgentEvent 也只返回稳定错误码和安全摘要；字段固定为 camelCase。未知 Chat Error 不得把 raw detail 直接展示给用户。
+- SSE Error / AgentEvent 也只返回稳定错误码和安全摘要；字段固定为 camelCase。Chat Error 的 `code`、`detail`、`userFacingMessage` 均是后端完成脱敏后的活动诊断契约，前端必须完整展示；未知 code 只在缺少用户提示时使用固定 fallback，不得因此隐藏安全 `detail`。后端不得把 raw exception、SQL、内部路径或 provider 原文放入这些字段。
 - `persistence_commit_outcome_unknown` 表示写入可能已提交，调用方不得自动重试；必须先按非敏感 commit id 对账。commit marker、advisory lease 和文件 reconciliation 规则仍由持久化专题契约负责。
 - 日志、审计和持久化失败原因只允许 trace/correlation id、exception type、稳定 code、长度、计数和 SHA-256。不得记录 raw exception message/object、SQL、prompt、参数值、token、密码、连接串、endpoint、source/table/database、原始工具参数或结果行。
 - AgentSession 状态、Data Protection key、Knowledge 内容和工具 raw output 视为敏感数据；任何失败路径都不得为了诊断将其写入日志。
@@ -90,9 +90,13 @@ Cloud 只读正式能力为：
 ## 6. 前端展示
 
 - 普通 API、SSE、AgentEvent、Harness ApprovalRequest、Chat Error、OIDC、auth、RAG、Config 与 route guard 的失败必须进入可见错误栏、dialog 或安全 fallback，不得只写 console 或空 catch。
-- 前端优先展示后端 `userFacingMessage`、validation errors、安全 `detail`、`title`；未知 code 使用固定 fallback。
+- 前端错误栏完整展示后端 `code`、`userFacingMessage`、validation errors、安全 `detail` 与 `title`；未知 code 在缺少用户提示时使用固定 fallback，但仍保留后端安全诊断字段。
+- 新会话默认 `Plan`。空态建议必须随当前模式变化：`Plan` 只能建议规划步骤和待办，`Execute` 才能建议设备日志、状态、工序、版本等真实只读查询；点击建议不得自动切换模式。
+- `Running`、等待批准、`Completed`、`Failed`、`Interrupted`、`ResetRequired` 必须由真实 Session、stream、pending approval 和 error 状态统一投影。`Interrupted` / `ResetRequired` 禁用发送、模式切换和批准，并只提供“新建会话”主操作，不得恢复或自动重放。
+- 批准卡只展示服务端返回的规范工具身份和白名单安全参数摘要；不得展开原始参数，不得提供 standing rule 或“不再询问”。提交批准或拒绝时按钮立即锁定，刷新后只以 `/api/aigateway/approval/pending` 恢复权威状态。
 - 运行详情默认折叠，只展示工具名、查询次数、返回行数、截断状态、Widget 类型、业务过滤条件和安全摘要；不得展示 SQL、连接信息、内部路径、原始结果行或未脱敏错误。
 - 消息、SSE、运行状态、Harness approval、inline Widget 与 Interrupted / ResetRequired 新建会话提示均以服务端状态为权威。
+- 对话在 `1920×1080`、`1366×768` 与 `1024×768` 必须保持消息区、工具栏和固定输入区不重叠；窄屏会话栏使用抽屉，交互按钮命中区域不得小于 40px，light/dark 均使用活动设计 token。
 
 ## 7. 物理边界与禁止回潮
 

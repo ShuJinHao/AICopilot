@@ -8,6 +8,15 @@ type ProblemLike = ChatErrorPayload & {
   errors?: unknown
 }
 
+export interface ChatErrorPresentation {
+  message: string
+  code: string | null
+  detail: string | null
+  userFacingMessage: string | null
+}
+
+export type ChatErrorInput = string | ChatErrorPayload | ChatErrorPresentation
+
 function toTrimmedString(value: unknown) {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
@@ -68,6 +77,21 @@ export function extractErrorDetail(details: unknown) {
   return null
 }
 
+function extractProblemDetail(details: unknown) {
+  if (!details || typeof details !== 'object') {
+    return null
+  }
+
+  const problem = details as ProblemLike
+  const validationErrors = collectValidationErrors(problem.errors)
+  const detail = toTrimmedString(problem.detail)
+  if (detail || validationErrors.length > 0) {
+    return [detail, ...validationErrors].filter(Boolean).join('；')
+  }
+
+  return toTrimmedString(problem.title)
+}
+
 export function resolveChatErrorMessage(payload: ChatErrorPayload) {
   const userFacingMessage = toTrimmedString(payload.userFacingMessage)
 
@@ -121,76 +145,115 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
   }
 }
 
-export function toFriendlyMessage(error: unknown) {
+function isChatErrorPresentation(value: ChatErrorInput): value is ChatErrorPresentation {
+  return typeof value === 'object' && value !== null && 'message' in value
+}
+
+export function createChatErrorPresentation(input: ChatErrorInput): ChatErrorPresentation {
+  if (typeof input === 'string') {
+    return {
+      message: toTrimmedString(input) ?? '请求失败，请稍后重试。',
+      code: null,
+      detail: null,
+      userFacingMessage: null,
+    }
+  }
+
+  if (isChatErrorPresentation(input)) {
+    return input
+  }
+
+  const code = toTrimmedString(input.code)
+  const detail = toTrimmedString(input.detail)
+  const userFacingMessage = toTrimmedString(input.userFacingMessage)
+  const message =
+    userFacingMessage ??
+    (!code && detail ? detail : resolveChatErrorMessage({ ...input, code: code ?? undefined }))
+
+  return {
+    message,
+    code,
+    detail,
+    userFacingMessage,
+  }
+}
+
+export function toChatErrorPresentation(error: unknown): ChatErrorPresentation {
   if (error instanceof ApiError) {
     const problem =
-      error.details && typeof error.details === 'object'
-        ? (error.details as ChatErrorPayload)
-        : null
+      error.details && typeof error.details === 'object' ? (error.details as ProblemLike) : null
 
-    if (problem?.code || problem?.userFacingMessage) {
-      return resolveChatErrorMessage(problem)
-    }
-
-    const detail = extractErrorDetail(error.details)
-    if (detail) {
-      return detail
+    if (problem) {
+      const code = toTrimmedString(problem.code)
+      const detail = extractProblemDetail(problem)
+      const userFacingMessage = toTrimmedString(problem.userFacingMessage)
+      if (code || detail || userFacingMessage) {
+        return createChatErrorPresentation({
+          code: code ?? undefined,
+          detail: detail ?? undefined,
+          userFacingMessage,
+        })
+      }
     }
 
     if (error.status === 401) {
-      return '登录状态已失效，请重新登录。'
+      return createChatErrorPresentation('登录状态已失效，请重新登录。')
     }
 
     if (error.status === 403) {
-      return '当前账号没有访问该功能的权限。'
+      return createChatErrorPresentation('当前账号没有访问该功能的权限。')
     }
 
     if (error.status === 429) {
-      return '请求过于频繁，请稍后再试。'
+      return createChatErrorPresentation('请求过于频繁，请稍后再试。')
     }
-
-    return '请求失败，请稍后重试。'
   }
 
-  return '请求失败，请稍后重试。'
+  return createChatErrorPresentation('请求失败，请稍后重试。')
+}
+
+export function toFriendlyMessage(error: unknown) {
+  return toChatErrorPresentation(error).message
 }
 
 export const useChatErrorStore = defineStore('chatError', () => {
-  const activeErrorMessage = ref('')
+  const activeError = ref<ChatErrorPresentation | null>(null)
   const errorSessionId = ref<string | null>(null)
   const currentSessionId = ref<string | null>(null)
 
-  const errorMessage = computed(() => {
+  const errorPresentation = computed(() => {
     if (!currentSessionId.value || errorSessionId.value !== currentSessionId.value) {
-      return ''
+      return null
     }
 
-    return activeErrorMessage.value
+    return activeError.value
   })
+  const errorMessage = computed(() => errorPresentation.value?.message ?? '')
 
   function bindCurrentSession(sessionId: string | null) {
     currentSessionId.value = sessionId
   }
 
-  function setSessionError(sessionId: string, message: string) {
+  function setSessionError(sessionId: string, error: ChatErrorInput) {
     errorSessionId.value = sessionId
-    activeErrorMessage.value = message
+    activeError.value = createChatErrorPresentation(error)
   }
 
   function clearSessionError(sessionId: string | null = currentSessionId.value) {
     if (!sessionId || errorSessionId.value === sessionId) {
       errorSessionId.value = null
-      activeErrorMessage.value = ''
+      activeError.value = null
     }
   }
 
   function reset() {
-    activeErrorMessage.value = ''
+    activeError.value = null
     errorSessionId.value = null
     currentSessionId.value = null
   }
 
   return {
+    errorPresentation,
     errorMessage,
     bindCurrentSession,
     setSessionError,

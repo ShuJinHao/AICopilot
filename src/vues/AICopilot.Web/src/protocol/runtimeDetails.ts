@@ -4,14 +4,14 @@ import {
   type ChartWidget,
   type ChatChunk,
   type DataTableWidget,
-  type StatsCardWidget
+  type StatsCardWidget,
 } from '@/types/protocols'
 import type {
   AgentEventChunk,
   ChatMessage,
   FunctionCall,
   FunctionCallChunk,
-  WidgetChunk
+  WidgetChunk,
 } from '@/types/models'
 import type { ChatRunStatus } from '@/stores/sessionScopedState'
 import { formatAgentEventDetail } from './agentEventDisplay'
@@ -82,7 +82,7 @@ const safeArgLabels: Record<string, string> = {
   limit: '限制',
   top: '限制',
   topN: '限制',
-  pageSize: '页大小'
+  pageSize: '页大小',
 }
 
 const sensitiveKeyPattern =
@@ -114,7 +114,9 @@ function getNumber(value: unknown) {
 }
 
 function compactText(value: unknown, maxLength = 72) {
-  const text = String(value ?? '').replace(/\s+/g, ' ').trim()
+  const text = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (!text) {
     return ''
   }
@@ -178,7 +180,7 @@ function collectSafeArgs(value: unknown, depth = 0): RuntimeTag[] {
       tags.push({
         key: `${key}-${tags.length}`,
         text: `${label}：${compactText(entry, 44)}`,
-        tone: 'neutral'
+        tone: 'neutral',
       })
       continue
     }
@@ -239,12 +241,12 @@ function hasTruncatedFlag(value: unknown): boolean {
     return true
   }
 
-  return Object.values(parsed).some((entry) =>
-    (isRecord(entry) || typeof entry === 'string') && hasTruncatedFlag(entry)
+  return Object.values(parsed).some(
+    (entry) => (isRecord(entry) || typeof entry === 'string') && hasTruncatedFlag(entry),
   )
 }
 
-export function summarizeFunctionArgs(args: string) {
+export function summarizeFunctionArgs(args: string | Record<string, unknown>) {
   const parsed = parseJson(args)
   const tags = collectSafeArgs(parsed)
   if (tags.length > 0) {
@@ -262,7 +264,10 @@ export function summarizeFunctionArgs(args: string) {
   return '参数已记录，因无法结构化解析未展开'
 }
 
-export function summarizeFunctionResult(result: string | undefined, status: FunctionCall['status']) {
+export function summarizeFunctionResult(
+  result: string | undefined,
+  status: FunctionCall['status'],
+) {
   if (status === 'calling') {
     return '等待工具结果'
   }
@@ -348,7 +353,7 @@ function buildStatus(status: ChatRunStatus | null | undefined): RuntimeStatusDet
     summary: summarizeRuntimeStatusText(status.error?.message || status.summary, status.phase),
     elapsedText: elapsedText(status.elapsedMs),
     tone: phaseTone(status),
-    facts
+    facts,
   }
 }
 
@@ -359,14 +364,14 @@ function buildModelBadges(message: ChatMessage): RuntimeTag[] {
   badges.push({
     key: 'final-model',
     tone: 'success',
-    text: `回答模型：${finalModelName}`
+    text: `回答模型：${finalModelName}`,
   })
 
   if (typeof message.contextWindowTokens === 'number') {
     badges.push({
       key: 'context-window',
       tone: 'neutral',
-      text: `上下文：${message.contextWindowTokens.toLocaleString('zh-CN')} tokens`
+      text: `上下文：${message.contextWindowTokens.toLocaleString('zh-CN')} tokens`,
     })
   }
 
@@ -374,7 +379,7 @@ function buildModelBadges(message: ChatMessage): RuntimeTag[] {
     badges.push({
       key: 'max-output',
       tone: 'neutral',
-      text: `输出上限：${message.maxOutputTokens.toLocaleString('zh-CN')} tokens`
+      text: `输出上限：${message.maxOutputTokens.toLocaleString('zh-CN')} tokens`,
     })
   }
 
@@ -391,30 +396,32 @@ function agentEventLabel(stage: string) {
 }
 
 function buildEvents(chunks: ChatChunk[]): RuntimeEventDetail[] {
-  return (chunks.filter((chunk) => chunk.type === ChunkType.AgentEvent) as AgentEventChunk[])
-    .map((chunk, index) => ({
+  return (chunks.filter((chunk) => chunk.type === ChunkType.AgentEvent) as AgentEventChunk[]).map(
+    (chunk, index) => ({
       key: `${chunk.event.stage}-${index}`,
       label: agentEventLabel(chunk.event.stage),
       detail: formatAgentEventDetail(chunk.event),
-      tone: chunk.event.recoverable ? 'blue' as const : 'warning' as const,
-      statusText: chunk.event.recoverable ? '可继续' : '需关注'
-    }))
+      tone: chunk.event.recoverable ? ('blue' as const) : ('warning' as const),
+      statusText: chunk.event.recoverable ? '可继续' : '需关注',
+    }),
+  )
 }
 
 function buildTools(chunks: ChatChunk[]): RuntimeToolDetail[] {
-  return (chunks.filter((chunk) => chunk.type === ChunkType.FunctionCall) as FunctionCallChunk[])
-    .map((chunk, index) => {
-      const call = chunk.functionCall
-      const isRunning = call.status === 'calling'
-      return {
-        key: `${call.id || call.name}-${index}`,
-        name: call.name || '未命名工具',
-        statusText: isRunning ? '执行中' : '已完成',
-        tone: isRunning ? 'warning' as const : 'success' as const,
-        argsSummary: summarizeFunctionArgs(call.args),
-        resultSummary: summarizeFunctionResult(call.result, call.status)
-      }
-    })
+  return (
+    chunks.filter((chunk) => chunk.type === ChunkType.FunctionCall) as FunctionCallChunk[]
+  ).map((chunk, index) => {
+    const call = chunk.functionCall
+    const isRunning = call.status === 'calling'
+    return {
+      key: `${call.id || call.name}-${index}`,
+      name: call.name || '未命名工具',
+      statusText: isRunning ? '执行中' : '已完成',
+      tone: isRunning ? ('warning' as const) : ('success' as const),
+      argsSummary: summarizeFunctionArgs(call.args),
+      resultSummary: summarizeFunctionResult(call.result, call.status),
+    }
+  })
 }
 
 function widgetTypeLabel(type: string) {
@@ -436,7 +443,7 @@ function summarizeWidget(chunk: WidgetChunk) {
     return {
       typeLabel: '组件',
       title: '结构化展示',
-      summary: '组件载荷已记录'
+      summary: '组件载荷已记录',
     }
   }
 
@@ -445,7 +452,7 @@ function summarizeWidget(chunk: WidgetChunk) {
     return {
       typeLabel: widgetTypeLabel(normalized.type),
       title: normalized.title || '数据表',
-      summary: `展示 ${data.rows.length} 行证据`
+      summary: `展示 ${data.rows.length} 行证据`,
     }
   }
 
@@ -454,7 +461,7 @@ function summarizeWidget(chunk: WidgetChunk) {
     return {
       typeLabel: widgetTypeLabel(normalized.type),
       title: normalized.title || '图表',
-      summary: `展示 ${data.dataset.source.length} 个数据点`
+      summary: `展示 ${data.dataset.source.length} 个数据点`,
     }
   }
 
@@ -463,7 +470,7 @@ function summarizeWidget(chunk: WidgetChunk) {
     return {
       typeLabel: widgetTypeLabel(normalized.type),
       title: normalized.title || data.label || '指标卡',
-      summary: `${data.label || '指标'}：${compactText(data.value, 32)}${data.unit ?? ''}`
+      summary: `${data.label || '指标'}：${compactText(data.value, 32)}${data.unit ?? ''}`,
     }
   }
 
@@ -472,24 +479,25 @@ function summarizeWidget(chunk: WidgetChunk) {
   return {
     typeLabel: '组件',
     title: '结构化展示',
-    summary: '组件载荷已记录'
+    summary: '组件载荷已记录',
   }
 }
 
 function buildWidgets(chunks: ChatChunk[]): RuntimeWidgetDetail[] {
-  return (chunks.filter((chunk) => chunk.type === ChunkType.Widget) as WidgetChunk[])
-    .map((chunk, index) => {
+  return (chunks.filter((chunk) => chunk.type === ChunkType.Widget) as WidgetChunk[]).map(
+    (chunk, index) => {
       const widget = summarizeWidget(chunk)
       return {
         key: `${widget.title}-${index}`,
-        ...widget
+        ...widget,
       }
-    })
+    },
+  )
 }
 
 export function buildRuntimeDetails(
   message: ChatMessage,
-  status?: ChatRunStatus | null
+  status?: ChatRunStatus | null,
 ): RuntimeDetails {
   if (message.role === MessageRole.User) {
     return {
@@ -498,7 +506,7 @@ export function buildRuntimeDetails(
       modelBadges: [],
       events: [],
       tools: [],
-      widgets: []
+      widgets: [],
     }
   }
 
@@ -515,10 +523,6 @@ export function buildRuntimeDetails(
     tools,
     widgets,
     count:
-      (statusDetail ? 1 : 0) +
-      modelBadges.length +
-      events.length +
-      tools.length +
-      widgets.length
+      (statusDetail ? 1 : 0) + modelBadges.length + events.length + tools.length + widgets.length,
   }
 }

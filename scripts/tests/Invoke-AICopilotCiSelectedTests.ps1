@@ -89,13 +89,27 @@ foreach ($project in $projects) {
     $resolvedProjects[[string]$project.path] = [IO.Path]::GetFullPath($projectPath)
 }
 
+$analyzerFixtureSelected = @($projects | Where-Object {
+        [string]$_.projectName -ceq 'AICopilot.AnalyzerFixtureTests'
+    }).Count -gt 0
+$analyzerProjectRelativePath = 'src/analyzers/AICopilot.Architecture.Analyzers/AICopilot.Architecture.Analyzers.csproj'
+$analyzerProjectPath = [IO.Path]::GetFullPath((Join-Path $root $analyzerProjectRelativePath))
+if ($analyzerFixtureSelected -and -not (Test-Path $analyzerProjectPath -PathType Leaf)) {
+    throw "Selected Analyzer fixture prerequisite is missing: $analyzerProjectRelativePath"
+}
+
 $selectedGraphPath = ''
 if ($projects.Count -gt 0) {
     $selectedGraphPath = Join-Path $resolvedResults 'AICopilot.CiSelected.slnx'
-    $projectElements = @($projects | ForEach-Object {
+    $graphProjectPaths = @($projects | ForEach-Object {
+            $resolvedProjects[[string]$_.path]
+        })
+    if ($analyzerFixtureSelected) {
+        $graphProjectPaths += $analyzerProjectPath
+    }
+    $projectElements = @($graphProjectPaths | Sort-Object -Unique | ForEach-Object {
             $relativePath = [IO.Path]::GetRelativePath(
-                $resolvedResults,
-                $resolvedProjects[[string]$_.path]).Replace('\', '/')
+                $resolvedResults, $_).Replace('\', '/')
             "  <Project Path=`"$([Security.SecurityElement]::Escape($relativePath))`" />"
         })
     @(
@@ -117,6 +131,14 @@ if ($projects.Count -gt 0) {
             '--nologo',
             "-p:SourceRevisionId=$head") `
         -FailureMessage 'Build failed for the selected AICopilot test project graph.'
+
+    if ($analyzerFixtureSelected) {
+        $analyzerOutputPath = Join-Path $root (
+            "src/analyzers/AICopilot.Architecture.Analyzers/bin/$Configuration/netstandard2.0/AICopilot.Architecture.Analyzers.dll")
+        if (-not (Test-Path $analyzerOutputPath -PathType Leaf)) {
+            throw "Selected Analyzer fixture graph did not produce the $Configuration Analyzer output: $analyzerOutputPath"
+        }
+    }
 }
 
 $productionBuildRequired = [bool]$selection.productionBuildRequired

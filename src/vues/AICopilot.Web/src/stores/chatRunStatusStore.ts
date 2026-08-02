@@ -7,7 +7,7 @@ import {
   createSessionScopedState,
   type ChatRunPhase,
   type ChatRunStatus,
-  type SessionScopedState
+  type SessionScopedState,
 } from './sessionScopedState'
 import { useSessionStore } from './sessionStore'
 
@@ -97,7 +97,7 @@ export function extractReturnedRowsFromFunctionResult(chunk: ChatChunk): number 
 }
 
 export function getChatRunMessageKey(
-  message: Pick<ChatMessage, 'messageId' | 'sequence' | 'timestamp'>
+  message: Pick<ChatMessage, 'messageId' | 'sequence' | 'timestamp'>,
 ) {
   if (typeof message.messageId === 'number' && message.messageId > 0) {
     return `message:${message.messageId}`
@@ -126,15 +126,15 @@ function isCloudReadonlyQuery(chunk: ChatChunk) {
     haystack.includes('cloudreadonly') ||
     haystack.includes('cloud_readonly') ||
     haystack.includes('business_database') ||
+    haystack.includes('businessquery') ||
     haystack.includes('devicelog') ||
-    haystack.includes('device_logs') ||
-    haystack.includes('query')
+    haystack.includes('device_logs')
   )
 }
 
 function parseErrorPayload(chunk: ChatChunk): ChatErrorPayload {
   const parsed = parseJson(chunk.content)
-  return isObject(parsed) ? parsed as ChatErrorPayload : {}
+  return isObject(parsed) ? (parsed as ChatErrorPayload) : {}
 }
 
 function parseAgentEvent(chunk: ChatChunk) {
@@ -166,7 +166,7 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
 
   function hasRunningStatus() {
     return Object.values(sessionStates).some((state) =>
-      state.chatRunStatus ? runningPhases.has(state.chatRunStatus.phase) : false
+      state.chatRunStatus ? runningPhases.has(state.chatRunStatus.phase) : false,
     )
   }
 
@@ -179,7 +179,7 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
 
       state.chatRunStatus = {
         ...status,
-        elapsedMs: elapsedFrom(status.startedAt, now)
+        elapsedMs: elapsedFrom(status.startedAt, now),
       }
     }
   }
@@ -220,7 +220,7 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
   function updateStatus(
     sessionId: string,
     messageKey: string,
-    updater: (status: ChatRunStatus) => ChatRunStatus
+    updater: (status: ChatRunStatus) => ChatRunStatus,
   ) {
     const status = getStatus(sessionId, messageKey)
     if (!status || !runningPhases.has(status.phase)) {
@@ -240,7 +240,7 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
       startedAt: new Date(now).toISOString(),
       elapsedMs: 0,
       summary,
-      queryCount: 0
+      queryCount: 0,
     })
   }
 
@@ -249,14 +249,14 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
     messageKey: string,
     phase: ChatRunPhase,
     summary: string,
-    extra: Partial<Pick<ChatRunStatus, 'queryCount' | 'returnedRows'>> = {}
+    extra: Partial<Pick<ChatRunStatus, 'queryCount' | 'returnedRows'>> = {},
   ) {
     updateStatus(sessionId, messageKey, (status) => ({
       ...status,
       ...extra,
       phase,
       summary,
-      elapsedMs: elapsedFrom(status.startedAt)
+      elapsedMs: elapsedFrom(status.startedAt),
     }))
   }
 
@@ -271,7 +271,7 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
           sessionId,
           messageKey,
           'querying',
-          isCloudReadonlyQuery(chunk) ? '正在查询 Cloud 只读数据' : '正在调用只读工具'
+          isCloudReadonlyQuery(chunk) ? '正在查询 Cloud 只读数据' : '正在调用受治理工具',
         )
         return
       case ChunkType.FunctionResult: {
@@ -282,10 +282,8 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
           summary: isCloudReadonlyQuery(chunk) ? '正在查询 Cloud 只读数据' : '正在处理工具结果',
           queryCount: (status.queryCount ?? 0) + 1,
           returnedRows:
-            rows === undefined
-              ? status.returnedRows
-              : (status.returnedRows ?? 0) + rows,
-          elapsedMs: elapsedFrom(status.startedAt)
+            rows === undefined ? status.returnedRows : (status.returnedRows ?? 0) + rows,
+          elapsedMs: elapsedFrom(status.startedAt),
         }))
         return
       }
@@ -329,11 +327,16 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
       phase: 'completed',
       completedAt,
       elapsedMs: elapsedFrom(status.startedAt),
-      summary: '回答已完成'
+      summary: '回答已完成',
     })
   }
 
-  function failRun(sessionId: string, messageKey: string, message = '请求失败，请稍后重试。', code?: string) {
+  function failRun(
+    sessionId: string,
+    messageKey: string,
+    message = '请求失败，请稍后重试。',
+    code?: string,
+  ) {
     const status = getStatus(sessionId, messageKey)
     if (!status || status.phase === 'completed') {
       return
@@ -348,8 +351,8 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
       summary: message,
       error: {
         code,
-        message
-      }
+        message,
+      },
     })
   }
 
@@ -391,6 +394,6 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
     clearRunStatus,
     clearSession,
     getStatus,
-    reset
+    reset,
   }
 })

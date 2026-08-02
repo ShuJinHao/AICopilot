@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ShieldAlert } from 'lucide-vue-next'
 import AiButton from '@/components/ai/AiButton.vue'
 import AiTag from '@/components/ai/AiTag.vue'
+import {
+  getApprovalSafeArgsSummary,
+  getCanonicalApprovalIdentity,
+  hasStrictApprovalIdentity,
+} from '@/protocol/approvalProtocol'
 import type { ApprovalChunk } from '@/types/models'
-import ArgumentViewer from './ArgumentViewer.vue'
 
 const props = defineProps<{
   chunk: ApprovalChunk
@@ -16,14 +20,13 @@ const emit = defineEmits<{
   (event: 'reject', payload: { callId: string }): void
 }>()
 
+const locallyLocked = ref(false)
 const request = computed(() => props.chunk.request)
 const isPending = computed(() => props.chunk.status === 'pending')
-const hasStrictIdentity = computed(
-  () => Boolean(request.value.targetType) && Boolean(request.value.targetName) && Boolean(request.value.toolName)
-)
-const targetText = computed(() =>
-  [request.value.targetType, request.value.targetName, request.value.toolName].filter(Boolean).join(' / ')
-)
+const hasStrictIdentity = computed(() => hasStrictApprovalIdentity(request.value))
+const canonicalIdentity = computed(() => getCanonicalApprovalIdentity(request.value))
+const safeArgsSummary = computed(() => getApprovalSafeArgsSummary(request.value))
+const controlsLocked = computed(() => Boolean(props.isSubmitting || locallyLocked.value))
 const statusText = computed(() => {
   switch (props.chunk.status) {
     case 'approved':
@@ -41,18 +44,37 @@ const statusTone = computed(() => {
   if (props.chunk.status === 'pending') return 'warning'
   return 'neutral'
 })
-const approvalTitle = computed(() => '需要确认后继续')
+const approvalTitle = computed(() => '确认调用受治理工具')
+
 function approve() {
-  if (isPending.value && hasStrictIdentity.value) {
+  if (isPending.value && hasStrictIdentity.value && !controlsLocked.value) {
+    locallyLocked.value = true
     emit('approve', { callId: request.value.callId })
   }
 }
 
 function reject() {
-  if (isPending.value && hasStrictIdentity.value) {
+  if (isPending.value && hasStrictIdentity.value && !controlsLocked.value) {
+    locallyLocked.value = true
     emit('reject', { callId: request.value.callId })
   }
 }
+
+watch(
+  () => props.isSubmitting,
+  (isSubmitting, wasSubmitting) => {
+    if (wasSubmitting && !isSubmitting && props.chunk.status === 'pending') {
+      locallyLocked.value = false
+    }
+  },
+)
+
+watch(
+  () => request.value.callId,
+  () => {
+    locallyLocked.value = false
+  },
+)
 </script>
 
 <template>
@@ -61,7 +83,7 @@ function reject() {
       <span class="approval-icon"><ShieldAlert class="h-5 w-5" /></span>
       <div>
         <h3>{{ approvalTitle }}</h3>
-        <p>该动作需要人工复核后才能继续。</p>
+        <p>仅对本次调用生效，提交后不能重复决定。</p>
       </div>
       <AiTag :tone="statusTone">{{ statusText }}</AiTag>
     </header>
@@ -71,44 +93,27 @@ function reject() {
         审批请求缺少完整执行身份，系统不会允许继续执行。
       </div>
 
-      <details class="approval-detail-fold">
-        <summary>审批详情</summary>
-        <dl>
-          <div v-if="request.name">
-            <dt>请求</dt>
-            <dd>{{ request.name }}</dd>
-          </div>
-          <div>
-            <dt>工具</dt>
-            <dd class="mono">{{ request.toolName || request.name }}</dd>
-          </div>
-          <div v-if="targetText">
-            <dt>身份</dt>
-            <dd class="mono">{{ targetText }}</dd>
-          </div>
-          <div v-if="request.runtimeName">
-            <dt>运行标识</dt>
-            <dd class="mono">{{ request.runtimeName }}</dd>
-          </div>
-        </dl>
-
-        <div class="args-block">
-          <span>参数</span>
-          <ArgumentViewer :args="request.args" />
+      <div class="approval-facts">
+        <div>
+          <span>规范工具身份</span>
+          <code>{{ canonicalIdentity || '身份不完整' }}</code>
         </div>
-      </details>
-
+        <div>
+          <span>安全参数摘要</span>
+          <p>{{ safeArgsSummary }}</p>
+        </div>
+      </div>
     </div>
 
     <footer>
       <template v-if="isPending">
-        <AiButton :disabled="isSubmitting || !hasStrictIdentity" @click="reject">拒绝</AiButton>
+        <AiButton :disabled="controlsLocked || !hasStrictIdentity" @click="reject"> 拒绝 </AiButton>
         <AiButton
           variant="primary"
-          :disabled="Boolean(isSubmitting || !hasStrictIdentity)"
+          :disabled="controlsLocked || !hasStrictIdentity"
           @click="approve"
         >
-          {{ isSubmitting ? '提交中' : '批准' }}
+          {{ controlsLocked ? '提交中' : '批准' }}
         </AiButton>
       </template>
       <span v-else class="muted">审批状态：{{ statusText }}</span>
@@ -120,14 +125,14 @@ function reject() {
 .approval-card {
   display: grid;
   overflow: hidden;
-  border: 1px solid #fed7aa;
-  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--app-warning) 38%, var(--ai-border));
+  border-radius: 16px;
   background: var(--ai-surface);
   box-shadow: var(--ai-shadow-xs);
 }
 
 .approval-card.approved {
-  border-color: #bbf7d0;
+  border-color: color-mix(in srgb, var(--app-success) 38%, var(--ai-border));
 }
 
 .approval-card.rejected,
@@ -160,9 +165,9 @@ function reject() {
   height: 36px;
   width: 36px;
   place-items: center;
-  border-radius: 14px;
-  background: #fff7ed;
-  color: #b45309;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--app-warning) 12%, var(--ai-surface));
+  color: var(--app-warning);
 }
 
 .approval-card h3 {
@@ -185,72 +190,53 @@ function reject() {
   padding: 15px;
 }
 
-dl {
+.approval-facts {
   display: grid;
-  gap: 8px;
-  margin: 0;
+  gap: 10px;
 }
 
-dl div {
+.approval-facts > div {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 8px;
-}
-
-dt {
-  color: var(--ai-text-muted);
-  font-weight: 800;
-}
-
-dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--ai-text);
-}
-
-.alert-danger {
-  border: 1px solid #fecaca;
-  border-radius: 16px;
-  background: #fef2f2;
-  padding: 10px 12px;
-  color: #b42318;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.args-block,
-.approval-detail-fold {
-  display: grid;
-  gap: 8px;
-}
-
-.args-block > span {
-  color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.approval-detail-fold {
+  gap: 5px;
   border: 1px solid var(--ai-border);
-  border-radius: 16px;
+  border-radius: 11px;
   padding: 10px 12px;
   background: var(--ai-surface-soft);
 }
 
-.approval-detail-fold summary {
-  cursor: pointer;
+.approval-facts span {
   color: var(--ai-text-muted);
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 11px;
+  font-weight: 800;
 }
 
-.approval-detail-fold[open] summary {
-  margin-bottom: 8px;
+.approval-facts code,
+.approval-facts p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ai-text);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.approval-facts code {
+  font-family: 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
+.alert-danger {
+  border: 1px solid color-mix(in srgb, var(--app-danger) 36%, var(--ai-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-danger) 8%, var(--ai-surface));
+  padding: 10px 12px;
+  color: var(--app-danger);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 footer {
   border-top: 1px solid var(--ai-border);
-  background: rgba(248, 250, 252, 0.72);
+  background: color-mix(in srgb, var(--ai-surface) 72%, var(--ai-surface-soft));
 }
 
 .muted {

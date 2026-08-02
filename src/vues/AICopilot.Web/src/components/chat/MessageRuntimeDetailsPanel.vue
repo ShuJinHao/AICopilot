@@ -110,7 +110,7 @@ const details = computed(() => buildRuntimeDetails(props.message, props.status ?
 
 .runtime-details summary {
   display: flex;
-  min-height: 38px;
+  min-height: 42px;
   cursor: pointer;
   align-items: center;
   gap: 8px;
@@ -173,7 +173,7 @@ const details = computed(() => buildRuntimeDetails(props.message, props.status ?
   border: 1px solid rgba(63, 111, 115, 0.12);
   border-radius: 8px;
   padding: 8px 9px;
-  background: rgba(255, 255, 255, 0.62);
+  background: color-mix(in srgb, var(--ai-surface) 78%, var(--ai-surface-soft));
 }
 
 .runtime-row strong,

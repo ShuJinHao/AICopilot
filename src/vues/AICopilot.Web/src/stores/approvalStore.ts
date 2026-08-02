@@ -5,7 +5,7 @@ import type { ApprovalChunk } from '@/types/models'
 import { chatService } from '@/services/chatService'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
-import { useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
+import { toChatErrorPresentation, useChatErrorStore } from './chatErrorStore'
 
 export const useApprovalStore = defineStore('chatApproval', () => {
   const sessionStore = useSessionStore()
@@ -57,7 +57,7 @@ export const useApprovalStore = defineStore('chatApproval', () => {
       reconcilePendingApprovalCards(sessionId, pendingApprovals)
       clearAuthorityUnknown(sessionId)
     } catch (error) {
-      errorStore.setSessionError(sessionId, toFriendlyMessage(error))
+      errorStore.setSessionError(sessionId, toChatErrorPresentation(error))
       throw error
     } finally {
       sync(sessionId)

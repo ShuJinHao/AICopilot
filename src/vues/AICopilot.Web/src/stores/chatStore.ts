@@ -7,7 +7,13 @@ import { getErrorCode, processChunk } from '@/protocol/chunkReducer'
 import { getApprovalFailureStatus } from '@/protocol/approvalProtocol'
 import { useAgentCatalogStore } from './agentCatalogStore'
 import { useApprovalStore } from './approvalStore'
-import { toFriendlyMessage, useChatErrorStore } from './chatErrorStore'
+import {
+  createChatErrorPresentation,
+  toChatErrorPresentation,
+  useChatErrorStore,
+  type ChatErrorInput,
+  type ChatErrorPresentation,
+} from './chatErrorStore'
 import { getChatRunMessageKey, useChatRunStatusStore } from './chatRunStatusStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
@@ -32,7 +38,7 @@ export const useChatStore = defineStore('chat', () => {
   const historyCursors = ref<Record<string, HistoryCursorState>>({})
   const isLoadingOlderHistory = ref(false)
   const sessionOperationCount = ref(0)
-  const initializationError = ref('')
+  const initializationError = ref<ChatErrorPresentation | null>(null)
 
   const sessions = computed(() => sessionStore.sessions)
   const currentSessionId = computed(() => sessionStore.currentSessionId)
@@ -50,7 +56,7 @@ export const useChatStore = defineStore('chat', () => {
       currentSession.value?.agentSessionResetRequired ||
       agentSessionStatus.value === 'ResetRequired'
     ) {
-      return '此会话没有可恢复的 AgentSession 状态，请新建会话后继续。'
+      return '此会话没有可恢复的状态；系统不会自动重放，请新建会话后继续。'
     }
     if (agentSessionStatus.value === 'Interrupted') {
       return '上一次执行已中断；系统不会自动重放模型或工具调用，请新建会话后继续。'
@@ -93,7 +99,10 @@ export const useChatStore = defineStore('chat', () => {
       !isSessionTransitionBlocked.value,
     ),
   )
-  const errorMessage = computed(() => errorStore.errorMessage || initializationError.value)
+  const errorPresentation = computed(
+    () => errorStore.errorPresentation ?? initializationError.value,
+  )
+  const errorMessage = computed(() => errorPresentation.value?.message ?? '')
   const hasMoreHistoryBefore = computed(() => {
     const sessionId = sessionStore.currentSessionId
     return Boolean(sessionId && historyCursors.value[sessionId]?.hasMoreBefore)
@@ -108,13 +117,13 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function clearCurrentSessionError() {
-    initializationError.value = ''
+    initializationError.value = null
     bindErrorSession()
     errorStore.clearSessionError(sessionStore.currentSessionId)
   }
 
-  function setSessionError(sessionId: string, message: string) {
-    errorStore.setSessionError(sessionId, message)
+  function setSessionError(sessionId: string, error: ChatErrorInput) {
+    errorStore.setSessionError(sessionId, error)
     bindErrorSession()
   }
 
@@ -237,7 +246,7 @@ export const useChatStore = defineStore('chat', () => {
       updateHistoryCursor(sessionId, history)
       return history.items.length > 0
     } catch (error) {
-      setSessionError(sessionId, toFriendlyMessage(error))
+      setSessionError(sessionId, toChatErrorPresentation(error))
       return false
     } finally {
       isLoadingOlderHistory.value = false
@@ -248,7 +257,7 @@ export const useChatStore = defineStore('chat', () => {
     await catalogStore.loadKnowledgeBases((message) => {
       const sessionId = sessionStore.currentSessionId
       if (sessionId) setSessionError(sessionId, message)
-      else initializationError.value = message
+      else initializationError.value = createChatErrorPresentation(message)
     })
   }
 
@@ -258,7 +267,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function prepareInitialization() {
     if (sessionStore.isSessionActivating) return
-    initializationError.value = ''
+    initializationError.value = null
     sessionStore.beginSessionActivation()
     streamStore.stop()
     errorStore.clearSessionError()
@@ -282,7 +291,7 @@ export const useChatStore = defineStore('chat', () => {
       sessionStore.failSessionActivation(previousActiveSessionId)
       approvalStore.sync(previousActiveSessionId)
       bindErrorSession()
-      setSessionError(previousCurrentSessionId ?? id, toFriendlyMessage(error))
+      setSessionError(previousCurrentSessionId ?? id, toChatErrorPresentation(error))
       throw error
     }
   }
@@ -336,9 +345,9 @@ export const useChatStore = defineStore('chat', () => {
       sessionStore.failSessionActivation(previousActiveSessionId)
       approvalStore.sync(previousActiveSessionId)
       bindErrorSession()
-      const message = toFriendlyMessage(error)
-      if (previousCurrentSessionId) setSessionError(previousCurrentSessionId, message)
-      else initializationError.value = message
+      const presentation = toChatErrorPresentation(error)
+      if (previousCurrentSessionId) setSessionError(previousCurrentSessionId, presentation)
+      else initializationError.value = presentation
       throw error
     }
   }
@@ -349,7 +358,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       return await createSession()
     } catch (error) {
-      initializationError.value = toFriendlyMessage(error)
+      initializationError.value = toChatErrorPresentation(error)
       console.error('Failed to create a new session.', error)
       return null
     }
@@ -396,7 +405,7 @@ export const useChatStore = defineStore('chat', () => {
       sessionStore.failSessionActivation(previousActiveSessionId)
       bindErrorSession()
       const sessionId = sessionStore.currentSessionId
-      if (sessionId) setSessionError(sessionId, toFriendlyMessage(error))
+      if (sessionId) setSessionError(sessionId, toChatErrorPresentation(error))
       return false
     }
   }
@@ -422,7 +431,7 @@ export const useChatStore = defineStore('chat', () => {
         return true
       })
     } catch (error) {
-      setSessionError(sessionId, toFriendlyMessage(error))
+      setSessionError(sessionId, toChatErrorPresentation(error))
       try {
         await sessionStore.refreshSession(sessionId)
       } catch (refreshError) {
@@ -500,18 +509,18 @@ export const useChatStore = defineStore('chat', () => {
           onError(error) {
             streamStore.stop()
             assistantMessage.isStreaming = false
-            const message = toFriendlyMessage(error)
-            runStatusStore.failRun(sessionId, messageKey, message)
-            setSessionError(sessionId, message)
+            const presentation = toChatErrorPresentation(error)
+            runStatusStore.failRun(sessionId, messageKey, presentation.message)
+            setSessionError(sessionId, presentation)
             approvalStore.sync(sessionId)
           },
         })
 
         if (shouldRefreshPendingApprovals) await approvalStore.refreshPendingApprovals(sessionId)
       } catch (error) {
-        const message = toFriendlyMessage(error)
-        runStatusStore.failRun(sessionId, messageKey, message)
-        setSessionError(sessionId, message)
+        const presentation = toChatErrorPresentation(error)
+        runStatusStore.failRun(sessionId, messageKey, presentation.message)
+        setSessionError(sessionId, presentation)
       } finally {
         streamStore.stop()
         assistantMessage.isStreaming = false
@@ -532,7 +541,9 @@ export const useChatStore = defineStore('chat', () => {
     chunk: ApprovalChunk,
   ) {
     const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) return false
+    if (!sessionId || isAgentSessionUnavailable.value || isSessionTransitionBlocked.value) {
+      return false
+    }
     if (!ownsCurrentApproval(callId, chunk, sessionId)) {
       setSessionError(sessionId, '审批目标不属于当前会话，已阻止请求。')
       return false
@@ -543,7 +554,8 @@ export const useChatStore = defineStore('chat', () => {
       let approvalErrorCode: string | null = null
       clearCurrentSessionError()
       streamStore.start()
-      const targetMessage = messageStore.getLastAssistantMessage(sessionId) ?? createAssistantMessage(sessionId)
+      const targetMessage =
+        messageStore.getLastAssistantMessage(sessionId) ?? createAssistantMessage(sessionId)
       targetMessage.isStreaming = true
 
       try {
@@ -570,14 +582,14 @@ export const useChatStore = defineStore('chat', () => {
             streamStore.stop()
             targetMessage.isStreaming = false
             chunk.status = 'pending'
-            setSessionError(sessionId, toFriendlyMessage(error))
+            setSessionError(sessionId, toChatErrorPresentation(error))
             approvalStore.sync(sessionId)
           },
         })
       } catch (error) {
         approvalFailed = true
         chunk.status = 'pending'
-        setSessionError(sessionId, toFriendlyMessage(error))
+        setSessionError(sessionId, toChatErrorPresentation(error))
       } finally {
         streamStore.stop()
         targetMessage.isStreaming = false
@@ -612,7 +624,7 @@ export const useChatStore = defineStore('chat', () => {
     historyCursors.value = {}
     isLoadingOlderHistory.value = false
     sessionOperationCount.value = 0
-    initializationError.value = ''
+    initializationError.value = null
   }
 
   return {
@@ -642,6 +654,7 @@ export const useChatStore = defineStore('chat', () => {
     selectedKnowledgeBaseId,
     selectedKnowledgeBase,
     currentRunStatus,
+    errorPresentation,
     errorMessage,
     getRunStatusForMessage,
     prepareInitialization,

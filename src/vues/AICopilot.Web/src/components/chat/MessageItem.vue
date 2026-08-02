@@ -16,14 +16,17 @@ const props = defineProps<{
 
 const store = useChatStore()
 const isUser = computed(() => props.message.role === MessageRole.User)
-const runStatus = computed(() => isUser.value ? null : store.getRunStatusForMessage(props.message))
+const runStatus = computed(() =>
+  isUser.value ? null : store.getRunStatusForMessage(props.message),
+)
 const chunks = computed(() => props.message.chunks)
 const visibleChunks = computed(() =>
-  chunks.value.filter((chunk) =>
-    chunk.type === ChunkType.Text ||
-    chunk.type === ChunkType.Widget ||
-    chunk.type === ChunkType.ApprovalRequest
-  )
+  chunks.value.filter(
+    (chunk) =>
+      chunk.type === ChunkType.Text ||
+      chunk.type === ChunkType.Widget ||
+      chunk.type === ChunkType.ApprovalRequest,
+  ),
 )
 
 function asWidget(chunk: ChatChunk) {
@@ -35,12 +38,22 @@ function asApproval(chunk: ChatChunk) {
 }
 
 async function approve(payload: { callId: string }, chunk: ApprovalChunk) {
-  if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
+  if (
+    !store.resolvedSessionId ||
+    store.isAgentSessionUnavailable ||
+    store.isSessionTransitionBlocked
+  )
+    return
   await store.submitApproval(payload.callId, 'approved', chunk)
 }
 
 async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
-  if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
+  if (
+    !store.resolvedSessionId ||
+    store.isAgentSessionUnavailable ||
+    store.isSessionTransitionBlocked
+  )
+    return
   await store.submitApproval(payload.callId, 'rejected', chunk)
 }
 </script>
@@ -55,21 +68,33 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
     <div class="message-body">
       <div class="message-meta">
         <strong>{{ isUser ? '你' : 'AICopilot' }}</strong>
-        <span>{{ new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
+        <span>{{
+          new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour12: false })
+        }}</span>
       </div>
 
       <ChatRunStatusStrip v-if="runStatus" :status="runStatus" />
 
       <div class="chunk-list">
-        <template v-for="(chunk, index) in visibleChunks" :key="`${chunk.source}-${chunk.type}-${index}`">
+        <template
+          v-for="(chunk, index) in visibleChunks"
+          :key="`${chunk.source}-${chunk.type}-${index}`"
+        >
           <MessageTextBlock v-if="chunk.type === ChunkType.Text" :content="chunk.content" />
 
-          <WidgetRenderer v-else-if="chunk.type === ChunkType.Widget" :data="asWidget(chunk).widget" />
+          <WidgetRenderer
+            v-else-if="chunk.type === ChunkType.Widget"
+            :data="asWidget(chunk).widget"
+          />
 
           <ApprovalCard
             v-else-if="chunk.type === ChunkType.ApprovalRequest"
             :chunk="asApproval(chunk)"
-            :is-submitting="store.isSessionTransitionBlocked || !store.resolvedSessionId"
+            :is-submitting="
+              store.isAgentSessionUnavailable ||
+              store.isSessionTransitionBlocked ||
+              !store.resolvedSessionId
+            "
             @approve="(payload) => approve(payload, asApproval(chunk))"
             @reject="(payload) => reject(payload, asApproval(chunk))"
           />
@@ -98,21 +123,22 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
 .message.user .avatar {
   grid-column: 2;
   grid-row: 1;
-  border-color: rgba(200, 255, 61, 0.38);
-  background: #efffbe;
-  color: var(--ai-graphite);
+  border-color: color-mix(in srgb, var(--ai-graphite) 24%, var(--ai-border));
+  background: color-mix(in srgb, var(--ai-graphite) 12%, var(--ai-surface));
+  color: var(--ai-text);
 }
 
 .message.user .message-body {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
-  border-color: rgba(200, 255, 61, 0.32);
+  max-width: min(78%, 720px);
+  border-color: color-mix(in srgb, var(--ai-graphite) 18%, var(--ai-border));
   border-style: solid;
   border-width: 1px;
   border-radius: 18px;
   padding: 12px 14px;
-  background: rgba(239, 255, 190, 0.92);
+  background: color-mix(in srgb, var(--ai-graphite) 7%, var(--ai-surface));
   box-shadow: var(--ai-shadow-xs);
 }
 
@@ -132,12 +158,34 @@ async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   display: grid;
   gap: 12px;
   min-width: 0;
-  max-width: min(100%, 940px);
+  max-width: min(100%, 900px);
   border: 0;
   border-radius: 0;
   padding: 2px 0;
   background: transparent;
   box-shadow: none;
+}
+
+@media (max-width: 720px) {
+  .message,
+  .message.user {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .message.user .avatar {
+    grid-column: 1;
+  }
+
+  .message.user .message-body {
+    grid-column: 2;
+    max-width: 100%;
+  }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 11px;
+  }
 }
 
 .message-meta {

@@ -18,7 +18,7 @@ import { resolveChatErrorMessage } from '@/stores/chatErrorStore'
 import { stripThinkingTags } from './modelOutputSanitizer'
 
 export interface ChunkReducerCallbacks {
-  setSessionError: (sessionId: string, message: string) => void
+  setSessionError: (sessionId: string, error: string | ChatErrorPayload) => void
   onApprovalChunk: (sessionId: string) => void
   onAgentSessionState?: (event: AgentEventPayload) => void
 }
@@ -222,7 +222,7 @@ function addErrorChunk(message: ChatMessage, chunk: ChatChunk, callbacks: ChunkR
       })
     }
 
-    callbacks.setSessionError(message.sessionId, resolveChatErrorMessage(payload))
+    callbacks.setSessionError(message.sessionId, payload)
   } catch (error) {
     console.error('Failed to parse chat error chunk payload.', error)
     callbacks.setSessionError(message.sessionId, '请求失败，请稍后重试。')

@@ -879,6 +879,15 @@ try {
 
 $workflowText = Get-Content (Join-Path $root '.github/workflows/aicopilot-ci.yml') -Raw
 $runnerText = Get-Content (Join-Path $root 'scripts/tests/Invoke-AICopilotCiSelectedTests.ps1') -Raw
+$analyzerFixtureSelectionIndex = $runnerText.IndexOf(
+    "projectName -ceq 'AICopilot.AnalyzerFixtureTests'",
+    [StringComparison]::Ordinal)
+$analyzerExplicitNodeIndex = $runnerText.IndexOf(
+    '$graphProjectPaths += $analyzerProjectPath',
+    [StringComparison]::Ordinal)
+$analyzerReleaseGuardIndex = $runnerText.IndexOf(
+    'Selected Analyzer fixture graph did not produce the $Configuration Analyzer output',
+    [StringComparison]::Ordinal)
 $webRestoreIndex = $workflowText.IndexOf(
     '- name: Restore web dependencies',
     [StringComparison]::Ordinal)
@@ -918,6 +927,12 @@ if ($workflowText -match 'Restore selected \.NET test projects' -or
     $runnerText -notmatch 'discovered zero tests') {
     throw 'AICopilot CI does not enforce one build per graph and non-zero filtered discovery.'
 }
+if ($analyzerFixtureSelectionIndex -lt 0 -or
+    $analyzerExplicitNodeIndex -le $analyzerFixtureSelectionIndex -or
+    $analyzerReleaseGuardIndex -le $analyzerExplicitNodeIndex -or
+    $runnerText -notmatch 'AICopilot\.Architecture\.Analyzers/bin/\$Configuration/netstandard2\.0/AICopilot\.Architecture\.Analyzers\.dll') {
+    throw 'AICopilot CI selected graph does not build and verify the Analyzer fixture prerequisite in the requested configuration.'
+}
 if ($workflowText -notmatch '\$actual\.Major\s+-ne\s+\$requested\.Major' -or
     $workflowText -notmatch '\$actual\.Minor\s+-ne\s+\$requested\.Minor' -or
     $workflowText -notmatch '\$actual\s+-lt\s+\$requested' -or
@@ -929,4 +944,4 @@ if ($runnerText -notmatch "ForEach-Object\s*\{\s*\[int\]\`$_\['discovered'\]\s*\
     throw 'AICopilot CI discovery aggregation does not safely read ordered result dictionaries.'
 }
 
-Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 webManifest=1 activeContract=7 securityMapping=4 securityTest=1 securityProjectFile=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 retiredInfrastructure=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 webAuditGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'
+Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 webManifest=1 activeContract=7 securityMapping=4 securityTest=1 securityProjectFile=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 retiredInfrastructure=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 webAuditGate=1 sdkContract=1 graphBuild=1 analyzerConfiguration=1 discoveryAggregation=1'

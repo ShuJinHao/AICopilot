@@ -34,7 +34,13 @@ async function deleteSession(id: string, title?: string | null) {
         <h2>会话</h2>
         <span>{{ sessions.length }} 个上下文</span>
       </div>
-      <AiButton variant="lime" size="icon" aria-label="新建会话" :disabled="store.isSessionTransitionBlocked" @click="createSession">
+      <AiButton
+        variant="lime"
+        size="icon"
+        aria-label="新建会话"
+        :disabled="store.isSessionTransitionBlocked"
+        @click="createSession"
+      >
         <Plus class="h-4 w-4" />
       </AiButton>
     </header>
@@ -76,7 +82,7 @@ async function deleteSession(id: string, title?: string | null) {
   min-height: 0;
   flex-direction: column;
   border-right: 1px solid var(--ai-border);
-  background: rgba(255, 255, 255, 0.68);
+  background: color-mix(in srgb, var(--ai-surface) 88%, var(--ai-surface-soft));
 }
 
 header {
@@ -112,7 +118,7 @@ header span {
 
 .session-item {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 28px;
+  grid-template-columns: 22px minmax(0, 1fr) 40px;
   gap: 10px;
   align-items: center;
   border: 1px solid transparent;
@@ -138,8 +144,8 @@ header span {
 }
 
 .session-item.active {
-  border-color: #d8ff78;
-  background: #efffbe;
+  border-color: color-mix(in srgb, var(--ai-graphite) 32%, var(--ai-border));
+  background: color-mix(in srgb, var(--ai-graphite) 10%, var(--ai-surface));
   font-weight: 850;
 }
 
@@ -152,8 +158,8 @@ header span {
 
 .delete-session {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   place-items: center;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -174,9 +180,9 @@ header span {
 }
 
 .delete-session:hover {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #b42318;
+  border-color: color-mix(in srgb, var(--app-danger) 34%, var(--ai-border));
+  background: color-mix(in srgb, var(--app-danger) 8%, var(--ai-surface));
+  color: var(--app-danger);
 }
 
 .empty-state {

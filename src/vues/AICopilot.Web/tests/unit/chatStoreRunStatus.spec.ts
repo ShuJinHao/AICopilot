@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { ApiError } from '@/services/apiClient'
 import { ChunkType, MessageRole, type Session } from '@/types/protocols'
 import type { ApprovalChunk } from '@/types/models'
 import { useApprovalStore } from '@/stores/approvalStore'
@@ -92,24 +93,26 @@ describe('chatStore current Harness lifecycle', () => {
 
   it('tracks a chat turn from a real tool call through final answer completion', async () => {
     activate(readySession())
-    chatServiceMock.sendMessageStream.mockImplementation(async (_sessionId, _message, callbacks) => {
-      callbacks.onChunkReceived({
-        source: 'HarnessAgent',
-        type: ChunkType.FunctionCall,
-        content: JSON.stringify({ id: 'call-1', name: 'queryDeviceLogs', args: '{}' }),
-      })
-      callbacks.onChunkReceived({
-        source: 'HarnessAgent',
-        type: ChunkType.FunctionResult,
-        content: JSON.stringify({ id: 'call-1', result: { rows: [{ id: 1 }] } }),
-      })
-      callbacks.onChunkReceived({
-        source: 'HarnessAgent',
-        type: ChunkType.Text,
-        content: '查询完成。',
-      })
-      callbacks.onComplete()
-    })
+    chatServiceMock.sendMessageStream.mockImplementation(
+      async (_sessionId, _message, callbacks) => {
+        callbacks.onChunkReceived({
+          source: 'HarnessAgent',
+          type: ChunkType.FunctionCall,
+          content: JSON.stringify({ id: 'call-1', name: 'queryDeviceLogs', args: '{}' }),
+        })
+        callbacks.onChunkReceived({
+          source: 'HarnessAgent',
+          type: ChunkType.FunctionResult,
+          content: JSON.stringify({ id: 'call-1', result: { rows: [{ id: 1 }] } }),
+        })
+        callbacks.onChunkReceived({
+          source: 'HarnessAgent',
+          type: ChunkType.Text,
+          content: '查询完成。',
+        })
+        callbacks.onComplete()
+      },
+    )
 
     const store = useChatStore()
     expect(await store.sendMessage('查询设备日志')).toBe(true)
@@ -150,6 +153,60 @@ describe('chatStore current Harness lifecycle', () => {
     expect(chatServiceMock.sendApprovalDecisionStream).toHaveBeenCalledOnce()
   })
 
+  it('locks a pending approval before a duplicate decision can be submitted', async () => {
+    activate(readySession({ hasPendingApproval: true }))
+    const chunk = addApprovalCard()
+    useApprovalStore().sync('session-1')
+    let releaseStream!: () => void
+    chatServiceMock.sendApprovalDecisionStream.mockImplementation(
+      async (_sessionId, _callId, _decision, callbacks) => {
+        await new Promise<void>((resolve) => {
+          releaseStream = resolve
+        })
+        callbacks.onComplete()
+      },
+    )
+
+    const store = useChatStore()
+    const firstDecision = store.submitApproval('call-1', 'approved', chunk)
+    const duplicateDecision = await store.submitApproval('call-1', 'approved', chunk)
+
+    expect(duplicateDecision).toBe(false)
+    expect(chatServiceMock.sendApprovalDecisionStream).toHaveBeenCalledOnce()
+
+    releaseStream()
+    expect(await firstDecision).toBe(true)
+  })
+
+  it('refreshes the session after an expectedVersion mode conflict', async () => {
+    activate(readySession({ agentMode: 'plan', agentSessionVersion: 3 }))
+    chatServiceMock.updateAgentMode.mockRejectedValue(
+      new ApiError('API Error: 409', 409, {
+        code: 'agent_session_version_conflict',
+        detail: '会话版本已从 3 更新为 4。',
+        userFacingMessage: '会话状态已变化，请刷新后重试。',
+      }),
+    )
+    chatServiceMock.getSession.mockResolvedValue(
+      readySession({ agentMode: 'execute', agentSessionVersion: 4 }),
+    )
+
+    const store = useChatStore()
+    expect(await store.changeAgentMode('execute')).toBe(false)
+
+    expect(chatServiceMock.updateAgentMode).toHaveBeenCalledWith('session-1', 'execute', 3)
+    expect(chatServiceMock.getSession).toHaveBeenCalledWith('session-1')
+    expect(store.currentSession).toMatchObject({
+      agentMode: 'execute',
+      agentSessionVersion: 4,
+    })
+    expect(store.errorPresentation).toMatchObject({
+      code: 'agent_session_version_conflict',
+      detail: '会话版本已从 3 更新为 4。',
+      userFacingMessage: '会话状态已变化，请刷新后重试。',
+    })
+  })
+
   it('expires local approval authority when the server interrupts the session', async () => {
     activate(readySession({ hasPendingApproval: true }))
     const chunk = addApprovalCard()
@@ -185,5 +242,20 @@ describe('chatStore current Harness lifecycle', () => {
     expect(await store.sendMessage('不应发出')).toBe(false)
     expect(chatServiceMock.sendMessageStream).not.toHaveBeenCalled()
     expect(store.agentSessionNotice).toContain('新建会话')
+  })
+
+  it('blocks a stale approval card after the session becomes interrupted', async () => {
+    activate(
+      readySession({
+        agentSessionStatus: 'Interrupted',
+        hasPendingApproval: false,
+      }),
+    )
+    const chunk = addApprovalCard()
+    useApprovalStore().sync('session-1')
+
+    const store = useChatStore()
+    expect(await store.submitApproval('call-1', 'approved', chunk)).toBe(false)
+    expect(chatServiceMock.sendApprovalDecisionStream).not.toHaveBeenCalled()
   })
 })
