@@ -211,7 +211,7 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         TargetType = targetType;
         TargetName = NormalizeRequired(targetName, nameof(targetName), 200);
         InputSchemaJson = NormalizeInputSchema(inputSchemaJson);
-        OutputSchemaJson = NormalizeOutputSchema(outputSchemaJson);
+        OutputSchemaJson = NormalizeOutputSchema(outputSchemaJson, providerType);
         RiskLevel = riskLevel;
         RequiredPermission = NormalizeOptional(requiredPermission, 160);
         RequiresApproval = requiresApproval || RiskRequiresApproval(riskLevel);
@@ -265,9 +265,9 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
             : throw new ArgumentException(contract.Error ?? "Tool input schema is outside the supported strict subset.", nameof(value));
     }
 
-    private static string NormalizeOutputSchema(string? value)
+    private static string NormalizeOutputSchema(string? value, ToolProviderType providerType)
     {
-        var contract = ToolOutputSchemaContractV1.Validate(value);
+        var contract = ToolOutputSchemaContractAuthority.Validate(providerType, value);
         return contract.IsValid
             ? contract.CanonicalJson!
             : throw new ArgumentException(contract.Error ?? "Tool output schema is outside the supported strict subset.", nameof(value));

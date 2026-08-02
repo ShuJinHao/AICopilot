@@ -10,6 +10,41 @@ namespace AICopilot.InProcessTests;
 public sealed class McpToolRegistrySynchronizerTests
 {
     [Fact]
+    public void OutputSchemaContracts_ShouldKeepGeneralV1ObjectRooted_AndAllowMcpJsonValues()
+    {
+        const string scalarSchema = """{"type":"string"}""";
+        const string arraySchema = """{"type":"array","items":{"type":"string"}}""";
+        const string objectSchema = """{"type":"object","properties":{},"additionalProperties":false}""";
+
+        ToolOutputSchemaContractV1.Validate(scalarSchema).IsValid.Should().BeFalse();
+        ToolOutputSchemaContractV1.Validate(arraySchema).IsValid.Should().BeFalse();
+        ToolOutputSchemaContractV1.Validate(objectSchema).IsValid.Should().BeTrue();
+
+        McpToolOutputSchemaContractV1.Validate(scalarSchema).IsValid.Should().BeTrue();
+        McpToolOutputSchemaContractV1.Validate(arraySchema).IsValid.Should().BeTrue();
+        McpToolOutputSchemaContractV1.Validate(objectSchema).IsValid.Should().BeTrue();
+
+        var createNonMcpScalar = () => new ToolRegistration(
+            "local_tool",
+            "Local tool",
+            "Local object-output tool.",
+            ToolProviderType.BuiltIn,
+            ToolRegistrationTargetType.Plugin,
+            "local-plugin",
+            """{"type":"object","properties":{},"additionalProperties":false}""",
+            scalarSchema,
+            AiToolRiskLevel.Low,
+            requiredPermission: null,
+            requiresApproval: false,
+            isEnabled: true,
+            timeoutSeconds: 30,
+            ToolAuditLevel.Standard,
+            DateTimeOffset.UtcNow);
+
+        createNonMcpScalar.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
     public async Task McpToolRegistrySynchronizer_ShouldAcceptClosedScalarOutput_AndDisableDeletedTool()
     {
         var repository = new InMemoryRepository<ToolRegistration>();
@@ -60,7 +95,9 @@ public sealed class McpToolRegistrySynchronizerTests
     public void McpRuntimeToolContract_ShouldReturnRawClosedScalar_AndRejectUnknownShape()
     {
         using var schemaDocument = JsonDocument.Parse("""{"type":"string"}""");
+        using var arraySchemaDocument = JsonDocument.Parse("""{"type":"array","items":{"type":"string"}}""");
         using var scalarDocument = JsonDocument.Parse("\"schema-bound\"");
+        using var arrayDocument = JsonDocument.Parse("""["schema-bound"]""");
         using var objectDocument = JsonDocument.Parse("""{"result":"legacy-wrapper"}""");
 
         var accepted = McpRuntimeToolContract.ValidateStructuredResult(
@@ -79,6 +116,14 @@ public sealed class McpToolRegistrySynchronizerTests
                 StructuredContent = objectDocument.RootElement.Clone(),
                 IsError = false
             });
+        var acceptedArray = McpRuntimeToolContract.ValidateStructuredResult(
+            arraySchemaDocument.RootElement,
+            new CallToolResult
+            {
+                Content = [],
+                StructuredContent = arrayDocument.RootElement.Clone(),
+                IsError = false
+            });
         var missing = McpRuntimeToolContract.ValidateStructuredResult(
             schemaDocument.RootElement,
             new CallToolResult { Content = [], IsError = false });
@@ -93,6 +138,8 @@ public sealed class McpToolRegistrySynchronizerTests
 
         accepted.IsValid.Should().BeTrue();
         accepted.Value!.Value.GetString().Should().Be("schema-bound");
+        acceptedArray.IsValid.Should().BeTrue();
+        acceptedArray.Value!.Value.GetArrayLength().Should().Be(1);
         rejected.IsValid.Should().BeFalse();
         missing.IsValid.Should().BeFalse();
         remoteError.IsValid.Should().BeFalse();

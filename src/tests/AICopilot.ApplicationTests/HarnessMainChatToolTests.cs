@@ -108,14 +108,14 @@ public sealed class HarnessMainChatToolTests
     }
 
     [Fact]
-    public async Task MainChatToolGate_ShouldApplyTheSameRegistryBoundaryToMcpTools()
+    public async Task MainChatToolGate_ShouldApplyTheMcpScalarOutputContractAndRegistryBoundary()
     {
         const string serverName = "cloud-read";
         const string toolName = "get_status";
         const string inputSchema =
             """{"type":"object","properties":{},"additionalProperties":false}""";
         const string outputSchema =
-            """{"type":"object","properties":{},"additionalProperties":false}""";
+            """{"type":"string"}""";
         var toolCode = AiToolIdentity.CreateRuntimeName(
             AiToolTargetType.McpServer,
             serverName,
@@ -138,6 +138,7 @@ public sealed class HarnessMainChatToolTests
             AuditLevel = nameof(ToolAuditLevel.Standard),
             DataBoundary = nameof(ToolDataBoundary.GovernedBusinessReadOnly),
             SchemaVersion = 3,
+            TimeoutSeconds = 30,
             ReadOnlyDeclared = true,
             McpReadOnlyHint = true,
             McpDestructiveHint = false,
@@ -184,6 +185,17 @@ public sealed class HarnessMainChatToolTests
             schemaVersion: 2);
         (await gate.FilterRegisteredAsync([staleRuntime], CancellationToken.None))
             .Should().BeEmpty("MCP schema-version drift must fail closed");
+
+        var staleTimeoutRuntime = runtimeTool.WithGovernance(
+            requiresApproval: false,
+            AiToolRiskLevel.Low,
+            "AiGateway.Chat",
+            nameof(ToolAuditLevel.Standard),
+            nameof(ToolDataBoundary.GovernedBusinessReadOnly),
+            schemaVersion: 3,
+            timeoutSeconds: 31);
+        (await gate.FilterRegisteredAsync([staleTimeoutRuntime], CancellationToken.None))
+            .Should().BeEmpty("MCP timeout governance drift must fail closed until runtime refresh");
     }
 
     [Fact]

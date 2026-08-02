@@ -12,7 +12,8 @@ public sealed record McpToolRegistryReadModel(
     DateTimeOffset UpdatedAt,
     string AuditLevel = "Standard",
     string DataBoundary = "NoData",
-    int SchemaVersion = 1);
+    int SchemaVersion = 1,
+    int TimeoutSeconds = 120);
 
 public interface IMcpToolRegistryReadService
 {

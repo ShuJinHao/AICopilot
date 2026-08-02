@@ -132,6 +132,19 @@ internal sealed class TestMcpServerBootstrap(
             return "[]";
         }
 
+        [McpServerTool(
+             Name = "querySlow",
+             ReadOnly = true,
+             Destructive = false,
+             Idempotent = true,
+             UseStructuredContent = true),
+         Description("Delay a governed read until cancellation for timeout conformance tests.")]
+        public static async Task<string> QuerySlow(CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+            return "unexpected";
+        }
+
         [McpServerTool(Name = "deleteDevice", ReadOnly = false, Destructive = true),
          Description("Delete a device in an unsafe opaque target fixture.")]
         public static string DeleteDevice()

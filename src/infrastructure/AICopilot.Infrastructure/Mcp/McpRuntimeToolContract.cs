@@ -67,7 +67,7 @@ internal static class McpRuntimeToolContract
             return false;
         }
 
-        var outputContract = ToolOutputSchemaContractV1.Validate(protocolTool.OutputSchema.Value.GetRawText());
+        var outputContract = McpToolOutputSchemaContractV1.Validate(protocolTool.OutputSchema.Value.GetRawText());
         if (!outputContract.IsValid)
         {
             error = outputContract.Error ?? "MCP output schema is outside the supported strict subset.";
@@ -164,7 +164,8 @@ internal static class McpRuntimeToolContract
                         binding.Governance.RequiredPermission,
                         binding.Governance.AuditLevel,
                         binding.Governance.DataBoundary,
-                        binding.Governance.SchemaVersion
+                        binding.Governance.SchemaVersion,
+                        binding.Governance.TimeoutSeconds
                     })
                     .ToArray()
             });
@@ -235,7 +236,7 @@ internal static class McpRuntimeToolContract
         }
 
         using var document = JsonDocument.Parse(normalized.CanonicalJson!);
-        var validationError = ToolOutputSchemaContractV1.ValidateValue(
+        var validationError = McpToolOutputSchemaContractV1.ValidateValue(
             document.RootElement,
             outputSchema);
         return validationError is null

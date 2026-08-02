@@ -76,7 +76,7 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
             }
 
             var inputSchemaContract = ToolInputSchemaContractV1.Validate(discoveredTool.InputSchemaJson);
-            var outputSchemaContract = ToolOutputSchemaContractV1.Validate(discoveredTool.OutputSchemaJson);
+            var outputSchemaContract = McpToolOutputSchemaContractV1.Validate(discoveredTool.OutputSchemaJson);
             if (!inputSchemaContract.IsValid || !outputSchemaContract.IsValid)
             {
                 // An invalid discovery contract is not registered as an open schema.

@@ -147,6 +147,57 @@ public sealed class McpRuntimeRegistrySynchronizerTests
     }
 
     [Fact]
+    public async Task ReconcileAsync_ShouldDeadlineEachServer_ContinueAndDisposeLateRegistration()
+    {
+        var slowState = CreateState("slow-mcp", 1);
+        var healthyState = CreateState("healthy-mcp", 1);
+        var slowExistingClient = new TrackingAsyncDisposable();
+        var healthyExistingClient = new TrackingAsyncDisposable();
+        var healthyReplacementClient = new TrackingAsyncDisposable();
+        var lateClient = new TrackingAsyncDisposable();
+        var lateCompletion = new TaskCompletionSource<McpRuntimeRegistration?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new FakeRuntimeRegistrationProvider
+        {
+            CandidateServers = [slowState, healthyState],
+            Create = state => state.Name == slowState.Name
+                ? CreateRegistration(state, slowExistingClient, "schema-a")
+                : CreateRegistration(state, healthyExistingClient, "schema-a")
+        };
+        var loader = CreateLoader();
+        await using var synchronizer = CreateSynchronizer(
+            loader,
+            TimeSpan.FromMilliseconds(50));
+
+        await synchronizer.ReconcileAsync(provider, CancellationToken.None);
+
+        provider.CreateAsync = (state, _) => state.Name == slowState.Name
+            ? lateCompletion.Task
+            : Task.FromResult<McpRuntimeRegistration?>(
+                CreateRegistration(state, healthyReplacementClient, "schema-b"));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        await synchronizer.ReconcileAsync(provider, CancellationToken.None);
+
+        stopwatch.Stop();
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
+        loader.GetPlugin(slowState.Name).Should().BeNull();
+        slowExistingClient.DisposeCount.Should().Be(1);
+        provider.QuarantinedServers.Should().ContainSingle().Which.Should().Be(slowState.Name);
+        loader.GetPlugin(healthyState.Name).Should().NotBeNull(
+            "one unresponsive server must not block later discovery");
+        healthyExistingClient.DisposeCount.Should().Be(1);
+        healthyReplacementClient.DisposeCount.Should().Be(0);
+
+        lateCompletion.SetResult(CreateRegistration(slowState, lateClient, "late-schema"));
+        await lateClient.Disposed.WaitAsync(TimeSpan.FromSeconds(2));
+
+        lateClient.DisposeCount.Should().Be(1);
+        loader.GetPlugin(slowState.Name).Should().BeNull(
+            "a late registration must only be observed and disposed, never registered");
+    }
+
+    [Fact]
     public async Task ClientHandle_ShouldWaitForActiveInvocationBeforeDisposing()
     {
         var client = new TrackingAsyncDisposable();
@@ -177,11 +228,17 @@ public sealed class McpRuntimeRegistrySynchronizerTests
         options.RefreshInterval.Should().Be(TimeSpan.FromSeconds(expectedSeconds));
     }
 
-    private static McpRuntimeRegistrySynchronizer CreateSynchronizer(IAgentPluginRegistry registry)
+    private static McpRuntimeRegistrySynchronizer CreateSynchronizer(
+        IAgentPluginRegistry registry,
+        TimeSpan? discoveryDeadline = null)
     {
         return new McpRuntimeRegistrySynchronizer(
             registry,
-            NullLogger<McpRuntimeRegistrySynchronizer>.Instance);
+            NullLogger<McpRuntimeRegistrySynchronizer>.Instance)
+        {
+            DiscoveryDeadline = discoveryDeadline ??
+                                TimeSpan.FromSeconds(McpRuntimeOptions.DiscoveryDeadlineSeconds)
+        };
     }
 
     private static AgentPluginLoader CreateLoader()
@@ -233,6 +290,10 @@ public sealed class McpRuntimeRegistrySynchronizerTests
 
         public Func<McpRuntimeServerState, McpRuntimeRegistration?> Create { get; set; } = _ => null;
 
+        public Func<McpRuntimeServerState, CancellationToken, Task<McpRuntimeRegistration?>>? CreateAsync { get; set; }
+
+        public List<string> QuarantinedServers { get; } = [];
+
         public Task<IReadOnlyList<McpRuntimeServerState>> ListCandidateServersAsync(
             CancellationToken cancellationToken)
         {
@@ -243,17 +304,31 @@ public sealed class McpRuntimeRegistrySynchronizerTests
             McpRuntimeServerState server,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(Create(server));
+            return CreateAsync?.Invoke(server, cancellationToken) ?? Task.FromResult(Create(server));
+        }
+
+        public Task QuarantineServerAsync(
+            McpRuntimeServerState server,
+            CancellationToken cancellationToken)
+        {
+            QuarantinedServers.Add(server.Name);
+            return Task.CompletedTask;
         }
     }
 
     private sealed class TrackingAsyncDisposable : IAsyncDisposable
     {
+        private readonly TaskCompletionSource disposed = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int DisposeCount { get; private set; }
+
+        public Task Disposed => disposed.Task;
 
         public ValueTask DisposeAsync()
         {
             DisposeCount++;
+            disposed.TrySetResult();
             return ValueTask.CompletedTask;
         }
     }

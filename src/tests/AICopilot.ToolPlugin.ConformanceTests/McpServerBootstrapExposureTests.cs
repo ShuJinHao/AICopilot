@@ -420,6 +420,149 @@ public sealed class McpServerBootstrapExposureTests
     }
 
     [Fact]
+    public async Task RuntimeInvocation_ShouldUseRegisteredTimeout_WithoutMisclassifyingCallerCancellation()
+    {
+        var server = new McpServerInfo(
+            "timeout-mcp",
+            "timeout conformance server",
+            McpTransportType.Stdio,
+            "dotnet",
+            string.Empty,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            ChatExposureMode.Advisory,
+            [
+                new McpAllowedTool(
+                    "querySlow",
+                    ReadOnlyDeclared: true,
+                    McpReadOnlyHint: true,
+                    McpDestructiveHint: false,
+                    McpIdempotentHint: true)
+            ],
+            true);
+        var toolCode = AiToolIdentity.CreateRuntimeName(
+            AiToolTargetType.McpServer,
+            server.Name,
+            "querySlow");
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentPlugin(registrar =>
+            registrar.RegisterPluginFromAssembly(typeof(DiagnosticAdvisorPlugin).Assembly));
+        using var provider = services.BuildServiceProvider();
+        var loader = provider.GetRequiredService<AgentPluginLoader>();
+        await using var bootstrap = new TestMcpServerBootstrap(
+            new InMemoryReadRepository<McpServerInfo>([server]),
+            new TestMcpToolRegistryReadService(
+                CreateGovernance(toolCode, server.Name, "querySlow", timeoutSeconds: 1)),
+            loader,
+            NullLogger<McpServerBootstrap>.Instance);
+        var clients = new List<McpClient>();
+
+        try
+        {
+            await foreach (var client in bootstrap.StartAsync(CancellationToken.None))
+            {
+                clients.Add(client);
+            }
+
+            var runtimeTool = loader.GetPlugin(server.Name)!
+                .GetTools()!
+                .Should()
+                .ContainSingle()
+                .Which;
+            runtimeTool.TimeoutSeconds.Should().Be(1);
+            using (var callerCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50)))
+            {
+                var callerCancellation = async () => await runtimeTool.InvokeAsync!(
+                    new AiToolInvocationContext(
+                        new Dictionary<string, object?>(),
+                        Services: null,
+                        Context: null),
+                    callerCts.Token);
+
+                await callerCancellation.Should().ThrowAsync<OperationCanceledException>();
+            }
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var governedTimeout = async () => await runtimeTool.InvokeAsync!(
+                new AiToolInvocationContext(
+                    new Dictionary<string, object?>(),
+                    Services: null,
+                    Context: null),
+                CancellationToken.None);
+
+            await governedTimeout.Should().ThrowAsync<AiToolExecutionTimeoutException>()
+                .WithMessage("Tool execution exceeded its governed timeout.");
+            stopwatch.Stop();
+            stopwatch.Elapsed.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(750));
+            stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            foreach (var client in clients)
+            {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RuntimeFingerprint_ShouldChangeWhenRegisteredTimeoutChanges()
+    {
+        var server = new McpServerInfo(
+            "fingerprint-mcp",
+            "fingerprint conformance server",
+            McpTransportType.Stdio,
+            "dotnet",
+            string.Empty,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            ChatExposureMode.Advisory,
+            [
+                new McpAllowedTool(
+                    "queryEcho",
+                    ReadOnlyDeclared: true,
+                    McpReadOnlyHint: true,
+                    McpDestructiveHint: false,
+                    McpIdempotentHint: true)
+            ],
+            true);
+        var toolCode = AiToolIdentity.CreateRuntimeName(
+            AiToolTargetType.McpServer,
+            server.Name,
+            "queryEcho");
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentPlugin(registrar =>
+            registrar.RegisterPluginFromAssembly(typeof(DiagnosticAdvisorPlugin).Assembly));
+        using var provider = services.BuildServiceProvider();
+        var loader = provider.GetRequiredService<AgentPluginLoader>();
+        await using var firstBootstrap = new TestMcpServerBootstrap(
+            new InMemoryReadRepository<McpServerInfo>([server]),
+            new TestMcpToolRegistryReadService(
+                CreateGovernance(toolCode, server.Name, "queryEcho", timeoutSeconds: 10)),
+            loader,
+            NullLogger<McpServerBootstrap>.Instance);
+        await using var secondBootstrap = new TestMcpServerBootstrap(
+            new InMemoryReadRepository<McpServerInfo>([server]),
+            new TestMcpToolRegistryReadService(
+                CreateGovernance(toolCode, server.Name, "queryEcho", timeoutSeconds: 11)),
+            loader,
+            NullLogger<McpServerBootstrap>.Instance);
+        var state = new McpRuntimeServerState(server.Id.Value, server.Name, server.RowVersion);
+        await using var firstRegistration = (await firstBootstrap.CreateRegistrationAsync(
+            state,
+            CancellationToken.None))!;
+        await using var secondRegistration = (await secondBootstrap.CreateRegistrationAsync(
+            state,
+            CancellationToken.None))!;
+
+        firstRegistration.ToolSchemaFingerprint.Should().NotBe(
+            secondRegistration.ToolSchemaFingerprint,
+            "TimeoutSeconds is executable governance and must invalidate the runtime binding");
+    }
+
+    [Fact]
     public async Task StartAsync_ShouldSkipEnabledStdioServer_WhenCommandIsMissing()
     {
         var missingCommand = $"aicopilot-missing-mcp-command-{Guid.NewGuid():N}";
@@ -504,6 +647,28 @@ public sealed class McpServerBootstrapExposureTests
 
         method.Should().NotBeNull();
         return (string[])method!.Invoke(null, [rawArguments])!;
+    }
+
+    private static McpToolRegistryReadModel CreateGovernance(
+        string toolCode,
+        string serverName,
+        string toolName,
+        int timeoutSeconds)
+    {
+        return new McpToolRegistryReadModel(
+            toolCode,
+            serverName,
+            toolName,
+            RuntimeAvailable: false,
+            IsEnabled: true,
+            RiskLevel: nameof(AiToolRiskLevel.Low),
+            RequiresApproval: false,
+            RequiredPermission: null,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            AuditLevel: nameof(ToolAuditLevel.Standard),
+            DataBoundary: nameof(ToolDataBoundary.NoData),
+            SchemaVersion: 1,
+            TimeoutSeconds: timeoutSeconds);
     }
 
     private static void ReplaceAllowedTools(McpServerInfo server, IEnumerable<McpAllowedTool> tools)

@@ -73,7 +73,9 @@ public sealed class ToolRegistryGuard(
                 $"Tool '{tool.ToolCode}' has an unavailable input contract: {inputSchema.Error}");
         }
 
-        var outputSchema = ToolOutputSchemaValidator.ValidateSchema(tool.OutputSchemaJson);
+        var outputSchema = ToolOutputSchemaValidator.ValidateSchema(
+            tool.OutputSchemaJson,
+            tool.ProviderType);
         if (!outputSchema.IsValid)
         {
             return ToolRegistryDecision.Reject(

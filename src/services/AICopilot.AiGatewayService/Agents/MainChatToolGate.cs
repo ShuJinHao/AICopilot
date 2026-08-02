@@ -48,7 +48,8 @@ public sealed class MainChatToolGate(
                 decision.Tool.RequiredPermission,
                 decision.Tool.AuditLevel.ToString(),
                 decision.Tool.DataBoundary.ToString(),
-                decision.Tool.SchemaVersion));
+                decision.Tool.SchemaVersion,
+                decision.Tool.TimeoutSeconds));
         }
 
         return exposed;
@@ -102,14 +103,22 @@ public sealed class MainChatToolGate(
             return false;
         }
 
+        if (registration.ProviderType == ToolProviderType.Mcp &&
+            runtime.TimeoutSeconds != registration.TimeoutSeconds)
+        {
+            return false;
+        }
+
         var runtimeInput = ToolInputSchemaValidator.ValidateSchema(
             runtime.JsonSchema?.GetRawText() ?? "{}");
         var runtimeOutput = ToolOutputSchemaValidator.ValidateSchema(
-            runtime.ReturnJsonSchema?.GetRawText() ?? "{}");
+            runtime.ReturnJsonSchema?.GetRawText() ?? "{}",
+            registration.ProviderType);
         var registeredInput = ToolInputSchemaValidator.ValidateSchema(
             registration.InputSchemaJson);
         var registeredOutput = ToolOutputSchemaValidator.ValidateSchema(
-            registration.OutputSchemaJson);
+            registration.OutputSchemaJson,
+            registration.ProviderType);
         return runtimeInput.IsValid &&
                runtimeOutput.IsValid &&
                registeredInput.IsValid &&

@@ -68,7 +68,7 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
             .ToArray();
     }
 
-    private static AiToolDefinition ToToolDefinition(
+    private AiToolDefinition ToToolDefinition(
         string serverName,
         McpRuntimeToolBinding binding,
         McpRuntimeClientHandle clientHandle)
@@ -94,6 +94,7 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
             AuditLevel = governance.AuditLevel,
             DataBoundary = governance.DataBoundary,
             SchemaVersion = governance.SchemaVersion,
+            TimeoutSeconds = governance.TimeoutSeconds,
             ReadOnlyDeclared = candidate.Exposure.ReadOnlyDeclared,
             McpReadOnlyHint = candidate.McpReadOnlyHint,
             McpDestructiveHint = candidate.McpDestructiveHint,
@@ -102,7 +103,6 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
             ReturnJsonSchema = candidate.OutputSchema.Clone(),
             InvokeAsync = async (context, cancellationToken) =>
             {
-                using var invocation = clientHandle.AcquireInvocation();
                 var safety = AiToolSafetyPolicy.EvaluateConfiguredMcp(
                     new AiToolConfiguredMcpMetadata(
                         candidate.Exposure.ReadOnlyDeclared,
@@ -137,10 +137,11 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
                         property => property.Name,
                         property => (object?)property.Value.Clone(),
                         StringComparer.Ordinal);
-                var result = await tool.CallAsync(
+                var result = await InvokeWithTimeoutAsync(
+                    tool,
                     arguments,
-                    progress: null,
-                    options: null,
+                    governance.TimeoutSeconds,
+                    clientHandle,
                     cancellationToken);
                 var validatedResult = McpRuntimeToolContract.ValidateStructuredResult(candidate, result);
                 if (!validatedResult.IsValid || validatedResult.Value is not { } output)
@@ -154,6 +155,89 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
         };
     }
 
+    private async Task<ModelContextProtocol.Protocol.CallToolResult> InvokeWithTimeoutAsync(
+        McpClientTool tool,
+        IReadOnlyDictionary<string, object?> arguments,
+        int timeoutSeconds,
+        McpRuntimeClientHandle clientHandle,
+        CancellationToken cancellationToken)
+    {
+        IDisposable? invocation = clientHandle.AcquireInvocation();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        timeoutCts.CancelAfter(timeout);
+        Task<ModelContextProtocol.Protocol.CallToolResult>? callTask = null;
+
+        try
+        {
+            callTask = tool.CallAsync(
+                    arguments,
+                    progress: null,
+                    options: null,
+                    timeoutCts.Token)
+                .AsTask();
+            return await callTask.WaitAsync(timeout, cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            timeoutCts.Cancel();
+            ObserveLateToolCall(callTask!, invocation);
+            invocation = null;
+            throw new AiToolExecutionTimeoutException();
+        }
+        catch (OperationCanceledException) when (
+            !cancellationToken.IsCancellationRequested &&
+            timeoutCts.IsCancellationRequested)
+        {
+            throw new AiToolExecutionTimeoutException();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (callTask is { IsCompleted: false })
+            {
+                ObserveLateToolCall(callTask, invocation);
+                invocation = null;
+            }
+
+            throw;
+        }
+        finally
+        {
+            invocation?.Dispose();
+        }
+    }
+
+    private void ObserveLateToolCall(
+        Task<ModelContextProtocol.Protocol.CallToolResult> callTask,
+        IDisposable invocation)
+    {
+        _ = ObserveLateToolCallCoreAsync(callTask, invocation);
+    }
+
+    private async Task ObserveLateToolCallCoreAsync(
+        Task<ModelContextProtocol.Protocol.CallToolResult> callTask,
+        IDisposable invocation)
+    {
+        try
+        {
+            _ = await callTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The deadline cancellation was expected and has now been observed.
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                "A timed-out MCP tool call completed after its deadline. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                ex.GetType().Name);
+        }
+        finally
+        {
+            invocation.Dispose();
+        }
+    }
+
     private static McpRuntimeToolGovernance CreateDefaultGovernance(
         string toolCode,
         AiToolRiskLevel riskLevel)
@@ -165,7 +249,8 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
             RequiredPermission: null,
             AuditLevel: "Standard",
             DataBoundary: "NoData",
-            SchemaVersion: 1);
+            SchemaVersion: 1,
+            TimeoutSeconds: 120);
     }
 
     private McpRuntimeToolCandidate? TryCreateCandidate(

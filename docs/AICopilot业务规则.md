@@ -136,9 +136,9 @@ Cloud AiRead 设备契约：
 - MCP 聚合注册、runtime registry refresh、tool plugin builder 和 `MainChatToolGate` 必须复用同一条安全策略；禁止 hostname/token heuristic、伪 allowlist、隐式 fallback 或仅启动时检查。
 - MCP client 固定使用稳定版 `ModelContextProtocol 2.0.0`，不得引入 preview、Tasks、Apps 或其它扩展包，也不得压制 `MCP9005` / `MCP9006` / `MCP9007` / `MCPEXP*` 警告。HTTP 存量 `McpTransportType.Sse` 与数据库/API 值保持不变，内部统一使用 v2 discovery-first `AutoDetect`，由 SDK 自动回退旧 initialize 握手，不维护第二套兼容 client。
 - Stdio 只使用官方 transport，关闭任意父进程环境继承，只传递 SDK 安全默认环境变量；stderr 只能记录脱敏后的长度与错误类别，禁止记录原文、命令输出、token 或环境变量值。
-- discovery 必须从 `ProtocolTool` typed API 读取 canonical tool name、`inputSchema`、`outputSchema` 与 `readOnly` / `destructive` / `idempotent` annotation。身份缺失、`inputSchema` 缺失、任一 schema 非法、output schema 缺失或 hint 与本地治理元数据冲突时不得注册；既有登记必须标记不可执行并从 Harness 工具面撤下，禁止反射读取 annotation 或退回 runtime alias。
-- MCP structured result 必须按本地封闭 output schema 和 bounded inline-output 策略验证；验证通过后保留远端原生 JSON 类型交给模型，非 object 结果不得包装成旧 `{ result: ... }`。缺少 structured content、远端 error、类型/字段不匹配或未知 shape 全部 fail-closed，文本 content 不能替代 schema-bound 结果。
-- runtime refresh 每轮同时比较数据库 `RowVersion` 与远端工具 schema/hint、有效注册治理快照组成的指纹。工具删除、schema/hint 漂移、权限/审计/数据边界/schema version 治理变化、身份冲突或 discovery 失败时必须撤下旧运行时插件并隔离旧登记；即使 `RowVersion` 未变化也不得继续使用陈旧工具。
+- discovery 必须从 `ProtocolTool` typed API 读取 canonical tool name、`inputSchema`、`outputSchema` 与 `readOnly` / `destructive` / `idempotent` annotation。每个 server 的连接与 `ListTools` discovery 固定使用独立 30 秒 deadline；超时必须立即撤下旧插件、隔离登记并继续后续 server，迟到任务只能被观察和释放，不能复活 registration。身份缺失、`inputSchema` 缺失、任一 schema 非法、output schema 缺失或 hint 与本地治理元数据冲突时不得注册；既有登记必须标记不可执行并从 Harness 工具面撤下，禁止反射读取 annotation 或退回 runtime alias。
+- 全局 `ToolOutputSchemaContractV1` 保持 object-root；只有 provider 为 MCP 时使用独立 `McpToolOutputSchemaContractV1` 接受受支持的 scalar、array、object。MCP structured result 必须按该本地封闭 schema 和 bounded inline-output 策略验证；验证通过后保留远端原生 JSON 类型交给模型，非 object 结果不得包装成旧 `{ result: ... }`。缺少 structured content、远端 error、类型/字段不匹配或未知 shape 全部 fail-closed，文本 content 不能替代 schema-bound 结果。
+- runtime refresh 每轮同时比较数据库 `RowVersion` 与远端工具 schema/hint、有效注册治理快照组成的指纹；治理快照必须包含 `TimeoutSeconds`。每次 MCP 调用按登记 timeout 执行并在超时时返回稳定 `tool_execution_timeout`，caller cancellation 与宿主停止继续保留取消语义，日志不得包含参数、endpoint 或远端原文。工具删除、schema/hint 漂移、权限/审批/审计/数据边界/schema version/timeout 治理变化、身份冲突或 discovery 失败时必须撤下旧运行时插件并隔离旧登记；即使 `RowVersion` 未变化也不得继续使用陈旧工具。
 - 本地非 MCP 工具仍按其正式 capability/risk/审批策略处理；MCP fail-closed 不等于删除必要的本地副作用工具。
 
 ## 7. Human-in-the-loop 规则

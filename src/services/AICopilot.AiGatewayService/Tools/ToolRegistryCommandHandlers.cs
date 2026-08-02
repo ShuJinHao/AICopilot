@@ -52,6 +52,7 @@ public sealed class UpdateToolRegistrationCommandHandler(
         var effectiveOutputSchema = request.OutputSchemaJson ?? tool.OutputSchemaJson;
         var outputSchemaContract = ToolRegistrationOutputContractPolicy.Validate(
             tool.ToolCode,
+            tool.ProviderType,
             effectiveOutputSchema,
             request.SchemaVersion ?? tool.SchemaVersion,
             request.CatalogVersion ?? tool.CatalogVersion);
@@ -132,6 +133,7 @@ public sealed class UpsertToolDefinitionCommandHandler(
 
         var outputSchemaContract = ToolRegistrationOutputContractPolicy.Validate(
             request.ToolCode,
+            request.ProviderType,
             request.OutputSchemaJson,
             request.SchemaVersion,
             request.CatalogVersion);
@@ -243,6 +245,7 @@ public sealed class ActivateToolDefinitionVersionCommandHandler(
 
         var outputSchemaContract = ToolRegistrationOutputContractPolicy.Validate(
             tool.ToolCode,
+            tool.ProviderType,
             tool.OutputSchemaJson,
             request.SchemaVersion ?? tool.SchemaVersion,
             request.CatalogVersion ?? tool.CatalogVersion);
@@ -324,11 +327,12 @@ internal static class ToolRegistrationOutputContractPolicy
 {
     public static ToolOutputSchemaContractResult Validate(
         string toolCode,
+        ToolProviderType providerType,
         string? outputSchemaJson,
         int schemaVersion,
         int catalogVersion)
     {
-        var contract = ToolOutputSchemaContractV1.Validate(outputSchemaJson);
+        var contract = ToolOutputSchemaContractAuthority.Validate(providerType, outputSchemaJson);
         if (!contract.IsValid)
         {
             return contract;

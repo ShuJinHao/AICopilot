@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.Tools;
@@ -25,6 +26,11 @@ internal static class ToolOutputSchemaValidator
 {
     internal static ToolOutputSchemaContractResult ValidateSchema(string? schemaJson) =>
         ToolOutputSchemaContractV1.Validate(schemaJson);
+
+    internal static ToolOutputSchemaContractResult ValidateSchema(
+        string? schemaJson,
+        ToolProviderType providerType) =>
+        ToolOutputSchemaContractAuthority.Validate(providerType, schemaJson);
 
     internal static ToolOutputValidationResult ValidateAndCanonicalize(
         object? output,

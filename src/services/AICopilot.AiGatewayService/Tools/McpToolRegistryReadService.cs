@@ -50,6 +50,7 @@ public sealed class McpToolRegistryReadService(
             tool.UpdatedAt,
             tool.AuditLevel.ToString(),
             tool.DataBoundary.ToString(),
-            tool.SchemaVersion);
+            tool.SchemaVersion,
+            tool.TimeoutSeconds);
     }
 }

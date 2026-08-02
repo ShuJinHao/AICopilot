@@ -265,10 +265,32 @@ public sealed class ArchitectureBoundaryTests
             .And.Contain("protocolTool.Annotations")
             .And.Contain("protocolTool.InputSchema")
             .And.Contain("protocolTool.OutputSchema")
-            .And.Contain("ToolSchemaFingerprint");
+            .And.Contain("ToolSchemaFingerprint")
+            .And.Contain("DiscoveryDeadlineSeconds = 30")
+            .And.Contain("TimeoutSeconds")
+            .And.Contain("McpToolOutputSchemaContractV1");
         runtimeSource.Should().NotContain("System.Reflection")
             .And.NotContain("BindingFlags")
             .And.NotContain("GetProperty(\"Annotations\"");
+
+        var generalOutputContract = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "shared",
+            "AICopilot.SharedKernel",
+            "Ai",
+            "ToolOutputSchemaContractV1.cs"));
+        var mcpOutputContract = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "shared",
+            "AICopilot.SharedKernel",
+            "Ai",
+            "McpToolOutputSchemaContractV1.cs"));
+        generalOutputContract.Should().Contain("requireObjectRoot: true")
+            .And.Contain("rootType = \"object\"");
+        mcpOutputContract.Should().Contain("requireObjectRoot: false")
+            .And.Contain("rootType = \"any-supported-json-type\"");
     }
 
     [Fact]

@@ -10,7 +10,8 @@ internal sealed record McpRuntimeToolGovernance(
     string? RequiredPermission,
     string AuditLevel,
     string DataBoundary,
-    int SchemaVersion);
+    int SchemaVersion,
+    int TimeoutSeconds);
 
 internal sealed class McpRuntimeToolGovernanceReader(
     IMcpToolRegistryReadService toolRegistryReadService)
@@ -39,7 +40,8 @@ internal sealed class McpRuntimeToolGovernanceReader(
                    out var riskLevel) &&
                !string.IsNullOrWhiteSpace(registration.AuditLevel) &&
                !string.IsNullOrWhiteSpace(registration.DataBoundary) &&
-               registration.SchemaVersion > 0
+               registration.SchemaVersion > 0 &&
+               registration.TimeoutSeconds is >= 1 and <= 600
             ? new McpRuntimeToolGovernance(
                 registration.ToolCode,
                 riskLevel,
@@ -47,7 +49,8 @@ internal sealed class McpRuntimeToolGovernanceReader(
                 registration.RequiredPermission,
                 registration.AuditLevel,
                 registration.DataBoundary,
-                registration.SchemaVersion)
+                registration.SchemaVersion,
+                registration.TimeoutSeconds)
             : null;
     }
 }
