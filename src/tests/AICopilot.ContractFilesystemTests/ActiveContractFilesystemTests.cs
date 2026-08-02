@@ -44,8 +44,12 @@ public sealed class ActiveContractFilesystemTests
         businessRules.Should().Contain("查询确认键是 `SessionId`");
         businessRules.Should().Contain("Cloud provider / AI consumer 跨版本发布顺序");
         businessRules.Should().Contain("完工弹夹数");
+        businessRules.Should().Contain("ModelContextProtocol 2.0.0");
+        businessRules.Should().Contain("McpToolOutputSchemaContractV1");
+        businessRules.Should().Contain("tool_execution_timeout");
 
         agentContract.Should().Contain("Microsoft Agent Framework Harness");
+        agentContract.Should().Contain("Microsoft.Agents.AI` `1.16.0");
         agentContract.Should().Contain("MainChatToolGate");
         agentContract.Should().Contain("TrustedRenderChunkBuffer");
         agentContract.Should().Contain("KnowledgeQuery(question, knowledgeBaseNames)");
@@ -53,12 +57,65 @@ public sealed class ActiveContractFilesystemTests
         agentContract.Should().Contain("SingleInstance");
         agentContract.Should().Contain("物理边界与禁止回潮");
         agentContract.Should().Contain("AICopilot.AiGatewayService/BusinessQueries");
+        agentContract.Should().Contain("ModelContextProtocol 2.0.0");
+        agentContract.Should().Contain("tool_execution_timeout");
 
         roadmap.Should().Contain(
             "| 能力 | 源码目标 | 验证退出门 | 生产状态 |");
         roadmap.Should().Contain("AI-01");
         roadmap.Should().Contain("AI-02");
         roadmap.Should().Contain("Harness 主聊天");
+        roadmap.Should().Contain("ModelContextProtocol 2.0.0");
+        roadmap.Should().Contain("MCP 2.0 受治理通道");
+    }
+
+    [Fact]
+    public void FrontendChatTransport_ShouldUseOnlyCurrentHarnessRequests()
+    {
+        var root = FindRepositoryRoot();
+        var frontendSourceRoot = Path.Combine(
+            root,
+            "src",
+            "vues",
+            "AICopilot.Web",
+            "src");
+        var chatService = File.ReadAllText(Path.Combine(
+            frontendSourceRoot,
+            "services",
+            "chatService.ts"));
+        var compactChatService = new string(chatService
+            .Where(character => !char.IsWhiteSpace(character))
+            .ToArray());
+
+        compactChatService.Should().Contain(
+            "sendEventStream('/aigateway/chat',{sessionId,message},callbacks)");
+        compactChatService.Should().Contain(
+            "sendEventStream('/aigateway/approval/decision',{sessionId,callId,decision},callbacks");
+        compactChatService.Should().Contain(
+            "`/aigateway/session/${encodeURIComponent(sessionId)}/agent-mode`,{mode,expectedVersion}");
+
+        var frontendSource = string.Join(
+            '\n',
+            Directory.EnumerateFiles(frontendSourceRoot, "*.*", SearchOption.AllDirectories)
+                .Where(path => Path.GetExtension(path) is ".ts" or ".vue")
+                .Select(File.ReadAllText));
+        string[] retiredTransportMarkers =
+        [
+            "referencedAgentTaskId",
+            "/aigateway/agent/task",
+            "/aigateway/artifact",
+            "/aigateway/business-approval",
+            "/aigateway/routing-model",
+            "/aigateway/runtime-settings",
+            "/aigateway/session/timeline",
+            "/aigateway/agent-upload",
+            "onsite"
+        ];
+
+        foreach (var marker in retiredTransportMarkers)
+        {
+            frontendSource.Should().NotContain(marker);
+        }
     }
 
     [Fact]

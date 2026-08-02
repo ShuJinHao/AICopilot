@@ -19,6 +19,8 @@ namespace AICopilot.ArchitectureTests;
 
 public sealed class LegacyRetirementArchitectureTests
 {
+    private static readonly string SolutionRoot = FindSolutionRoot();
+
     private static readonly string[] RetiredTypeMarkers =
     [
         ".AgentTasks.",
@@ -29,13 +31,43 @@ public sealed class LegacyRetirementArchitectureTests
         "AgentArtifact",
         "AgentTask",
         "ApprovalPolicy",
-        "ApprovalRequest",
+        ".Aggregates.Approvals.ApprovalRequest",
         "ArtifactWorkspace",
         "ChatRuntimeSettings",
         "FinalAgent",
         "MessageEvent",
         "Onsite",
         "RoutingModel"
+    ];
+
+    private static readonly string[] RetiredPathMarkers =
+    [
+        "/AgentTasks/",
+        "/ApprovalPolicies/",
+        "/Aggregates/Approvals/",
+        "/Artifacts/",
+        "/RoutingModels/",
+        "/RuntimeSettings/",
+        "/src/services/AICopilot.AiGatewayService/Workflows/",
+        "/Workspaces/",
+        "AgentArtifact",
+        "ArtifactWorkspace",
+        "AgentTask",
+        "ApprovalPolicy",
+        "RoutingModel",
+        "ChatRuntimeSettings",
+        "FinalAgent",
+        "IntentRouting",
+        "AgentWorkflow",
+        "NodeRun",
+        "PlanDraft",
+        "MessageEvent",
+        "/AICopilot.SimulationTests/",
+        "/AICopilot.SimulationDockerTests/",
+        "/AgentRunThread.vue",
+        "/Run-AgentSimulationAcceptance.ps1",
+        "/Test-AgentSimulationScope.ps1",
+        "/aicopilot-simulation-release-candidate.yml"
     ];
 
     [Fact]
@@ -68,6 +100,28 @@ public sealed class LegacyRetirementArchitectureTests
     }
 
     [Fact]
+    public void RepositorySurface_ShouldNotRestoreRetiredOrchestrationPaths()
+    {
+        var scanRoots = new[]
+        {
+            Path.Combine(SolutionRoot, "src"),
+            Path.Combine(SolutionRoot, "scripts"),
+            Path.Combine(SolutionRoot, ".github", "workflows")
+        };
+        var violations = scanRoots
+            .Where(Directory.Exists)
+            .SelectMany(EnumerateSurfaceFiles)
+            .Select(path => "/" + Path.GetRelativePath(SolutionRoot, path).Replace('\\', '/'))
+            .Where(path => RetiredPathMarkers.Any(marker =>
+                path.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        violations.Should().BeEmpty(
+            "retired orchestration projects, source folders, workers, scripts, and frontend entries must remain physically absent");
+    }
+
+    [Fact]
     public void AiGatewayDbContext_ShouldPersistOnlyHarnessRuntimeAndCurrentCatalogs()
     {
         var actualDbSets = typeof(AiGatewayDbContext)
@@ -87,6 +141,32 @@ public sealed class LegacyRetirementArchitectureTests
             typeof(AgentSessionState),
             typeof(ModelQuotaReservation)
         ]);
+    }
+
+    [Fact]
+    public void AiGatewayMigrationChain_ShouldRemainSingleHarnessBaseline()
+    {
+        var migrationDirectory = Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "Migrations",
+            "AiGatewayDbContext");
+        var migrationFiles = Directory
+            .EnumerateFiles(migrationDirectory, "*.cs", SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFileName)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        migrationFiles.Should().HaveCount(3);
+        migrationFiles.Should().ContainSingle(name =>
+            string.Equals(name, "AiGatewayDbContextModelSnapshot.cs", StringComparison.Ordinal));
+        migrationFiles.Should().ContainSingle(name =>
+            name!.EndsWith("_AiGatewayHarnessBaseline.cs", StringComparison.Ordinal) &&
+            !name.EndsWith(".Designer.cs", StringComparison.Ordinal));
+        migrationFiles.Should().ContainSingle(name =>
+            name!.EndsWith("_AiGatewayHarnessBaseline.Designer.cs", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -122,5 +202,45 @@ public sealed class LegacyRetirementArchitectureTests
             "timeline",
             "agent-upload"
         }.Any(retired => route.Contains(retired, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static IEnumerable<string> EnumerateSurfaceFiles(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.TryPop(out var current))
+        {
+            foreach (var directory in Directory.EnumerateDirectories(current))
+            {
+                var name = Path.GetFileName(directory);
+                if (name is "bin" or "obj" or "node_modules" or "dist" or "artifacts")
+                {
+                    continue;
+                }
+
+                pending.Push(directory);
+            }
+
+            foreach (var file in Directory.EnumerateFiles(current))
+            {
+                yield return file;
+            }
+        }
+    }
+
+    private static string FindSolutionRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "AICopilot.slnx")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("AICopilot repository root was not found.");
     }
 }
