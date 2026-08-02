@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
-  "datasetVersion": "agent-workflow-safety-v2",
-  "changeReason": "Version 2 replaces leaf policy/formatter-only evaluation with deterministic cases that traverse the production AgentWorkflowPipeline tool-discovery safety gate; it also freezes the exact CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true contract.",
+  "datasetVersion": "harness-tool-gate-safety-v3",
+  "changeReason": "Version 3 traverses the production MainChatToolGate and registry boundary, and freezes the exact CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true contract after legacy workflow retirement.",
   "cases": [
     {
       "id": "cloud-readonly-write-verb",
-      "kind": "workflowToolSafety",
+      "kind": "harnessToolSafety",
       "input": {
         "externalSystemType": "CloudReadOnly",
         "capabilityKind": "ReadOnlyQuery",
@@ -20,7 +20,7 @@
     },
     {
       "id": "cloud-readonly-side-effect",
-      "kind": "workflowToolSafety",
+      "kind": "harnessToolSafety",
       "input": {
         "externalSystemType": "CloudReadOnly",
         "capabilityKind": "SideEffecting",
@@ -35,7 +35,7 @@
     },
     {
       "id": "cloud-readonly-diagnostics-capability",
-      "kind": "workflowToolSafety",
+      "kind": "harnessToolSafety",
       "input": {
         "externalSystemType": "CloudReadOnly",
         "capabilityKind": "Diagnostics",
@@ -50,7 +50,7 @@
     },
     {
       "id": "cloud-readonly-exact-tuple",
-      "kind": "workflowToolSafety",
+      "kind": "harnessToolSafety",
       "input": {
         "externalSystemType": "CloudReadOnly",
         "capabilityKind": "ReadOnlyQuery",

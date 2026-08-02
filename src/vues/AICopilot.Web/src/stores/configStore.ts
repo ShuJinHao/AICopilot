@@ -8,7 +8,6 @@ import type {
   ConfigLoadingDomain
 } from '@/stores/config/configStoreTypes'
 import { useLanguageModelConfigDomain } from '@/stores/config/languageModelConfig'
-import { useRoutingModelConfigDomain } from '@/stores/config/routingModelConfig'
 import { toStoreErrorMessage } from '@/stores/useDialogCrud'
 import type { ConfigDialogMode } from '@/types/app'
 
@@ -18,31 +17,26 @@ export const useConfigStore = defineStore('config', () => {
 
   const loadingStates = reactive<Record<ConfigLoadingDomain, boolean>>({
     languageModel: false,
-    routingModel: false,
     conversationTemplate: false
   })
 
   const dialogStates = reactive<Record<ConfigEditableDomain, boolean>>({
     languageModel: false,
-    routingModel: false,
     conversationTemplate: false
   })
 
   const dialogModes = reactive<Record<ConfigEditableDomain, ConfigDialogMode>>({
     languageModel: 'create',
-    routingModel: 'create',
     conversationTemplate: 'create'
   })
 
   const submittingStates = reactive<Record<ConfigEditableDomain, boolean>>({
     languageModel: false,
-    routingModel: false,
     conversationTemplate: false
   })
 
   const actionErrors = reactive<Record<ConfigEditableDomain, string>>({
     languageModel: '',
-    routingModel: '',
     conversationTemplate: ''
   })
 
@@ -55,10 +49,6 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   const languageModelDomain = useLanguageModelConfigDomain(domainStates)
-  const routingModelDomain = useRoutingModelConfigDomain(
-    domainStates,
-    languageModelDomain.refreshLanguageModels
-  )
   const conversationTemplateDomain = useConversationTemplateConfigDomain(domainStates)
 
   async function refresh() {
@@ -68,29 +58,6 @@ export const useConfigStore = defineStore('config', () => {
     try {
       await Promise.all([
         languageModelDomain.refreshLanguageModels(),
-        routingModelDomain.refreshRoutingModels(),
-        conversationTemplateDomain.refreshConversationTemplates()
-      ])
-    } catch (error) {
-      errorMessage.value = toStoreErrorMessage(
-        error,
-        CONFIG_STORE_MESSAGES.pageLoadFailed,
-        CONFIG_STORE_MESSAGES.pageLoadForbidden
-      )
-      throw error
-    } finally {
-      isLoading.value = false
-    }
-  }
-
-  async function refreshAgentSlots() {
-    isLoading.value = true
-    errorMessage.value = ''
-
-    try {
-      await Promise.all([
-        languageModelDomain.refreshLanguageModels(),
-        routingModelDomain.refreshRoutingModels(),
         conversationTemplateDomain.refreshConversationTemplates()
       ])
     } catch (error) {
@@ -107,7 +74,6 @@ export const useConfigStore = defineStore('config', () => {
 
   return {
     ...languageModelDomain,
-    ...routingModelDomain,
     ...conversationTemplateDomain,
     isLoading,
     errorMessage,
@@ -116,7 +82,6 @@ export const useConfigStore = defineStore('config', () => {
     dialogModes,
     submittingStates,
     actionErrors,
-    refresh,
-    refreshAgentSlots
+    refresh
   }
 })

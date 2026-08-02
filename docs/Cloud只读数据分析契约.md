@@ -6,7 +6,7 @@
 
 - AICopilot 只能读取已批准范围内的 Cloud 业务数据，用于分析、解释、汇总、检索和建议。
 - AICopilot 不得创建、修改、删除、补录、审批、派发或触发 Cloud 业务流程。
-- AICopilot 不得通过 MCP、Tool、Agent workflow、后台任务、直接 SQL 或隐藏 adapter 间接写 Cloud。
+- AICopilot 不得通过 MCP、Tool、Harness、后台任务、直接 SQL 或隐藏 adapter 间接写 Cloud。
 - Human-in-the-loop 只控制 AICopilot 自身高风险动作，不授权 Cloud 业务写入。
 - Cloud 只读失败、为空或未配置时，不得 fallback 到 Simulation 冒充真实数据。
 - 当前唯一真实外部业务数据源是 Cloud。MES、ERP 只允许以后通过统一 provider/profile registry 扩展，不得复制 Runner、Guard、RepairLoop 或 Prompt。
@@ -19,20 +19,20 @@
 - Cloud provider item/envelope 运行时契约：`CloudAiReadProviderItemContractValidator.cs`、`CloudAiReadJsonValueReader.cs`。
 - 统一上下文、确认字段、领域能力、结构化结果、provider/profile/context 接口：`src/services/AICopilot.Services.Contracts/Contracts/BusinessQueryPipelineContracts.cs`。
 - profile registry 与上下文 TTL owner：`src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDataSourceProfileRegistry.cs`。
-- Cloud provider 与 provider registry：`src/services/AICopilot.AiGatewayService/Workflows/Executors/BusinessQueryProviderRegistry.cs`。
-- Agent 业务查询编排与结构化工具输出：`src/services/AICopilot.AiGatewayService/AgentTasks/Runtime/AgentRuntimeBusinessQueryToolService.cs`。
-- 语义分析入口：`src/services/AICopilot.AiGatewayService/Workflows/Executors/SemanticAnalysisRunner.cs`。
-- 同源 Text-to-SQL runner 与 prompt adapter：`src/services/AICopilot.AiGatewayService/Workflows/Executors/CloudReadOnlyTextToSqlFallbackRunner.cs`、`CloudReadOnlyLlmTextToSqlGenerator.cs`；文件名不代表第二条 Cloud 专用执行链。
+- Cloud provider 与 provider registry：`src/services/AICopilot.AiGatewayService/BusinessQueries/BusinessQueryProviderRegistry.cs`。
+- 中性业务查询入口：`src/services/AICopilot.AiGatewayService/BusinessQueries/BusinessQueryExecutor.cs`；结果只表达成功、空结果、待确认、失败、安全上下文、来源和可信 inline Widget。
+- Harness 模型可见的唯一业务查询工具：`src/services/AICopilot.AiGatewayService/Agents/MainChatBusinessQueryTool.cs`。
+- 同源 Text-to-SQL runner 与 prompt adapter：`src/services/AICopilot.AiGatewayService/BusinessQueries/CloudReadOnlyTextToSqlFallbackRunner.cs`、`CloudReadOnlyLlmTextToSqlGenerator.cs`；Text-to-SQL 不得单独进入模型工具目录。
 - 唯一数据库执行接口、共享 AST guard 和 governed column inspector：`src/services/AICopilot.Services.Contracts/Contracts/IDatabaseConnector.cs`、`src/infrastructure/AICopilot.Dapper/DapperDatabaseConnector.cs`、`src/infrastructure/AICopilot.Dapper/Security/AstSqlGuardrail.cs`、`src/services/AICopilot.Services.CrossCutting/Sql/SqlAllowlistColumnInspector.cs`。
 - Cloud readonly 授权脚本：`deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql`、`deploy/enterprise-ai/cloud-readonly/check-readonly-grants.sql`。
 - Cloud readonly 授权 preflight：`deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh`、`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh`。
-- 关键测试：`AICopilotArchitectureAnalyzerTests` 的 `AIARCH006/AIARCH007`、`ArchitectureBoundaryTests`、`BusinessQueryPipelineTests`、`AgentRuntimeBusinessQueryToolServiceTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`SqlGuardrailTests`、`SemanticSqlGenerationTests`、`CloudAiReadClientContractTests`、`SemanticDefinitionTests`、`SemanticAnalysisRunnerTests`、`DataAnalysisFinalContextFormatterTests`、`AgentSafetyApplicationTests`、`ToolSafetyAndApprovalIdentityTests.CloudReadOnlyToolSafety_ShouldRejectForbiddenWriteVerbs`、`PromptGovernanceTests`、`DeviceLogFollowUpIntentRewriterTests`。已退役的 `CloudReadonlySimulationTests` 与 `TextToSqlReadOnlyTests` 不再是契约入口。
+- 关键测试：`AICopilotArchitectureAnalyzerTests` 的 `AIARCH006/AIARCH007`、`ArchitectureBoundaryTests`、`LegacyRetirementArchitectureTests`、`BusinessQueryPipelineTests`、`HarnessMainChatToolTests`、`CloudReadOnlyTextToSqlFallbackRunnerTests`、`SqlGuardrailTests`、`SemanticSqlGenerationTests`、`CloudAiReadClientContractTests`、`SemanticDefinitionTests`、`SemanticSourceStatusDiagnosticsTests`、`ToolSafetyAndApprovalIdentityTests.CloudReadOnlyToolSafety_ShouldRejectForbiddenWriteVerbs`、`PromptGovernanceTests` 和 `SemanticSummaryBuilderTests`。
 
 ### 编译型只读门禁
 
-- `AIARCH006` 以 Roslyn symbol/operation 对所有源码方法（包括 internal/private/protected HostedService 路径）逐个判断 Cloud root：该方法自身直接调用、构造或泛型解析完全限定真实 Cloud AiRead / 统一业务查询 operation，签名/字段/ctor 持有正式 client、provider registry、profile registry、context store、database connector 或 shared guard，或自身属于正式 provider/fallback workflow 时才命中；随后从该 root 追踪完整 call graph、具体实现、interface dispatch、泛型 helper、lambda 以及 field/property delegate。Delegate member initializer、constructor assignment 和 property getter return 必须在 CompilationEnd 统一解析，不能受并发 Analyzer callback 顺序影响。中性命名方法通过本地 DI factory、private helper 返回或 object creation 取得真实只读类型时同样命中。Generic Agent/worker orchestrator 不能仅因深层 interface dispatch 某个实现可能读 Cloud 就被整体误标；可信 operation 只来自契约记录的完全限定 client、provider/profile/context/connector/guard 与正式 fallback workflow，同名伪 Cloud 类型、仅计划/DTO 类型或方法名不能扩大入口。
-- Cloud root 可达图中的写边矩阵固定为：完全限定 `AICopilot.SharedKernel.Repository.IRepository/IReadRepository` mutation；`SaveChanges*`、`ExecuteNonQuery*`、EF raw/bulk write；完全限定 `Dapper.SqlMapper.Execute/ExecuteAsync`；参数实现完全限定 `AICopilot.SharedKernel.Messaging.ICommand` 的 dispatch；以及完全限定 `AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor/McpAgentToolExecutor.ExecuteAsync`。这些边全部是 compiler error，只允许下条列出的两个 AICopilot 内部持久化契约按完全限定 symbol identity 截断。同名 `Fixture.IRepository`、`Fixture.ICommand`、`Fixture.SqlMapper`、含 `Mcp`/`Write` 字样的方法或 executor 均不得触发或扩大规则；不得以 SQL 字符串关键词代替 symbol identity。
-- 只读路径只允许两个精确的 AICopilot 内部持久化例外：`AICopilot.Services.Contracts.IAuditLogWriter` 只能记录只读查询审计；`AICopilot.Services.Contracts.IModelQuotaReservationStore` 只能执行 `TryReserveAsync`、`SettleAsync`、`ReclaimExpiredAsync`，维护模型调用前后的租约、限流、并发和 token 配额状态。每一次真实 `IChatClient` 请求都必须独立预约、结算并记录熔断结果；流式中断或用量未知按已派发的保守预留结算，不能在 Agent 构造时记成功，也不能按外层 invocation 合并预约。配额接口唯一生产实现必须是 `AICopilot.EntityFrameworkCore.Repository.PostgresModelQuotaReservationStore`，只能依赖 `AgentExecutionTransactionRunner`，且该 runner 的唯一 DbContext 必须是 `AiGatewayDbContext`。两者都不是 Cloud 业务写权限；同名接口、其他实现、adapter/wrapper、其他 DbContext、实现类额外写方法或借内部状态写入执行 Cloud mutation 均不在例外内。
+- `AIARCH006` 以 Roslyn symbol/operation 对所有源码方法判定 Cloud root：当前可信身份只包含完全限定的 Cloud AiRead client、`BusinessQueryExecutor`、provider/profile/context/connector/guard 与同源 fallback 类型。命中后追踪完整 call graph、具体实现、interface dispatch、泛型 helper、lambda 和 field/property delegate；同名 fake、DTO 或字符串不得扩大入口。
+- Cloud root 可达图中的写边包含完全限定 repository mutation、`SaveChanges*`、`ExecuteNonQuery*`、EF raw/bulk write、`Dapper.SqlMapper.Execute/ExecuteAsync` 以及参数实现完全限定 `ICommand` 的 dispatch。这些边全部是 compiler error；同名 fake 和 SQL 字符串不能代替 symbol identity。
+- 只读路径只允许两个精确的内部持久化例外：`IAuditLogWriter` 只记录只读审计；`IModelQuotaReservationStore` 只执行 `TryReserveAsync`、`SettleAsync`、`ReclaimExpiredAsync`。每次真实 `IChatClient` 请求都必须独立预约、结算并记录熔断结果；唯一生产实现是 `PostgresModelQuotaReservationStore`，只能依赖 `AiGatewayTransactionRunner` 与 `AiGatewayDbContext`。两者都不是 Cloud 业务写权限。
 - `AIARCH007` 只接受完全限定符号上的 CloudReadOnly tool safety descriptor，且安全元数据必须同时为 `boundary=CloudReadOnly`、`capability=ReadOnlyQuery`、`readOnlyDeclared=true`；`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失值、同名伪类型或其他无法静态证明的动态声明都必须 compiler-error fail-closed。动态 MCP 配置不能因 Analyzer 无法展开就绕过安全契约；注册和每次执行都必须通过同一 `AiToolSafetyPolicy.EvaluateConfigured` 运行时门禁。
 
 ## 3. Cloud business plugin 正式路径
@@ -50,13 +50,13 @@ Cloud 当前正式 AI Read 只读表面必须在 AICopilot 客户端 allowlist �
 
 Cloud AiRead transport 只允许以上八个固定 GET。AICopilot 不提供任意 method/path 公共传输入口，不接受可配置 POST allowlist；POST、PUT、PATCH、DELETE 必须在发出 HTTP 请求前拒绝。Cloud identity status 是独立的只读身份 GET 表面，只复用安全路径校验，不扩展 Cloud AiRead 业务端点。
 
-六类 Cloud business plugin 优先走上述 typed GET，并统一返回 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable` 或 `Unauthorized`。Harness 主聊天的模型可见业务查询表面只能有一个 `BusinessQuery`；typed GET 与 fallback 选择都在该工具内部完成，带 `DataSource.TextToSql` 权限的直接工具不得进入模型工具目录。只有 `Unsupported` 或同一 Cloud 来源的 `Unavailable` 可由模型决定是否尝试 Cloud Text-to-SQL；`Empty` 直接作为真实空结果，`NeedClarification` 继续询问，`Unauthorized`/凭据失败不得绕过。Chat 在首次业务查询上下文确认后，可在该已确认 source/profile/capability 内直接执行符合条件的同源 fallback，不得再次要求用户确认 SQL；Plan/Worker 则必须由已确认计划明确选择 `TextToSql`。任何 Simulation、MCP 或其他数据源 fallback 禁止。
+六类 Cloud business plugin 优先走上述 typed GET，并统一返回 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable` 或 `Unauthorized`。Harness 主聊天的模型可见业务查询表面只能有一个 `BusinessQuery`；`BusinessQueryExecutor` 在工具内部固定执行 typed-first，并只在同一 Cloud 来源的 `Unsupported` 或 `Unavailable` 时自动进入受控 Text-to-SQL。`Empty` 直接作为真实空结果，`NeedClarification` 继续询问，`Unauthorized`/凭据失败不得绕过。查询确认与复用只按 `SessionId` 绑定，不存在任务级选择或重试语义。Simulation、MCP 或其他数据源 fallback 禁止。
 
 每个 provider 必须为其声明的每个 capability 同时声明非空结果字段契约和敏感字段片段；registry 必须与同一 `SourceKey/SourceType` 的 profile 联合校验 capability，并确保结果契约覆盖 capability profile 的全部敏感字段片段。运行时逐行校验顶层字段，递归检查 dictionary、sequence、`JsonElement`、`JsonDocument` 和可安全序列化 DTO，未知或序列化失败的复杂对象 fail-closed；校验通过后才能进入通用最终上下文 formatter。formatter 不持有 Cloud 专用 schema；MES/ERP 的输出边界由各自 provider capability 结果契约负责。业务数据源绑定必须同时匹配 `SourceKey`、`SourceType`，已确认 `DataSourceId` 时还必须精确匹配该 ID。
 
-查询上下文的来源、能力、业务对象、时间范围和过滤条件只能来自服务端记录的用户确认；session 存在、模型高置信度、`Device`/`Process`/`ClientRelease` 目录型 target 或空/非空 filters 都不能自动代表用户已确认。同一 task 先固定已确认 source/sourceId；完全相同 scope 可复用完整确认，改变时间或过滤时只复用未改变的来源、能力和业务对象字段，并对变化字段继续返回 `NeedClarification`。用户显式切换来源时必须形成新的完整确认，默认来源不得覆盖已确认来源。
+查询上下文的来源、能力、业务对象、时间范围和过滤条件只能来自服务端记录的用户确认；Session 存在、模型高置信度、`Device`/`Process`/`ClientRelease` 目录型 target 或空/非空 filters 都不能自动代表用户已确认。同一 Session 先固定已确认 source/sourceId；完全相同 scope 可复用完整确认，改变时间或过滤时只复用未改变的来源、能力和业务对象字段，并对变化字段继续返回 `NeedClarification`。过期、跨 Session 或显式切换来源必须形成新的完整确认。
 
-`Analysis.Recipe.*` 具体数据问题必须在语义规划器、数据提供方、数据库、SQL 生成器和 fallback 之前返回固定禁读边界。fallback 决策由统一 orchestrator 基于结构化结果完成，typed plugin 自身不得直接切换数据源或调用 Simulation。
+`Analysis.Recipe.*` 具体数据问题必须在语义规划器、数据提供方、数据库、SQL 生成器和 fallback 之前返回固定禁读边界。fallback 决策由 `BusinessQueryExecutor` 基于结构化结果完成，typed plugin 自身不得直接切换数据源或调用 Simulation。
 
 既有 physical mapping / semantic source status 属于 Direct DB 治理和运维诊断表面，不是正式语义执行授权；其配置、状态 API 或独立测试存在，不得被解释为六类 Cloud-only intent 可以转入 Direct DB。
 
@@ -114,7 +114,7 @@ Cloud AiRead transport 只允许以上八个固定 GET。AICopilot 不提供任�
 - `/devices` 支持 `deviceId/deviceCode/processId/keyword/maxRows`，多个条件按 AND 相交，返回设备主数据 `id/deviceCode/deviceName/processId`；不得从该端点读取或生成运行状态、日志级别、`lineName`、`processName` 或 `updatedAt`。
 - 自然语言里的设备编码必须先解析成唯一 `deviceId`；只有未截断搜索结果中的唯一精确规范化 `deviceCode` 匹配可以用于解析。零个或多个精确匹配、结果截断或只有模糊命中时要求用户补充正式 `deviceId`，不得扫描分页或选择第一条。
 - `Analysis.Device.Status` 只调用 `/device-client-states`，以 `softwareStatus` 为 Cloud 权威派生状态，`runtimeStatus` 保留心跳原值，`lastRuntimeHeartbeatAtUtc` 是唯一 freshness 时间。无心跳设备必须返回 `MissingRuntimeHeartbeat` 行；仅 `asOfUtc - lastRuntimeHeartbeatAtUtc > 24h` 为 `RuntimeHeartbeatStale`，恰好 24 小时不 stale；Stale 不得翻译为 Offline/Stopped。零条只表示授权范围内没有匹配设备。
-- `Analysis.Device.Status` 的合法空集不回退，权限/凭据失败不回退；只有统一 plugin 结果为 `Unsupported`/同源 `Unavailable` 时才允许统一 orchestrator 决定同源 Text-to-SQL。Direct DB 设备主数据映射不得连接 `device_logs`，最新日志级别只属于 `Analysis.DeviceLog.*`。
+- `Analysis.Device.Status` 的合法空集不回退，权限/凭据失败不回退；只有统一 plugin 结果为 `Unsupported`/同源 `Unavailable` 时才允许 `BusinessQueryExecutor` 进入同源 Text-to-SQL。Direct DB 设备主数据映射不得连接 `device_logs`，最新日志级别只属于 `Analysis.DeviceLog.*`。
 - `Analysis.Process.List` 只调用 `/processes`，支持正式 `processId/keyword/maxRows`；`processCode/processName` 作为搜索语义规范化为 keyword。`Analysis.Process.Detail` 必须至少携带 `processId/processCode/processName` 之一，`keyword` 只能用于 List，keyword-only Detail 必须在 sealed plan/provider/HTTP 前拒绝。`processId` 必须作为 GUID 精确参数发送，并且直查响应只能有一条、不得截断且返回 `processId` 必须与请求完全一致；非 `processId` 搜索分支必须先形成非空 `processCode/processName` exact filters，再在未截断结果中唯一精确命中。空 exact filters、只有模糊命中、零命中、多命中或截断都必须返回明确边界，不得让 `All(empty)` 变成成功、猜测或选择第一条。
 - `Analysis.ClientRelease.List` 只调用 `/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`。版本、hash、下载地址、发布说明、归档和发布状态只能逐字段使用 Cloud 返回，不能由模型推断、拼接或补默认值。当前没有 `ClientRelease` 的 governed Text-to-SQL capability profile，因此该能力保持 typed plugin-only，任何结果都不得转入 Text-to-SQL。
 - `Analysis.ProductionData.*` 只调用通用 `/production-records`，允许 `typeKey/processId/deviceId/plcCode/plcName/barcode/result/startTime/endTime/preset/fieldMode/maxRows` 中由 Cloud 正式声明的组合；CP/AP 不新增按工序复制的插件或端点。
@@ -160,13 +160,12 @@ Text-to-SQL prompt 只负责澄清、PostgreSQL 方言、profile schema 和结�
 ## 8. Simulation 边界
 
 - Simulation 只允许作为显式 Development、离线演示或测试资产。
-- Development/Simulation 配置只表示该能力可被显式选择，不构成调用授权：请求必须同时显式传入唯一 `SimulationBusiness` `DataSourceId` 和精确 `TextToSql` 模式；计划准备、协调器和运行时不得自动选择数据源或执行模式。
+- Development/Simulation 配置只表示该能力可被显式选择，不构成调用授权：请求必须同时显式传入唯一 `SimulationBusiness` `DataSourceId` 和精确 `TextToSql` 模式；provider registry 和 `BusinessQueryExecutor` 不得自动选择 Simulation 数据源或执行模式。
 - `appsettings.json` 与 `appsettings.Development.json` 叠加后的默认值都必须保持 `CloudReadonly.Mode=Disabled`、`Simulation.Enabled=false` 和 `CloudAiRead.Enabled=false`；Development 的 Simulation 只能由专用测试 fixture、显式环境变量或显式启动参数逐次开启，不能依赖开发配置文件自动开启。
 - 生产基础配置、compose 和部署模板不得携带 `MockOnly=true` 或默认 Simulation 开关。
 - Real Cloud 查询失败、为空或未配置时，必须返回 Cloud AiRead / CloudReadOnly 错误或空态，不能降级为 Simulation。
-- 任何产物、报告、artifact 或导出里出现 Simulation 数据时，必须带明确 `sourceMode=Simulation`、`isSimulation=true` 或等价来源标记。
-- Simulation acceptance 只使用 Manual-only 固定 Linux runner：先以 `docker info` 验证 Linux Docker daemon，再分别整项目执行 `AICopilot.SimulationTests` 和 `AICopilot.SimulationDockerTests`。缺 Docker 必须失败，不得 Skip，不得用 `--filter`、Suite/Phase/Batch/类名或静态 changed-files 清单缩小 acceptance。
-- Simulation pure/Docker runner 在显式运行时分别产生 TRX，并按当次 discovery 对账；不得固定历史 12/1 数量。报告只写入 ignored artifacts，不新增任务流水文档。
+- 任何聊天结果或 Widget 里出现 Simulation 数据时，必须带明确 `sourceMode=Simulation`、`isSimulation=true` 或等价来源标记。
+- Simulation 边界测试属于现有 Application、Unit 或 InProcess owner；不维护专用 Simulation runner、静态 case 数或独立发布候选入口。
 
 ## 9. 验收命令
 
@@ -176,13 +175,13 @@ Text-to-SQL prompt 只负责澄清、PostgreSQL 方言、profile schema 和结�
 dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --filter "AIARCH006|AIARCH007_ShouldRequireControllerMetadataAndCloudReadOnlySafetyMetadata" --no-restore
 dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --filter "CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables" --no-restore
 dotnet test src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj --filter "BusinessQueryPipelineTests|CloudReadOnlyTextToSqlFallbackRunnerTests|CloudReadOnlyLlmTextToSqlGeneratorTests" --no-restore
-dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "AgentRuntimeBusinessQueryToolServiceTests|SemanticAnalysisRunnerTests" --no-restore
+dotnet test src/tests/AICopilot.ApplicationTests/AICopilot.ApplicationTests.csproj --filter "HarnessMainChatToolTests|SemanticSourceStatusDiagnosticsTests" --no-restore
 dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter "SqlGuardrailTests|SemanticSqlGenerationTests|CloudAiReadClientContractTests" --no-restore
 dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter "CloudReadonlyChatBoundaryTests" --no-restore
 rg -n "CloudAiRead|CloudReadOnly|production-records|PreviousSqlForRepair|CloudReadOnlyGovernedSchema|Simulation|MockOnly" src deploy docs
 ```
 
-`AICopilot.GoldenEvalTests`、Simulation pure/Docker、`AICopilot.CloudAiReadLiveTests` 只在用户当前轮明确授权相应质量、Simulation 或跨仓联合验收时运行。Live 验收必须从环境变量读取当前非生产 Cloud BaseUrl/token 和测试实体标识，不允许 StubHandler、手写 JSON 或 Simulation 充当 provider；缺任一变量必须失败，不能 Skip。token 只允许由 Cloud 隔离 E2E 宿主经子进程环境传递，不得进入参数、日志、summary 或仓库。任一仓库生产源码变化后旧 live 结果立即失效。
+`AICopilot.GoldenEvalTests`、`AICopilot.CloudAiReadLiveTests` 和显式 Simulation/Quality 验收只在用户当前轮授权时运行。Live 验收必须从环境变量读取当前非生产 Cloud BaseUrl/token 和测试实体标识，不允许 StubHandler、手写 JSON 或 Simulation 充当 provider；缺任一变量必须失败，不能 Skip。token 只允许由 Cloud 隔离 E2E 宿主经子进程环境传递，不得进入参数、日志、summary 或仓库。任一仓库生产源码变化后旧 live 结果立即失效。
 
 ## 10. 外部依赖
 

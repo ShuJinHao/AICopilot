@@ -482,12 +482,12 @@ $securityImpactRules = @(
             '^src/hosts/AICopilot\.HttpApi/(?:Controllers/IdentityController\.cs|HttpApiAuthenticationConfiguration\.cs|Infrastructure/(?:CloudOidc|CurrentUser|ApiProblemDetailsFactory)|Models/IdentityModels\.cs)')
     },
     [pscustomobject]@{
-        Id = 'agent-http'
+        Id = 'harness-http'
         ProjectName = 'AICopilot.HttpIntegrationTests'
-        Filter = 'FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentRunQueuePermissionTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentSafetyApprovalHttpTests'
+        Filter = 'FullyQualifiedName~AICopilot.HttpIntegrationTests.OpenApiContractTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.HarnessApprovalHttpTests'
         Patterns = @(
-            '^src/services/AICopilot\.AiGatewayService/(?:AgentTasks|ApprovalPolicies|Approvals|Safety|Workspaces)/',
-            '^src/hosts/AICopilot\.HttpApi/Controllers/AiGateway(?:AgentTask|WorkspaceArtifact|Tool)?Controller\.cs')
+            '^src/services/AICopilot\.AiGatewayService/(?:Agents|BusinessQueries|Safety|Tools)/',
+            '^src/hosts/AICopilot\.HttpApi/Controllers/AiGateway(?:Session|Tool)?Controller\.cs')
     },
     [pscustomobject]@{
         Id = 'mcp-http'

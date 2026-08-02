@@ -8,10 +8,7 @@ import type {
   LanguageModelFormModel,
   LanguageModelSummary,
   LanguageModelTestRequest,
-  LanguageModelTestResult,
-  RoutingModelDetail,
-  RoutingModelFormModel,
-  RoutingModelSummary
+  LanguageModelTestResult
 } from '@/types/app'
 
 export const configService = {
@@ -63,39 +60,6 @@ export const configService = {
 
   async deleteLanguageModel(id: string) {
     return await apiClient.delete('/aigateway/language-model', { id })
-  },
-
-  async getRoutingModel(id: string) {
-    return await apiClient.get<RoutingModelDetail>('/aigateway/routing-model', { id })
-  },
-
-  async getRoutingModels() {
-    return await apiClient.get<RoutingModelSummary[]>('/aigateway/routing-model/list')
-  },
-
-  async createRoutingModel(payload: RoutingModelFormModel) {
-    return await apiClient.post('/aigateway/routing-model', {
-      name: payload.name,
-      modelId: payload.modelId,
-      isActive: payload.isActive
-    })
-  },
-
-  async updateRoutingModel(payload: RoutingModelFormModel) {
-    return await apiClient.put('/aigateway/routing-model', {
-      id: payload.id,
-      name: payload.name,
-      modelId: payload.modelId,
-      isActive: payload.isActive
-    })
-  },
-
-  async activateRoutingModel(id: string) {
-    return await apiClient.put('/aigateway/routing-model/activate', { id })
-  },
-
-  async deleteRoutingModel(id: string) {
-    return await apiClient.delete('/aigateway/routing-model', { id })
   },
 
   async getConversationTemplate(id: string) {

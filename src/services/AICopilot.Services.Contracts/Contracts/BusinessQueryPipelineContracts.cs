@@ -345,7 +345,7 @@ public static class BusinessQueryConfirmationPolicy
 }
 
 public sealed record BusinessQueryContext(
-    Guid TaskId,
+    Guid SessionId,
     string SourceKey,
     Guid? DataSourceId,
     DataSourceExternalSystemType SourceType,
@@ -375,8 +375,8 @@ public sealed record BusinessQueryContext(
     public bool CanReuseFor(BusinessQueryContext requested)
     {
         if (!IsConfirmed ||
-            TaskId == Guid.Empty ||
-            TaskId != requested.TaskId ||
+            SessionId == Guid.Empty ||
+            SessionId != requested.SessionId ||
             !string.Equals(SourceKey, requested.SourceKey, StringComparison.OrdinalIgnoreCase) ||
             DataSourceId != requested.DataSourceId ||
             SourceType != requested.SourceType ||
@@ -391,11 +391,11 @@ public sealed record BusinessQueryContext(
                HasSameFilters(requested);
     }
 
-    public bool HasSameTaskAndSource(BusinessQueryContext requested)
+    public bool HasSameSessionAndSource(BusinessQueryContext requested)
     {
         return IsConfirmed &&
-               TaskId != Guid.Empty &&
-               TaskId == requested.TaskId &&
+               SessionId != Guid.Empty &&
+               SessionId == requested.SessionId &&
                string.Equals(SourceKey, requested.SourceKey, StringComparison.OrdinalIgnoreCase) &&
                DataSourceId == requested.DataSourceId &&
                SourceType == requested.SourceType;
@@ -533,7 +533,7 @@ public interface IBusinessQueryContextStore
     BusinessQueryConfirmationChallenge BeginConfirmation(BusinessQueryContext requested);
 
     bool TryConfirmPending(
-        Guid taskId,
+        Guid sessionId,
         string userMessage,
         out BusinessQueryContext confirmed);
 
@@ -545,17 +545,16 @@ public sealed record BusinessQueryConfirmationChallenge(
 
 public sealed record BusinessQueryFallbackDecision(
     bool IsEligible,
-    bool RequiresModelDecision,
     string ReasonCode)
 {
     public static BusinessQueryFallbackDecision Denied(string reasonCode)
     {
-        return new BusinessQueryFallbackDecision(false, false, reasonCode);
+        return new BusinessQueryFallbackDecision(false, reasonCode);
     }
 
     public static BusinessQueryFallbackDecision Eligible(string reasonCode)
     {
-        return new BusinessQueryFallbackDecision(true, true, reasonCode);
+        return new BusinessQueryFallbackDecision(true, reasonCode);
     }
 }
 

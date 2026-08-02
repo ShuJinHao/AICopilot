@@ -15,9 +15,6 @@ public record SessionDto
     public string? LastMessageSummary { get; set; }
     public DateTime? LastMessageAt { get; set; }
     public int MessageCount { get; set; }
-    public DateTimeOffset? OnsiteConfirmedAt { get; set; }
-    public string? OnsiteConfirmedBy { get; set; }
-    public DateTimeOffset? OnsiteConfirmationExpiresAt { get; set; }
     public string? AgentMode { get; set; }
     public long? AgentSessionVersion { get; set; }
     public string? AgentSessionStatus { get; set; }
@@ -60,10 +57,7 @@ internal static class SessionDtoMapper
             Title = session.Title,
             LastMessageSummary = session.LastMessageSummary,
             LastMessageAt = session.LastMessageAt,
-            MessageCount = session.MessageCount,
-            OnsiteConfirmedAt = session.OnsiteConfirmedAt,
-            OnsiteConfirmedBy = session.OnsiteConfirmedBy,
-            OnsiteConfirmationExpiresAt = session.OnsiteConfirmationExpiresAt
+            MessageCount = session.MessageCount
         };
     }
 }

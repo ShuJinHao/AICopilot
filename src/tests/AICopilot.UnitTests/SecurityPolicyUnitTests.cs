@@ -1,5 +1,4 @@
 using System.Reflection;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
@@ -189,53 +188,6 @@ public sealed class SecurityPolicyUnitTests
         model.ModelName.Should().Be("text-embedding-3-small");
         model.ApiKey.Should().Be("key");
         model.IsEnabled.Should().BeFalse();
-    }
-    [Fact]
-    public void ApprovalPolicy_ShouldRejectInvalidInput()
-    {
-        var emptyName = () => new ApprovalPolicy(
-            " ",
-            null,
-            ApprovalTargetType.Plugin,
-            "tool",
-            [],
-            true,
-            false);
-        emptyName.Should().Throw<ArgumentException>();
-
-        var invalidTargetType = () => new ApprovalPolicy(
-            "policy",
-            null,
-            (ApprovalTargetType)999,
-            "tool",
-            [],
-            true,
-            false);
-        invalidTargetType.Should().Throw<ArgumentOutOfRangeException>();
-
-        var emptyTarget = () => new ApprovalPolicy(
-            "policy",
-            null,
-            ApprovalTargetType.Plugin,
-            " ",
-            [],
-            true,
-            false);
-        emptyTarget.Should().Throw<ArgumentException>();
-
-        var policy = new ApprovalPolicy(
-            " policy ",
-            " description ",
-            ApprovalTargetType.Plugin,
-            " target ",
-            [" Echo ", "echo", " "],
-            true,
-            false);
-
-        policy.Name.Should().Be("policy");
-        policy.Description.Should().Be("description");
-        policy.TargetName.Should().Be("target");
-        policy.ToolNames.Should().Equal("Echo");
     }
     [Fact]
     public void McpServerInfo_SecurityMetadata_ShouldBeRequiredBeforeOptionalParameters()

@@ -140,9 +140,9 @@ AICOPILOT_PRIVATE_MODEL_TEMPERATURE=0.2
 
 `AICOPILOT_PRIVATE_MODEL_API_KEY` 即使模型网关允许任意值，也必须显式写入真实 `.env` 并由 seed 加密入库，不能提交到仓库默认值。已存在同 provider/model 的模型记录时，migration worker 只修复密钥保护格式，不强行覆盖现场 URL、启用状态或参数。
 
-后端容器以非 root 用户运行，文件上传和 Agent artifact workspace 必须落在持久化可写卷。默认 compose 会把
-`enterprise-ai-aicopilot-data` 挂到 `/var/lib/aicopilot`，并将文件上传和 artifact workspace 根目录固定为
-`/var/lib/aicopilot/storage` 与 `/var/lib/aicopilot/artifact-workspaces`。这两个根目录不允许用 `.env`
+后端容器以非 root 用户运行，RAG 文档上传必须落在持久化可写卷。默认 compose 会把
+`enterprise-ai-aicopilot-data` 挂到 `/var/lib/aicopilot`，并将文件上传根目录固定为
+`/var/lib/aicopilot/storage`。该根目录不允许用 `.env`
 覆盖到共享挂载点外；不要让生产容器依赖 `/app`、容器层或 `LocalApplicationData` 默认路径写运行产物。
 同一持久卷还必须预先包含 `/var/lib/aicopilot/data-protection-keys`，其 owner/group 为容器运行用户
 `app:app`、mode 为 `0700`。HttpApi 使用固定 `ApplicationName=AICopilot.AgentSessions` 在该目录保存
@@ -156,12 +156,11 @@ docker compose run --rm --no-deps --user root --entrypoint /usr/bin/install \
 
 当前只允许 `AiGateway__Deployment__Mode=SingleInstance`；不得横向启动多个 HttpApi 实例共享本地 key
 目录。多实例必须先引入独立共享 key provider 并更新本契约，不能用复制目录或临时 key 绕过。
-HttpApi 与 DataWorker 必须挂载同一个 `enterprise-ai-aicopilot-data` 卷：RAG/AiGateway 数据库绑定上传文件在写入前会先产生对账日志，请求侧与 DataWorker 通过同一 commit id 的 PostgreSQL advisory lease 互斥，DataWorker 取得 lease 后再按提交标记决定保留或删除文件。默认每 `300` 秒扫描，只对至少 `10` 分钟前的日志对账，提交标记保留 `30` 天，单轮最多 `100` 条。可通过 `.env.example` 中的 `AICOPILOT_PERSISTENCE_*` 变量调整，但不得将对账延迟设为 `0`，不得让标记保留期短于对账延迟。日志损坏时标记清理会 fail-closed，不得手工批量删除 `.persistence/file-reconciliation`。`ArtifactWorkspace` 的多文件/覆盖/复制一致性另由 `AI-PERSIST-01d` 治理，不在本上传对账器的已完成范围内。
+HttpApi 与 DataWorker 必须挂载同一个 `enterprise-ai-aicopilot-data` 卷：RAG 数据库绑定上传文件在写入前会先产生对账日志，请求侧与 DataWorker 通过同一 commit id 的 PostgreSQL advisory lease 互斥，DataWorker 取得 lease 后再按提交标记决定保留或删除文件。默认每 `300` 秒扫描，只对至少 `10` 分钟前的日志对账，提交标记保留 `30` 天，单轮最多 `100` 条。可通过 `.env.example` 中的 `AICOPILOT_PERSISTENCE_*` 变量调整，但不得将对账延迟设为 `0`，不得让标记保留期短于对账延迟。日志损坏时标记清理会 fail-closed，不得手工批量删除 `.persistence/file-reconciliation`。
 RagWorker 也必须挂载同一卷；文档删除 consumer 会按 storage path 查询 pending journal 并争用同一 commit lease，不可读或 active 时让消息重试，禁止从容器或 cron 直接删除文件。共享卷只允许这些受信任的 AICopilot 后端容器写入；若要接入其他写入者，必须先增加权限隔离或 dirfd 级路径操作。
 durable local file/journal backend 只支持 Linux 与 macOS；本 compose 的 Linux 容器是标准生产运行方式。Windows 不在该 backend 的支持矩阵内，禁止用缺少父目录 durability barrier 的实现冒充等价支持。
 `base-dotnet-aspnet:10.0-noble` 由 `mirror-base-images.sh` 生成时必须内置
-`libgssapi-krb5-2`、`tzdata`，并预创建 `/app`、`/var/lib/aicopilot/storage`
-、`/var/lib/aicopilot/artifact-workspaces` 与 mode `0700` 的
+`libgssapi-krb5-2`、`tzdata`，并预创建 `/app`、`/var/lib/aicopilot/storage` 与 mode `0700` 的
 `/var/lib/aicopilot/data-protection-keys`，全部归属 `app:app`；应用 Dockerfile
 不得再用 `USER root` 或临时 `apt-get` 修运行环境。
 

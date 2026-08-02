@@ -368,11 +368,11 @@ try {
         throw 'Aspire TestKit change did not execute its filtered Security dependent without expanding to Quality or Full.'
     }
 
-    $agentOutput = Join-Path $temporaryRoot 'agent-security.json'
+    $agentOutput = Join-Path $temporaryRoot 'harness-security.json'
     & $selector `
         -RepositoryRoot $root `
         -ChangedFiles @(
-            'src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskService.cs') `
+            'src/services/AICopilot.AiGatewayService/Agents/ChatStreamHandler.cs') `
         -OutputPath $agentOutput `
         -GitHubOutputPath ''
     $agent = Get-Content $agentOutput -Raw | ConvertFrom-Json
@@ -384,8 +384,8 @@ try {
         @($agentHttp[0].categories) -notcontains 'Security' -or
         @($agent.selectedDotNetProjects.projectName) -contains 'AICopilot.PersistenceTests' -or
         @($agent.matchedSecurityImpactRules).Count -ne 1 -or
-        @($agent.matchedSecurityImpactRules) -notcontains 'agent-http') {
-        throw 'Agent path/owner mapping did not isolate the expected heavy Security filter.'
+        @($agent.matchedSecurityImpactRules) -notcontains 'harness-http') {
+        throw 'Harness path/owner mapping did not isolate the expected Security filter.'
     }
 
     foreach ($securityCase in @(

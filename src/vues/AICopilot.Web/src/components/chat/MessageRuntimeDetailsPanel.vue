@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Activity, BarChart3, Brain, Cpu, Gauge, Wrench } from 'lucide-vue-next'
+import { Activity, BarChart3, Cpu, Gauge, Wrench } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
 import type { ChatMessage } from '@/types/models'
 import type { ChatRunStatus } from '@/stores/sessionScopedState'
@@ -63,18 +63,6 @@ const details = computed(() => buildRuntimeDetails(props.message, props.status ?
             <span>{{ event.detail }}</span>
             <AiTag :tone="event.tone">{{ event.statusText }}</AiTag>
           </div>
-        </div>
-      </section>
-
-      <section v-if="details.intents.length > 0" class="runtime-section">
-        <div class="runtime-label">
-          <Brain :size="15" />
-          <span>意图</span>
-        </div>
-        <div class="runtime-tags">
-          <AiTag v-for="intent in details.intents" :key="intent.key" tone="neutral">
-            {{ intent.name }} · {{ intent.confidenceText }}
-          </AiTag>
         </div>
       </section>
 

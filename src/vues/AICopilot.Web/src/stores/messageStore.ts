@@ -8,8 +8,8 @@ import { useSessionStore } from './sessionStore'
 
 const unknownModelLabel = '\u672a\u77e5'
 
-// History render payload is only a stable display snapshot. Runtime state such as
-// approvals, intent, and tool calls must come from live stores or timeline events.
+// History render payload is only a stable display snapshot. Approval authority and
+// live tool state must come from the persisted AgentSession projection.
 const stableHistoryChunkTypes = new Set<ChunkType>([
   ChunkType.Text,
   ChunkType.Widget,
@@ -64,8 +64,6 @@ export const useMessageStore = defineStore('chatMessage', () => {
       role,
       finalModelId: role === MessageRole.Assistant ? (message.finalModelId ?? null) : null,
       finalModelName: role === MessageRole.Assistant ? (message.finalModelName ?? unknownModelLabel) : null,
-      routingModelId: role === MessageRole.Assistant ? (message.routingModelId ?? null) : null,
-      routingModelName: role === MessageRole.Assistant ? (message.routingModelName ?? null) : null,
       contextWindowTokens: role === MessageRole.Assistant ? (message.contextWindowTokens ?? null) : null,
       maxOutputTokens: role === MessageRole.Assistant ? (message.maxOutputTokens ?? null) : null,
       chunks: [],
@@ -78,7 +76,7 @@ export const useMessageStore = defineStore('chatMessage', () => {
       ? stableRenderChunks
       : [
           {
-            source: role === MessageRole.User ? 'User' : 'FinalAgentRunExecutor',
+            source: role === MessageRole.User ? 'User' : 'HarnessAgent',
             type: ChunkType.Text,
             content: message.content
           }
@@ -93,7 +91,7 @@ export const useMessageStore = defineStore('chatMessage', () => {
 
     if (restored.chunks.length === 0 && message.content.trim()) {
       restored.chunks.push({
-        source: role === MessageRole.User ? 'User' : 'FinalAgentRunExecutor',
+        source: role === MessageRole.User ? 'User' : 'HarnessAgent',
         type: ChunkType.Text,
         content: message.content
       })

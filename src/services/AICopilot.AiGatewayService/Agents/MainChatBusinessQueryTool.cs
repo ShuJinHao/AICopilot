@@ -1,14 +1,12 @@
 using System.ComponentModel;
-using AICopilot.AiGatewayService.Models;
-using AICopilot.AiGatewayService.Workflows;
-using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.AiGatewayService.BusinessQueries;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.Agents;
 
 internal sealed class MainChatBusinessQueryTool(
-    SemanticAnalysisRunner semanticAnalysisRunner,
+    BusinessQueryExecutor businessQueryExecutor,
     SessionRuntimeSnapshot session,
     BusinessQueryContext? confirmedQuery,
     TrustedRenderChunkBuffer renderChunkBuffer)
@@ -46,47 +44,30 @@ internal sealed class MainChatBusinessQueryTool(
         string question,
         CancellationToken cancellationToken)
     {
-        var intent = new IntentResult
-        {
-            Intent = confirmedQuery?.SemanticPlan?.Intent ?? semanticIntent,
-            Query = confirmedQuery?.Question ?? question,
-            Confidence = 1,
-            BusinessDataSourceExplicitlySelected = confirmedQuery?.SourceExplicitlySelected == true,
-            ConfirmedBusinessQueryContext =
-                confirmedQuery is null ? null : BusinessQueryConfirmation.Complete,
-            ConfirmedBusinessQuery = confirmedQuery
-        };
-        var sink = new AgentWorkflowSink();
-        AgentAnalysisNodeResult result;
-        try
-        {
-            result = await semanticAnalysisRunner.RunAsync(
-                intent,
-                sink,
-                session,
-                cancellationToken);
-        }
-        catch
-        {
-            sink.Complete();
-            throw;
-        }
-
-        sink.Complete();
-        if (result.Status == BranchExecutionStatus.Succeeded)
-        {
-            await renderChunkBuffer.CaptureWidgetsAsync(sink, cancellationToken);
-        }
+        var result = await businessQueryExecutor.ExecuteAsync(
+            session.Id,
+            confirmedQuery?.SemanticPlan?.Intent ?? semanticIntent,
+            confirmedQuery?.Question ?? question,
+            confirmedQuery,
+            cancellationToken);
+        renderChunkBuffer.CaptureTrustedWidgets(result.Widgets);
 
         return result.Status switch
         {
-            BranchExecutionStatus.Succeeded or BranchExecutionStatus.Empty => new
+            BusinessQueryExecutionStatus.Succeeded or BusinessQueryExecutionStatus.Empty => new
             {
                 status = result.Status.ToString().ToLowerInvariant(),
-                context = result.Evidence?.SafeContext,
-                provider = result.Evidence?.Provider,
-                sourceMode = result.Evidence?.SourceMode,
-                isSimulation = result.Evidence?.IsSimulation
+                context = result.SafeContext,
+                provider = result.Provider,
+                sourceKey = result.SourceKey,
+                sourceMode = result.SourceMode,
+                isSimulation = result.IsSimulation
+            },
+            BusinessQueryExecutionStatus.NeedsConfirmation => new
+            {
+                status = "needs_confirmation",
+                code = result.FailureCode,
+                message = result.SafeMessage
             },
             _ => new
             {

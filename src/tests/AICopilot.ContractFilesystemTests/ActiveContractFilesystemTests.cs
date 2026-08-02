@@ -29,7 +29,7 @@ public sealed class ActiveContractFilesystemTests
     }
 
     [Fact]
-    public void AiAuthorityDocuments_ShouldKeepTheB1HarnessSourceTruthMarkers()
+    public void AiAuthorityDocuments_ShouldKeepTheCurrentHarnessSourceTruthMarkers()
     {
         var root = FindRepositoryRoot();
         var businessRules = File.ReadAllText(
@@ -40,7 +40,8 @@ public sealed class ActiveContractFilesystemTests
             Path.Combine(root, "docs", "AI架构路线图.md"));
 
         businessRules.Should().Contain("JIT 首次身份绑定并发");
-        businessRules.Should().Contain("最终产物异步关单状态");
+        businessRules.Should().Contain("Harness 逐次批准");
+        businessRules.Should().Contain("查询确认键是 `SessionId`");
         businessRules.Should().Contain("Cloud provider / AI consumer 跨版本发布顺序");
         businessRules.Should().Contain("完工弹夹数");
 
@@ -50,14 +51,14 @@ public sealed class ActiveContractFilesystemTests
         agentContract.Should().Contain("KnowledgeQuery(question, knowledgeBaseNames)");
         agentContract.Should().Contain("/var/lib/aicopilot/data-protection-keys");
         agentContract.Should().Contain("SingleInstance");
-        agentContract.Should().Contain("待 B2 物理删除的不可达结构");
-        agentContract.Should().Contain("当前不是活动契约");
+        agentContract.Should().Contain("物理边界与禁止回潮");
+        agentContract.Should().Contain("AICopilot.AiGatewayService/BusinessQueries");
 
         roadmap.Should().Contain(
-            "| 能力 | 当前源码 SHA | 源码状态 | 验证状态 | 生产状态 | 阻断项 |");
+            "| 能力 | 源码目标 | 验证退出门 | 生产状态 |");
         roadmap.Should().Contain("AI-01");
         roadmap.Should().Contain("AI-02");
-        roadmap.Should().Contain("Agent 最终产物闭环");
+        roadmap.Should().Contain("Harness 主聊天");
     }
 
     [Fact]

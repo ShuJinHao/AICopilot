@@ -1,12 +1,10 @@
 import {
   ChunkType,
   type AgentEventPayload,
-  type AgentTask,
   type ChatChunk,
   type ChatErrorPayload,
   type ChatModelMetadataPayload,
   type FunctionApprovalRequest,
-  type IntentResult,
 } from '@/types/protocols'
 import type {
   ApprovalChunk,
@@ -14,17 +12,14 @@ import type {
   ChatMessage,
   FunctionCall,
   FunctionCallChunk,
-  IntentChunk,
   WidgetChunk,
 } from '@/types/models'
 import { resolveChatErrorMessage } from '@/stores/chatErrorStore'
 import { stripThinkingTags } from './modelOutputSanitizer'
-import { formatPlanDraftFailure } from './agentEventDisplay'
 
 export interface ChunkReducerCallbacks {
   setSessionError: (sessionId: string, message: string) => void
   onApprovalChunk: (sessionId: string) => void
-  onAgentTaskChunk?: (sessionId: string, task: AgentTask) => void
   onAgentSessionState?: (event: AgentEventPayload) => void
 }
 
@@ -39,9 +34,6 @@ export function processChunk(
       break
     case ChunkType.Metadata:
       applyMetadataChunk(message, chunk)
-      break
-    case ChunkType.Intent:
-      addIntentChunk(message, chunk)
       break
     case ChunkType.FunctionCall:
       addFunctionCallChunk(message, chunk)
@@ -63,9 +55,6 @@ export function processChunk(
     case ChunkType.AgentEvent:
       addAgentEventChunk(message, chunk, callbacks)
       break
-    case ChunkType.AgentTask:
-      addAgentTaskChunk(message, chunk, callbacks)
-      break
     case ChunkType.Error:
       addErrorChunk(message, chunk, callbacks)
       break
@@ -84,14 +73,6 @@ function applyMetadataChunk(message: ChatMessage, chunk: ChatChunk) {
       message.finalModelName = metadata.finalModelName.trim()
     } else if (!message.finalModelName) {
       message.finalModelName = '未知'
-    }
-
-    if (metadata.routingModelId !== undefined) {
-      message.routingModelId = metadata.routingModelId
-    }
-
-    if (typeof metadata.routingModelName === 'string' && metadata.routingModelName.trim()) {
-      message.routingModelName = metadata.routingModelName.trim()
     }
 
     if (metadata.contextWindowTokens !== undefined) {
@@ -148,16 +129,6 @@ function addWidgetChunk(message: ChatMessage, chunk: ChatChunk, parsedWidget: un
     type: ChunkType.Widget,
     widget: parsedWidget,
   } as WidgetChunk)
-}
-
-function addIntentChunk(message: ChatMessage, chunk: ChatChunk) {
-  try {
-    const intents = JSON.parse(chunk.content) as IntentResult[]
-    message.chunks.push({ ...chunk, intents } as IntentChunk)
-  } catch (error) {
-    console.error('Failed to parse intent chunk payload.', error)
-    addTextChunk(message, chunk)
-  }
 }
 
 function addFunctionCallChunk(message: ChatMessage, chunk: ChatChunk) {
@@ -222,9 +193,6 @@ function addAgentEventChunk(
       event,
     } as AgentEventChunk)
 
-    if (event.stage === 'plan_draft_failed') {
-      callbacks.setSessionError(message.sessionId, formatPlanDraftFailure(event))
-    }
     if (
       event.stage === 'agent_session_state' &&
       event.sessionId &&
@@ -238,20 +206,6 @@ function addAgentEventChunk(
   } catch (error) {
     console.error('Failed to parse agent event chunk payload.', error)
     callbacks.setSessionError(message.sessionId, '运行状态事件解析失败。')
-  }
-}
-
-function addAgentTaskChunk(
-  message: ChatMessage,
-  chunk: ChatChunk,
-  callbacks: ChunkReducerCallbacks,
-) {
-  try {
-    const task = JSON.parse(chunk.content) as AgentTask
-    callbacks.onAgentTaskChunk?.(message.sessionId, task)
-  } catch (error) {
-    console.error('Failed to parse agent task chunk payload.', error)
-    callbacks.setSessionError(message.sessionId, '任务状态解析失败。')
   }
 }
 

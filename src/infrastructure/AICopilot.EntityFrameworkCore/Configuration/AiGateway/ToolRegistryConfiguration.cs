@@ -105,10 +105,6 @@ public sealed class ToolRegistrationConfiguration : IEntityTypeConfiguration<Too
             .IsRequired()
             .HasColumnName("data_boundary");
 
-        builder.Property(tool => tool.IsVisibleToPlanner)
-            .IsRequired()
-            .HasColumnName("is_visible_to_planner");
-
         builder.Property(tool => tool.IsExecutableByAgent)
             .IsRequired()
             .HasColumnName("is_executable_by_agent");
@@ -121,11 +117,6 @@ public sealed class ToolRegistrationConfiguration : IEntityTypeConfiguration<Too
             .IsRequired()
             .HasColumnName("catalog_version");
 
-        builder.Property(tool => tool.ApprovalPolicy)
-            .IsRequired()
-            .HasMaxLength(120)
-            .HasColumnName("approval_policy");
-
         builder.Property(tool => tool.CreatedAt)
             .HasColumnType("timestamp with time zone")
             .HasColumnName("created_at");
@@ -133,92 +124,5 @@ public sealed class ToolRegistrationConfiguration : IEntityTypeConfiguration<Too
         builder.Property(tool => tool.UpdatedAt)
             .HasColumnType("timestamp with time zone")
             .HasColumnName("updated_at");
-    }
-}
-
-public sealed class ToolExecutionRecordConfiguration : IEntityTypeConfiguration<ToolExecutionRecord>
-{
-    public void Configure(EntityTypeBuilder<ToolExecutionRecord> builder)
-    {
-        builder.ToTable("tool_execution_records");
-
-        builder.HasKey(record => record.Id);
-        builder.Property(record => record.Id)
-            .HasConversion(id => id.Value, value => new ToolExecutionRecordId(value))
-            .HasColumnName("id");
-
-        builder.Property(record => record.TaskId)
-            .HasConversion(id => id.Value, value => new AgentTaskId(value))
-            .IsRequired()
-            .HasColumnName("task_id");
-
-        builder.Property(record => record.StepId)
-            .HasConversion(id => id.Value, value => new AgentStepId(value))
-            .IsRequired()
-            .HasColumnName("step_id");
-
-        builder.Property(record => record.RunAttemptId)
-            .HasConversion(
-                id => id.HasValue ? id.Value.Value : (Guid?)null,
-                value => value.HasValue ? new AgentTaskRunAttemptId(value.Value) : null)
-            .HasColumnName("run_attempt_id");
-
-        builder.Property(record => record.ToolCode)
-            .IsRequired()
-            .HasMaxLength(160)
-            .HasColumnName("tool_code");
-
-        builder.Property(record => record.InputSummary)
-            .HasMaxLength(2000)
-            .HasColumnName("input_summary");
-
-        builder.Property(record => record.OutputSummary)
-            .HasMaxLength(4000)
-            .HasColumnName("output_summary");
-
-        builder.Property(record => record.Status)
-            .HasConversion<string>()
-            .HasMaxLength(40)
-            .IsRequired()
-            .HasColumnName("status");
-
-        builder.Property(record => record.StartedAt)
-            .HasColumnType("timestamp with time zone")
-            .HasColumnName("started_at");
-
-        builder.Property(record => record.CompletedAt)
-            .HasColumnType("timestamp with time zone")
-            .HasColumnName("completed_at");
-
-        builder.Property(record => record.DurationMs)
-            .HasColumnName("duration_ms");
-
-        builder.Property(record => record.ErrorCode)
-            .HasMaxLength(120)
-            .HasColumnName("error_code");
-
-        builder.Property(record => record.ErrorMessage)
-            .HasMaxLength(2000)
-            .HasColumnName("error_message");
-
-        builder.Property(record => record.ArtifactId)
-            .HasMaxLength(80)
-            .HasColumnName("artifact_id");
-
-        builder.Property(record => record.AuditMetadata)
-            .HasMaxLength(4000)
-            .HasColumnName("audit_metadata");
-
-        builder.HasIndex(record => record.TaskId)
-            .HasDatabaseName("ix_tool_execution_records_task_id");
-
-        builder.HasIndex(record => new { record.TaskId, record.StepId })
-            .HasDatabaseName("ix_tool_execution_records_task_step");
-
-        builder.HasIndex(record => record.RunAttemptId)
-            .HasDatabaseName("ix_tool_execution_records_run_attempt_id");
-
-        builder.HasIndex(record => record.ToolCode)
-            .HasDatabaseName("ix_tool_execution_records_tool_code");
     }
 }

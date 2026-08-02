@@ -7,7 +7,7 @@
     <IsTestProject>true</IsTestProject>
     <AICopilotTestKind>Integration</AICopilotTestKind>
     <AICopilotCiCategory>Quality</AICopilotCiCategory>
-    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentRunQueuePermissionTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentSafetyApprovalHttpTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.CloudOidcHttpFlowTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.IdentityAccessManagementTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.IdentityHttpBoundaryTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.McpToolGovernancePermissionTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.ModelApiKeyProtectionTests</AICopilotCiSecurityFilter>
+    <AICopilotCiSecurityFilter>FullyQualifiedName~AICopilot.HttpIntegrationTests.OpenApiContractTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.HarnessApprovalHttpTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.CloudOidcHttpFlowTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.IdentityAccessManagementTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.IdentityHttpBoundaryTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.McpToolGovernancePermissionTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.ModelApiKeyProtectionTests</AICopilotCiSecurityFilter>
     <AICopilotTestRuntime>Aspire</AICopilotTestRuntime>
     <AICopilotTestOwner>IdentityHttp</AICopilotTestOwner>
   </PropertyGroup>
@@ -29,12 +29,10 @@
     <ProjectReference Include="..\..\infrastructure\AICopilot.Infrastructure\AICopilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
-    <ProjectReference Include="..\..\testing\AICopilot.AgentWorkflowTestKit\AICopilot.AgentWorkflowTestKit.csproj" />
     <ProjectReference Include="..\..\testing\AICopilot.AspireIntegrationTestKit\AICopilot.AspireIntegrationTestKit.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Aspire.Hosting.ApplicationModel" />
-    <Using Include="AICopilot.AgentWorkflowTestKit" />
     <Using Include="AICopilot.AspireIntegrationTestKit" />
     <Using Include="FluentAssertions" />
     <Using Include="Microsoft.Extensions.DependencyInjection" />

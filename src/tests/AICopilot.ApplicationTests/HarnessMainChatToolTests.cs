@@ -7,12 +7,13 @@ using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
-using AICopilot.AgentWorkflowTestKit;
+using AICopilot.HarnessTestKit;
 
 namespace AICopilot.ApplicationTests;
 
-public sealed class HarnessMainChatToolTests : ToolRegistryGovernanceTestBase
+public sealed class HarnessMainChatToolTests
 {
+    private static readonly Guid UserId = Guid.Parse("11111111-1111-4111-8111-111111111111");
     [Fact]
     public async Task MainChatToolGate_ShouldRequireExactRegistryContractAndChatPermission()
     {
@@ -290,7 +291,7 @@ public sealed class HarnessMainChatToolTests : ToolRegistryGovernanceTestBase
         AiToolRiskLevel riskLevel = AiToolRiskLevel.RequiresApproval,
         bool requiresApproval = true)
     {
-        var seed = BuiltInToolRegistrations.FindAgentRuntimeTool(
+        var seed = BuiltInToolRegistrations.FindHarnessTool(
                        DiagnosticAdvisorPlugin.ToolCode)
                    ?? throw new InvalidOperationException(
                        "Diagnostic advisor registration seed is missing.");
@@ -313,11 +314,9 @@ public sealed class HarnessMainChatToolTests : ToolRegistryGovernanceTestBase
             seed.Category,
             seed.BusinessDomains,
             seed.DataBoundary,
-            seed.IsVisibleToPlanner,
             seed.IsExecutableByAgent,
             seed.SchemaVersion,
-            seed.CatalogVersion,
-            seed.ApprovalPolicy);
+            seed.CatalogVersion);
     }
 
     private sealed class RecordingKnowledgeRetrievalService : IKnowledgeRetrievalService

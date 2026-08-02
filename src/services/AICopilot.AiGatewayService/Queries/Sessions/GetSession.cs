@@ -95,7 +95,7 @@ public class GetSessionQueryHandler(
             var mode = await harnessAgent.GetModeAsync(harnessSession, cancellationToken);
             dto.AgentMode = mode == RuntimeAgentMode.Execute ? "execute" : "plan";
         }
-        catch (AgentWorkflowException)
+        catch (AgentRuntimeException)
         {
             // A temporarily unavailable model provider must not make a valid,
             // restorable AgentSession look corrupt to the client.

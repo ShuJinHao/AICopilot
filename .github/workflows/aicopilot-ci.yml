@@ -173,15 +173,6 @@ jobs:
           ./scripts/tests/Measure-AICopilotDuplication.ps1 -BaseRef $baseRef
           ./scripts/tests/Invoke-AICopilotMutation.ps1 -BaseRef $baseRef
 
-      - name: Run full browser smoke only in explicit full mode
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'full' }}
-        working-directory: src/vues/AICopilot.Web
-        env:
-          PLAYWRIGHT_CHANNEL: chromium
-        run: |
-          npx playwright install --with-deps chromium
-          npm run test:smoke
-
       - name: Upload selected test evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

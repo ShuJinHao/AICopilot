@@ -37,16 +37,9 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         ImmutableHashSet.Create(
             StringComparer.Ordinal,
             "AICopilot.Core.AiGateway.Aggregates.Sessions.Session",
-            "AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentTask",
-            "AICopilot.Core.AiGateway.Aggregates.Artifacts.ArtifactWorkspace",
-            "AICopilot.Core.AiGateway.Aggregates.Approvals.ApprovalRequest",
             "AICopilot.Core.AiGateway.Aggregates.LanguageModel.LanguageModel",
             "AICopilot.Core.AiGateway.Aggregates.ConversationTemplate.ConversationTemplate",
-            "AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy.ApprovalPolicy",
-            "AICopilot.Core.AiGateway.Aggregates.RoutingModel.RoutingModelConfiguration",
             "AICopilot.Core.AiGateway.Aggregates.Tools.ToolRegistration",
-            "AICopilot.Core.AiGateway.Aggregates.RuntimeSettings.ChatRuntimeSettings",
-            "AICopilot.Core.AiGateway.Aggregates.Uploads.UploadRecord",
             "AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase.BusinessDatabase",
             "AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase.DataSourcePermissionGrant",
             "AICopilot.Core.McpServer.Aggregates.McpServerInfo.McpServerInfo",
@@ -64,25 +57,6 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             "AICopilot.IdentityService.Commands.LoginUserCommand",
             "AICopilot.IdentityService.Queries.GetCurrentUserProfileQuery",
             "AICopilot.IdentityService.Queries.GetInitializationStatusQuery");
-
-    private static readonly ImmutableDictionary<string, string> ExplicitResourceAuthorizationOwners =
-        ImmutableDictionary.CreateRange(
-            StringComparer.Ordinal,
-            new[]
-            {
-                new KeyValuePair<string, string>(
-                    "AICopilot.AiGatewayService.Workspaces.GetArtifactWorkspaceQuery",
-                    "AICopilot.AiGatewayService.Workspaces.ArtifactWorkspaceQueryCoordinator"),
-                new KeyValuePair<string, string>(
-                    "AICopilot.AiGatewayService.Workspaces.DownloadArtifactQuery",
-                    "AICopilot.AiGatewayService.Workspaces.ArtifactWorkspaceQueryCoordinator"),
-                new KeyValuePair<string, string>(
-                    "AICopilot.AiGatewayService.AgentTasks.ApproveAgentApprovalCommand",
-                    "AICopilot.AiGatewayService.AgentTasks.AgentApprovalDecisionCoordinator"),
-                new KeyValuePair<string, string>(
-                    "AICopilot.AiGatewayService.AgentTasks.RejectAgentApprovalCommand",
-                    "AICopilot.AiGatewayService.AgentTasks.AgentApprovalDecisionCoordinator")
-            });
 
     private static readonly ImmutableHashSet<string> IdentityDecreaseMethodNames =
         ImmutableHashSet.Create(
@@ -142,7 +116,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
     {
         public const string Contract = "AICopilot.Services.Contracts.IModelQuotaReservationStore";
         public const string Store = "AICopilot.EntityFrameworkCore.Repository.PostgresModelQuotaReservationStore";
-        public const string TransactionRunner = "AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner";
+        public const string TransactionRunner = "AICopilot.EntityFrameworkCore.Transactions.AiGatewayTransactionRunner";
         public const string DbContext = "AICopilot.EntityFrameworkCore.AiGatewayDbContext";
         public const string DbContextOptions = "Microsoft.EntityFrameworkCore.DbContextOptions<TContext>";
     }
@@ -170,12 +144,13 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             "AICopilot.Infrastructure.CloudRead.CloudAiReadClient",
             "AICopilot.Dapper.DapperDatabaseConnector",
             "AICopilot.Dapper.Security.AstSqlGuardrail");
-    private static readonly ImmutableHashSet<string> FormalCloudReadOnlyWorkflowTypeNames =
+    private static readonly ImmutableHashSet<string> FormalCloudReadOnlyTypeNames =
         ImmutableHashSet.Create(
             StringComparer.Ordinal,
-            "AICopilot.AiGatewayService.Workflows.Executors.BusinessTextToSqlFallbackRunner",
-            "AICopilot.AiGatewayService.Workflows.Executors.BusinessQueryProviderRegistry",
-            "AICopilot.AiGatewayService.Workflows.Executors.CloudAiReadBusinessQueryProvider",
+            "AICopilot.AiGatewayService.BusinessQueries.BusinessQueryExecutor",
+            "AICopilot.AiGatewayService.BusinessQueries.BusinessTextToSqlFallbackRunner",
+            "AICopilot.AiGatewayService.BusinessQueries.BusinessQueryProviderRegistry",
+            "AICopilot.AiGatewayService.BusinessQueries.CloudAiReadBusinessQueryProvider",
             "AICopilot.DataAnalysisService.BusinessDatabases.BusinessDataSourceProfileRegistry",
             "AICopilot.DataAnalysisService.BusinessDatabases.BusinessQueryContextStore",
             "AICopilot.Dapper.DapperDatabaseConnector",
@@ -559,12 +534,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         CompilationState state)
     {
         var isPlugin = ImplementsFullyQualified(type, "AICopilot.AgentPlugin.IAgentPlugin");
-        var isAgentExecutor = ImplementsFullyQualified(
-            type,
-            "AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor");
-        if ((isPlugin || isAgentExecutor) &&
-            LooksLikeTestDouble(type.Name) &&
-            !IsApprovedDevelopmentMock(type, state.AssemblyName))
+        if (isPlugin && LooksLikeTestDouble(type.Name))
         {
             ReportPlugin(context, type, "production plugin/test-double implementations are forbidden");
         }
@@ -628,23 +598,16 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             var isPublicException = !isStream &&
                                     ExplicitPublicRequestNames.Contains(type.ToDisplayString()) &&
                                     HasExpectedAssemblyIdentity(type, type.ToDisplayString());
-            var hasResourceAuthorization = TryGetResourceAuthorizationOwner(type, out var resourceOwner);
-            var hasValidResourceAuthorization =
-                !isStream &&
-                hasResourceAuthorization &&
-                ExplicitResourceAuthorizationOwners.TryGetValue(type.ToDisplayString(), out var expectedOwner) &&
-                string.Equals(resourceOwner, expectedOwner, StringComparison.Ordinal);
-
-            if (hasResourceAuthorization && !hasValidResourceAuthorization)
+            var hasResourceAuthorization = TryGetResourceAuthorizationOwner(type, out _);
+            if (hasResourceAuthorization)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
                     SecurityMetadataRule,
                     FirstSourceLocation(type),
                     type.ToDisplayString(),
-                    "ResourceAuthorizationOwnerAttribute must match the exact approved request/coordinator pair"));
+                    "ResourceAuthorizationOwnerAttribute is not supported by the current request surface"));
             }
             else if (!isPublicException &&
-                     !hasValidResourceAuthorization &&
                      !HasAttribute(type, AuthorizeRequirementAttributeName))
             {
                 context.ReportDiagnostic(Diagnostic.Create(
@@ -653,7 +616,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
                     type.ToDisplayString(),
                     isStream
                         ? "stream requests always require AuthorizeRequirementAttribute"
-                        : "service commands and queries require AuthorizeRequirementAttribute, an exact resource-authorization owner, or an exact public request"));
+                        : "service commands and queries require AuthorizeRequirementAttribute or an exact public request"));
             }
         }
 
@@ -2818,8 +2781,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         if (IsEntityFrameworkSaveChanges(method) ||
             IsAdoNonQueryExecution(method) ||
             IsEntityFrameworkRawWrite(method) ||
-            IsEntityFrameworkBulkWrite(method) ||
-            IsFormalMcpToolExecution(method))
+            IsEntityFrameworkBulkWrite(method))
         {
             return method.ToDisplayString();
         }
@@ -3264,20 +3226,6 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             "Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions") &&
         method.Name is "ExecuteDelete" or "ExecuteDeleteAsync" or "ExecuteUpdate" or "ExecuteUpdateAsync";
 
-    private static bool IsFormalMcpToolExecution(IMethodSymbol method)
-    {
-        if (method.Name != "ExecuteAsync")
-        {
-            return false;
-        }
-
-        var containingType = method.ContainingType.OriginalDefinition.ToDisplayString();
-        return containingType is
-                   "AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor" or
-                   "AICopilot.AiGatewayService.AgentTasks.McpAgentToolExecutor" &&
-               HasExpectedAssemblyIdentity(method.ContainingType.OriginalDefinition, containingType);
-    }
-
     private static bool IsAuditWrite(IMethodSymbol method)
     {
         method = Normalize(method);
@@ -3434,8 +3382,8 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             return true;
         }
 
-        return IsFormalCloudReadOnlyWorkflowSymbol(method) ||
-               IsFormalCloudReadOnlyWorkflowSymbol(containingType);
+        return IsFormalCloudReadOnlySymbol(method) ||
+               IsFormalCloudReadOnlySymbol(containingType);
     }
 
     private static bool InvocationUsesTrustedCloudReadType(IInvocationOperation invocation)
@@ -3490,7 +3438,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         }
 
         if ((TrustedCloudReadTypeNames.Contains(named.OriginalDefinition.ToDisplayString()) ||
-             FormalCloudReadOnlyWorkflowTypeNames.Contains(named.OriginalDefinition.ToDisplayString())) &&
+             FormalCloudReadOnlyTypeNames.Contains(named.OriginalDefinition.ToDisplayString())) &&
             HasExpectedAssemblyIdentity(named.OriginalDefinition, named.OriginalDefinition.ToDisplayString()))
         {
             return true;
@@ -3543,11 +3491,11 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             IsCloudReadClientType(argument, visited));
     }
 
-    private static bool IsFormalCloudReadOnlyWorkflowSymbol(ISymbol symbol)
+    private static bool IsFormalCloudReadOnlySymbol(ISymbol symbol)
     {
         var type = symbol as INamedTypeSymbol ?? symbol.ContainingType;
         return type is not null &&
-               FormalCloudReadOnlyWorkflowTypeNames.Contains(type.OriginalDefinition.ToDisplayString()) &&
+               FormalCloudReadOnlyTypeNames.Contains(type.OriginalDefinition.ToDisplayString()) &&
                HasExpectedAssemblyIdentity(type.OriginalDefinition, type.OriginalDefinition.ToDisplayString());
     }
 
@@ -3823,11 +3771,6 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
         name.StartsWith("Fake", StringComparison.Ordinal) ||
         name.StartsWith("Stub", StringComparison.Ordinal) ||
         name.StartsWith("Test", StringComparison.Ordinal);
-
-    private static bool IsApprovedDevelopmentMock(INamedTypeSymbol type, string assemblyName) =>
-        assemblyName == "AICopilot.AiGatewayService" &&
-        type.ToDisplayString() == "AICopilot.AiGatewayService.AgentTasks.MockMcpAgentToolExecutor" &&
-        type.DeclaredAccessibility == Accessibility.Internal;
 
     private static void ReportPlugin(SymbolAnalysisContext context, INamedTypeSymbol type, string reason) =>
         context.ReportDiagnostic(Diagnostic.Create(

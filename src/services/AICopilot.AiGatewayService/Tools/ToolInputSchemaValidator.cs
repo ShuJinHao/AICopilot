@@ -1,5 +1,4 @@
 using System.Text.Json;
-using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.Tools;
@@ -36,7 +35,12 @@ internal static class ToolInputSchemaValidator
         string? inputJson,
         string? schemaJson)
     {
-        var inputContract = AgentNodeToolInputContractV1.Normalize(inputJson);
+        if (inputJson is null)
+        {
+            return ToolInputValidationResult.Failure("Tool input JSON is required.");
+        }
+
+        var inputContract = AgentStructuredPayloadPolicyV1.NormalizeNodeToolInput(inputJson);
         if (!inputContract.IsValid)
         {
             return ToolInputValidationResult.Failure(

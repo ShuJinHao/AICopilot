@@ -13,13 +13,13 @@ namespace AICopilot.Infrastructure.Mcp;
 
 public class McpServerBootstrap(
     IReadRepository<McpServerInfo> mcpServerRepository,
-    IApprovalRequirementReadService approvalRequirementReadService,
+    IMcpToolRegistryReadService toolRegistryReadService,
     IAgentPluginRegistry agentPluginRegistry,
     ILogger<McpServerBootstrap> logger,
     McpToolRegistrySynchronizer? toolRegistrySynchronizer = null)
     : IMcpServerBootstrap, IMcpRuntimeRegistrationProvider
 {
-    private readonly McpRuntimeProtectedToolReader protectedToolReader = new(approvalRequirementReadService);
+    private readonly McpRuntimeProtectedToolReader protectedToolReader = new(toolRegistryReadService);
     private readonly McpRuntimeToolPluginBuilder toolPluginBuilder = new(logger);
     private readonly McpRuntimeToolRegistryProjection toolRegistryProjection = new(toolRegistrySynchronizer);
 

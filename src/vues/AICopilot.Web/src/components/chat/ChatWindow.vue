@@ -18,7 +18,7 @@ const sessionDrawerVisible = ref(false)
 const preserveScrollAnchor = ref(false)
 
 const currentTitle = computed(() => store.currentSession?.title || '新会话')
-const workbenchStatusLabel = computed(() => {
+const sessionStatusLabel = computed(() => {
   if (store.isSessionActivating) return '初始化中'
   if (store.agentSessionStatus === 'Interrupted') return '已中断'
   if (store.isAgentSessionUnavailable) return '需重建'
@@ -26,9 +26,9 @@ const workbenchStatusLabel = computed(() => {
   if (!store.resolvedSessionId && store.errorMessage) return '不可用'
   return store.isStreaming ? '生成中' : '就绪'
 })
-const workbenchStatusTone = computed(() => {
+const sessionStatusTone = computed(() => {
   if (store.isAgentSessionUnavailable) return 'danger'
-  return workbenchStatusLabel.value === '就绪' ? 'success' : 'warning'
+  return sessionStatusLabel.value === '就绪' ? 'success' : 'warning'
 })
 const agentModeLabel = computed(() =>
   store.agentMode === 'execute' ? 'Execute · 执行' : 'Plan · 规划',
@@ -110,7 +110,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="command-workbench">
+  <div
+    class="chat-shell"
+    :class="{ 'session-rail-collapsed': uiLayoutStore.isSessionRailCollapsed }"
+  >
     <aside
       v-if="!isMobile"
       class="session-rail"
@@ -146,8 +149,8 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="canvas-toolbar">
-          <AiTag :tone="workbenchStatusTone">
-            {{ workbenchStatusLabel }}
+          <AiTag :tone="sessionStatusTone">
+            {{ sessionStatusLabel }}
           </AiTag>
           <AiTag :tone="store.agentMode === 'execute' ? 'blue' : 'teal'">
             {{ agentModeLabel }}
@@ -237,4 +240,4 @@ onBeforeUnmount(() => {
   </div>
 </template>
 
-<style src="./chat-workbench.css"></style>
+<style src="./chat-shell.css"></style>

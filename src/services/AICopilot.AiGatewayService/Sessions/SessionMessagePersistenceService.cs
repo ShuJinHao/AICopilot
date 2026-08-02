@@ -12,9 +12,7 @@ public sealed record SessionMessageAppend(
     MessageModelSnapshot? ModelSnapshot = null,
     IReadOnlyCollection<ChatChunk>? RenderChunks = null);
 
-public class SessionMessagePersistenceService(
-    IRepository<Session> repository,
-    IMessageTimelineProjectionStore messageTimelineProjectionStore)
+public class SessionMessagePersistenceService(IRepository<Session> repository)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -51,23 +49,18 @@ public class SessionMessagePersistenceService(
             return;
         }
 
-        var existingEvents = await messageTimelineProjectionStore.ListBySessionAsync(session.Id, cancellationToken: cancellationToken);
-        var nextEventSequence = Math.Max(
-            existingEvents.Count == 0 ? 0 : existingEvents.Max(item => item.Sequence),
-            session.Messages.Count == 0 ? 0 : session.Messages.Max(item => item.Sequence));
-        session.EnsureMessageCountAtLeast(nextEventSequence);
+        var nextMessageSequence = session.Messages.Count == 0
+            ? 0
+            : session.Messages.Max(item => item.Sequence);
+        session.EnsureMessageCountAtLeast(nextMessageSequence);
 
         foreach (var entry in normalizedEntries)
         {
-            var message = session.AddMessage(
+            _ = session.AddMessage(
                 entry.Content,
                 entry.Type,
                 entry.ModelSnapshot,
                 SerializeRenderChunks(entry));
-            messageTimelineProjectionStore.Add(MessageEvent.ForMessage(
-                session.Id,
-                ++nextEventSequence,
-                message));
         }
 
         repository.Update(session);
@@ -96,7 +89,7 @@ public class SessionMessagePersistenceService(
             RenderChunks =
             [
                 new ChatChunk(
-                    entry.Type == MessageType.User ? "User" : "FinalAgentRunExecutor",
+                    entry.Type == MessageType.User ? "User" : "HarnessAgent",
                     ChunkType.Text,
                     content)
             ]

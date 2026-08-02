@@ -2,27 +2,6 @@ using AICopilot.SharedKernel.Domain;
 
 namespace AICopilot.Core.AiGateway.Ids;
 
-public readonly record struct ApprovalPolicyId : IStronglyTypedGuidId
-{
-    public ApprovalPolicyId(Guid value)
-    {
-        if (value == Guid.Empty)
-        {
-            throw new ArgumentException("Approval policy id is required.", nameof(value));
-        }
-
-        Value = value;
-    }
-
-    public Guid Value { get; }
-
-    public static ApprovalPolicyId New() => new(Guid.NewGuid());
-
-    public static implicit operator Guid(ApprovalPolicyId id) => id.Value;
-
-    public override string ToString() => Value.ToString();
-}
-
 public readonly record struct ConversationTemplateId : IStronglyTypedGuidId
 {
     public ConversationTemplateId(Guid value)
@@ -65,27 +44,6 @@ public readonly record struct LanguageModelId : IStronglyTypedGuidId
     public override string ToString() => Value.ToString();
 }
 
-public readonly record struct RoutingModelConfigurationId : IStronglyTypedGuidId
-{
-    public RoutingModelConfigurationId(Guid value)
-    {
-        if (value == Guid.Empty)
-        {
-            throw new ArgumentException("Routing model configuration id is required.", nameof(value));
-        }
-
-        Value = value;
-    }
-
-    public Guid Value { get; }
-
-    public static RoutingModelConfigurationId New() => new(Guid.NewGuid());
-
-    public static implicit operator Guid(RoutingModelConfigurationId id) => id.Value;
-
-    public override string ToString() => Value.ToString();
-}
-
 public readonly record struct SessionId : IStronglyTypedGuidId
 {
     public SessionId(Guid value)
@@ -103,27 +61,6 @@ public readonly record struct SessionId : IStronglyTypedGuidId
     public static SessionId New() => new(Guid.NewGuid());
 
     public static implicit operator Guid(SessionId id) => id.Value;
-
-    public override string ToString() => Value.ToString();
-}
-
-public readonly record struct MessageEventId : IStronglyTypedGuidId
-{
-    public MessageEventId(Guid value)
-    {
-        if (value == Guid.Empty)
-        {
-            throw new ArgumentException("Message event id is required.", nameof(value));
-        }
-
-        Value = value;
-    }
-
-    public Guid Value { get; }
-
-    public static MessageEventId New() => new(Guid.NewGuid());
-
-    public static implicit operator Guid(MessageEventId id) => id.Value;
 
     public override string ToString() => Value.ToString();
 }

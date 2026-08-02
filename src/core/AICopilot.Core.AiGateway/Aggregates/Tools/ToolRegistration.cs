@@ -8,14 +8,11 @@ public enum ToolProviderType
 {
     BuiltIn = 0,
     Mcp = 1,
-    CloudReadonly = 2,
-    Artifact = 3,
-    MockMcp = 4
+    CloudReadonly = 2
 }
 
 public enum ToolRegistrationTargetType
 {
-    AgentRuntime = 0,
     Plugin = 1,
     McpServer = 2
 }
@@ -30,10 +27,7 @@ public enum ToolAuditLevel
 public enum ToolDataBoundary
 {
     NoData = 0,
-    SimulationBusinessOnly = 1,
     RagContextOnly = 2,
-    ArtifactDraftOnly = 3,
-    AuthorizedEvidenceOnly = 4,
     GovernedBusinessReadOnly = 5
 }
 
@@ -62,11 +56,9 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         string category = "General",
         IReadOnlyCollection<string>? businessDomains = null,
         ToolDataBoundary dataBoundary = ToolDataBoundary.NoData,
-        bool isVisibleToPlanner = true,
         bool isExecutableByAgent = true,
         int schemaVersion = 1,
-        int catalogVersion = 1,
-        string? approvalPolicy = null)
+        int catalogVersion = 1)
     {
         Id = ToolRegistrationId.New();
         CreatedAt = nowUtc;
@@ -89,63 +81,33 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
             category,
             businessDomains,
             dataBoundary,
-            isVisibleToPlanner,
             isExecutableByAgent,
             schemaVersion,
-            catalogVersion,
-            approvalPolicy);
+            catalogVersion);
     }
 
     public uint RowVersion { get; private set; }
-
     public string ToolCode { get; private set; } = string.Empty;
-
     public string DisplayName { get; private set; } = string.Empty;
-
     public string Description { get; private set; } = string.Empty;
-
     public ToolProviderType ProviderType { get; private set; }
-
     public ToolRegistrationTargetType TargetType { get; private set; }
-
     public string TargetName { get; private set; } = string.Empty;
-
-    public string InputSchemaJson { get; private set; } =
-        "{\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}";
-
-    public string OutputSchemaJson { get; private set; } =
-        "{\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}";
-
+    public string InputSchemaJson { get; private set; } = "{\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}";
+    public string OutputSchemaJson { get; private set; } = "{\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}";
     public AiToolRiskLevel RiskLevel { get; private set; }
-
     public string? RequiredPermission { get; private set; }
-
     public bool RequiresApproval { get; private set; }
-
     public bool IsEnabled { get; private set; }
-
     public int TimeoutSeconds { get; private set; }
-
     public ToolAuditLevel AuditLevel { get; private set; }
-
     public string Category { get; private set; } = "General";
-
     public string[] BusinessDomains { get; private set; } = [];
-
-    public ToolDataBoundary DataBoundary { get; private set; } = ToolDataBoundary.NoData;
-
-    public bool IsVisibleToPlanner { get; private set; } = true;
-
+    public ToolDataBoundary DataBoundary { get; private set; }
     public bool IsExecutableByAgent { get; private set; } = true;
-
     public int SchemaVersion { get; private set; } = 1;
-
     public int CatalogVersion { get; private set; } = 1;
-
-    public string ApprovalPolicy { get; private set; } = "None";
-
     public DateTimeOffset CreatedAt { get; private set; }
-
     public DateTimeOffset UpdatedAt { get; private set; }
 
     public void Update(
@@ -166,11 +128,9 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         string? category = null,
         IReadOnlyCollection<string>? businessDomains = null,
         ToolDataBoundary? dataBoundary = null,
-        bool? isVisibleToPlanner = null,
         bool? isExecutableByAgent = null,
         int? schemaVersion = null,
-        int? catalogVersion = null,
-        string? approvalPolicy = null)
+        int? catalogVersion = null)
     {
         Update(
             displayName,
@@ -191,30 +151,21 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
             category ?? Category,
             businessDomains ?? BusinessDomains,
             dataBoundary ?? DataBoundary,
-            isVisibleToPlanner ?? IsVisibleToPlanner,
             isExecutableByAgent ?? IsExecutableByAgent,
             schemaVersion ?? SchemaVersion,
-            catalogVersion ?? CatalogVersion,
-            approvalPolicy ?? ApprovalPolicy);
+            catalogVersion ?? CatalogVersion);
     }
 
     public bool DisableForUnavailableContract(
         AiToolRiskLevel conservativeRiskLevel,
         DateTimeOffset nowUtc)
     {
-        if (!Enum.IsDefined(typeof(AiToolRiskLevel), conservativeRiskLevel))
+        if (!Enum.IsDefined(conservativeRiskLevel))
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(conservativeRiskLevel),
-                conservativeRiskLevel,
-                "Tool risk level is invalid.");
+            throw new ArgumentOutOfRangeException(nameof(conservativeRiskLevel));
         }
 
-        if (!IsEnabled &&
-            !IsExecutableByAgent &&
-            RequiresApproval &&
-            RiskLevel == conservativeRiskLevel &&
-            string.Equals(ApprovalPolicy, "RediscoveryReviewRequired", StringComparison.Ordinal))
+        if (!IsEnabled && !IsExecutableByAgent && RequiresApproval && RiskLevel == conservativeRiskLevel)
         {
             return false;
         }
@@ -225,7 +176,6 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         IsExecutableByAgent = false;
         SchemaVersion = checked(SchemaVersion + 1);
         CatalogVersion = checked(CatalogVersion + 1);
-        ApprovalPolicy = "RediscoveryReviewRequired";
         UpdatedAt = nowUtc;
         return true;
     }
@@ -249,24 +199,19 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         string category,
         IReadOnlyCollection<string>? businessDomains,
         ToolDataBoundary dataBoundary,
-        bool isVisibleToPlanner,
         bool isExecutableByAgent,
         int schemaVersion,
-        int catalogVersion,
-        string? approvalPolicy)
+        int catalogVersion)
     {
         Validate(toolCode, displayName, description, providerType, targetType, targetName, riskLevel, timeoutSeconds, auditLevel, dataBoundary, schemaVersion, catalogVersion);
-        var normalizedInputSchema = NormalizeInputSchema(inputSchemaJson);
-        var normalizedOutputSchema = NormalizeOutputSchema(outputSchemaJson);
-
         ToolCode = NormalizeRequired(toolCode, nameof(toolCode), 160);
         DisplayName = NormalizeRequired(displayName, nameof(displayName), 160);
         Description = NormalizeRequired(description, nameof(description), 1000);
         ProviderType = providerType;
         TargetType = targetType;
         TargetName = NormalizeRequired(targetName, nameof(targetName), 200);
-        InputSchemaJson = normalizedInputSchema;
-        OutputSchemaJson = normalizedOutputSchema;
+        InputSchemaJson = NormalizeInputSchema(inputSchemaJson);
+        OutputSchemaJson = NormalizeOutputSchema(outputSchemaJson);
         RiskLevel = riskLevel;
         RequiredPermission = NormalizeOptional(requiredPermission, 160);
         RequiresApproval = requiresApproval || RiskRequiresApproval(riskLevel);
@@ -276,11 +221,9 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         Category = NormalizeRequired(category, nameof(category), 120);
         BusinessDomains = NormalizeBusinessDomains(businessDomains);
         DataBoundary = dataBoundary;
-        IsVisibleToPlanner = isVisibleToPlanner && riskLevel != AiToolRiskLevel.Critical;
         IsExecutableByAgent = isExecutableByAgent && riskLevel != AiToolRiskLevel.Critical;
         SchemaVersion = schemaVersion;
         CatalogVersion = catalogVersion;
-        ApprovalPolicy = NormalizeRequired(approvalPolicy ?? BuildDefaultApprovalPolicy(riskLevel, RequiresApproval), nameof(approvalPolicy), 120);
         UpdatedAt = nowUtc;
     }
 
@@ -302,83 +245,40 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
         _ = NormalizeRequired(displayName, nameof(displayName), 160);
         _ = NormalizeRequired(description, nameof(description), 1000);
         _ = NormalizeRequired(targetName, nameof(targetName), 200);
-
-        if (!Enum.IsDefined(typeof(ToolProviderType), providerType))
+        if (!Enum.IsDefined(providerType) || !Enum.IsDefined(targetType) ||
+            !Enum.IsDefined(riskLevel) || !Enum.IsDefined(auditLevel) || !Enum.IsDefined(dataBoundary))
         {
-            throw new ArgumentOutOfRangeException(nameof(providerType), providerType, "Tool provider type is invalid.");
+            throw new ArgumentOutOfRangeException(nameof(providerType));
         }
 
-        if (!Enum.IsDefined(typeof(ToolRegistrationTargetType), targetType))
+        if (timeoutSeconds is < 1 or > 600 || schemaVersion < 1 || catalogVersion < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(targetType), targetType, "Tool target type is invalid.");
-        }
-
-        if (!Enum.IsDefined(typeof(AiToolRiskLevel), riskLevel))
-        {
-            throw new ArgumentOutOfRangeException(nameof(riskLevel), riskLevel, "Tool risk level is invalid.");
-        }
-
-        if (!Enum.IsDefined(typeof(ToolAuditLevel), auditLevel))
-        {
-            throw new ArgumentOutOfRangeException(nameof(auditLevel), auditLevel, "Tool audit level is invalid.");
-        }
-
-        if (!Enum.IsDefined(typeof(ToolDataBoundary), dataBoundary))
-        {
-            throw new ArgumentOutOfRangeException(nameof(dataBoundary), dataBoundary, "Tool data boundary is invalid.");
-        }
-
-        if (timeoutSeconds is < 1 or > 600)
-        {
-            throw new ArgumentOutOfRangeException(nameof(timeoutSeconds), timeoutSeconds, "Tool timeout must be between 1 and 600 seconds.");
-        }
-
-        if (schemaVersion < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(schemaVersion), schemaVersion, "Tool schema version must be positive.");
-        }
-
-        if (catalogVersion < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(catalogVersion), catalogVersion, "Tool catalog version must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(timeoutSeconds));
         }
     }
 
     private static string NormalizeInputSchema(string? value)
     {
         var contract = ToolInputSchemaContractV1.Validate(value);
-        if (!contract.IsValid)
-        {
-            throw new ArgumentException(
-                contract.Error ?? "Tool input schema is outside the supported strict subset.",
-                nameof(value));
-        }
-
-        return contract.CanonicalJson!;
+        return contract.IsValid
+            ? contract.CanonicalJson!
+            : throw new ArgumentException(contract.Error ?? "Tool input schema is outside the supported strict subset.", nameof(value));
     }
 
     private static string NormalizeOutputSchema(string? value)
     {
         var contract = ToolOutputSchemaContractV1.Validate(value);
-        if (!contract.IsValid)
-        {
-            throw new ArgumentException(
-                contract.Error ?? "Tool output schema is outside the supported strict subset.",
-                nameof(value));
-        }
-
-        return contract.CanonicalJson!;
+        return contract.IsValid
+            ? contract.CanonicalJson!
+            : throw new ArgumentException(contract.Error ?? "Tool output schema is outside the supported strict subset.", nameof(value));
     }
 
     private static string NormalizeRequired(string value, string paramName, int maxLength)
     {
         var normalized = NormalizeOptional(value, maxLength);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            throw new ArgumentException($"{paramName} is required.", paramName);
-        }
-
-        return normalized;
+        return !string.IsNullOrWhiteSpace(normalized)
+            ? normalized
+            : throw new ArgumentException($"{paramName} is required.", paramName);
     }
 
     private static string? NormalizeOptional(string? value, int maxLength)
@@ -389,31 +289,15 @@ public sealed class ToolRegistration : BaseEntity<ToolRegistrationId>, IAggregat
             : normalized;
     }
 
-    private static string[] NormalizeBusinessDomains(IReadOnlyCollection<string>? values)
-    {
-        return (values ?? [])
+    private static string[] NormalizeBusinessDomains(IReadOnlyCollection<string>? values) =>
+        (values ?? [])
             .Select(value => NormalizeOptional(value, 120))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Cast<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-    }
 
-    private static bool RiskRequiresApproval(AiToolRiskLevel riskLevel)
-    {
-        return riskLevel is AiToolRiskLevel.RequiresApproval or AiToolRiskLevel.High or AiToolRiskLevel.Critical;
-    }
-
-    private static string BuildDefaultApprovalPolicy(AiToolRiskLevel riskLevel, bool requiresApproval)
-    {
-        return riskLevel switch
-        {
-            AiToolRiskLevel.Critical => "CriticalDisabled",
-            AiToolRiskLevel.High => "ToolApproval",
-            AiToolRiskLevel.RequiresApproval => "ToolApproval",
-            _ when requiresApproval => "ToolApproval",
-            _ => "None"
-        };
-    }
+    private static bool RiskRequiresApproval(AiToolRiskLevel riskLevel) =>
+        riskLevel is AiToolRiskLevel.RequiresApproval or AiToolRiskLevel.High or AiToolRiskLevel.Critical;
 }

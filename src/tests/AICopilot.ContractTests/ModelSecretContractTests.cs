@@ -87,7 +87,7 @@ public sealed class ModelSecretContractTests
     }
 
     [Fact]
-    public void LanguageModelDto_ShouldExposePlannerUsageWithoutApiKey()
+    public void LanguageModelDto_ShouldExposeChatUsageWithoutApiKey()
     {
         var model = new LanguageModel(
             "FakeEval",
@@ -96,16 +96,16 @@ public sealed class ModelSecretContractTests
             "sk-test-secret",
             new ModelParameters { MaxTokens = 4096, MaxOutputTokens = 1024, Temperature = 0.2f },
             "FakeEval",
-            LanguageModelUsage.Chat | LanguageModelUsage.Planner,
+            LanguageModelUsage.Chat,
             true);
 
         var dto = LanguageModelDtoMapper.Map(model);
         var json = JsonSerializer.Serialize(dto, JsonOptions);
 
-        dto.Usages.Should().Contain("Planner");
+        dto.Usages.Should().Equal("Chat");
         dto.HasApiKey.Should().BeTrue();
         dto.ApiKeyPreview.Should().Be("******");
-        json.Should().Contain("\"Planner\"");
+        json.Should().Contain("\"Chat\"");
         json.Should().NotContain("sk-test-secret");
         json.Should().NotContain("\"apiKey\":");
     }

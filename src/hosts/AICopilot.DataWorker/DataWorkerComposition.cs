@@ -1,13 +1,8 @@
-using AICopilot.AiGatewayService;
-using AICopilot.DataAnalysisService;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Persistence;
-using AICopilot.IdentityService;
 using AICopilot.Infrastructure;
-using AICopilot.RagService;
 using AICopilot.Services.Contracts;
-using AICopilot.Services.CrossCutting;
 
 namespace AICopilot.DataWorker;
 
@@ -20,11 +15,6 @@ internal static class DataWorkerComposition
 
         builder.AddServiceDefaults();
         builder.AddInfrastructures();
-        builder.Services.AddAICopilotMediatRPipeline();
-        builder.AddDataAnalysisService();
-        builder.AddIdentityService();
-        builder.AddAiGatewayService();
-        builder.AddRagService();
         builder.Services.AddScoped<ICurrentUser, WorkerCurrentUser>();
         builder.Services.AddHostedService<OutboxDispatcher>();
         builder.Services.AddScoped<PersistenceFileMaintenanceService>();

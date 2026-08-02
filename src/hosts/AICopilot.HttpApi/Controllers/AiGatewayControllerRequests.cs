@@ -16,8 +16,6 @@ public sealed record UpdateToolRegistrationRequest(
     string? Category = null,
     IReadOnlyCollection<string>? BusinessDomains = null,
     string? DataBoundary = null,
-    bool? IsVisibleToPlanner = null,
     bool? IsExecutableByAgent = null,
     int? SchemaVersion = null,
-    int? CatalogVersion = null,
-    string? ApprovalPolicy = null);
+    int? CatalogVersion = null);

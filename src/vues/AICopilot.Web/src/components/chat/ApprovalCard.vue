@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { ShieldAlert } from 'lucide-vue-next'
 import AiButton from '@/components/ai/AiButton.vue'
-import AiCheckbox from '@/components/ai/AiCheckbox.vue'
 import AiTag from '@/components/ai/AiTag.vue'
 import type { ApprovalChunk } from '@/types/models'
 import ArgumentViewer from './ArgumentViewer.vue'
@@ -13,11 +12,10 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: 'approve', payload: { callId: string; onsiteConfirmed: boolean }): void
+  (event: 'approve', payload: { callId: string }): void
   (event: 'reject', payload: { callId: string }): void
 }>()
 
-const onsiteConfirmed = ref(false)
 const request = computed(() => props.chunk.request)
 const isPending = computed(() => props.chunk.status === 'pending')
 const hasStrictIdentity = computed(
@@ -44,15 +42,9 @@ const statusTone = computed(() => {
   return 'neutral'
 })
 const approvalTitle = computed(() => '需要确认后继续')
-const attestationExpiresText = computed(() =>
-  request.value.attestationExpiresAt
-    ? new Date(request.value.attestationExpiresAt).toLocaleString('zh-CN', { hour12: false })
-    : ''
-)
-
 function approve() {
   if (isPending.value && hasStrictIdentity.value) {
-    emit('approve', { callId: request.value.callId, onsiteConfirmed: onsiteConfirmed.value })
+    emit('approve', { callId: request.value.callId })
   }
 }
 
@@ -106,14 +98,6 @@ function reject() {
         </div>
       </details>
 
-      <div v-if="request.requiresOnsiteAttestation" class="onsite-block">
-        <strong>现场复核</strong>
-        <p>此动作需要确认现场有人在岗，并再次确认执行前条件。</p>
-        <p v-if="attestationExpiresText">在岗声明有效至：{{ attestationExpiresText }}</p>
-        <AiCheckbox v-if="isPending" v-model="onsiteConfirmed">
-          现场有人在岗，且已复核执行前条件
-        </AiCheckbox>
-      </div>
     </div>
 
     <footer>
@@ -121,7 +105,7 @@ function reject() {
         <AiButton :disabled="isSubmitting || !hasStrictIdentity" @click="reject">拒绝</AiButton>
         <AiButton
           variant="primary"
-          :disabled="Boolean(isSubmitting || !hasStrictIdentity || (request.requiresOnsiteAttestation && !onsiteConfirmed))"
+          :disabled="Boolean(isSubmitting || !hasStrictIdentity)"
           @click="approve"
         >
           {{ isSubmitting ? '提交中' : '批准' }}
@@ -235,7 +219,6 @@ dd {
 }
 
 .args-block,
-.onsite-block,
 .approval-detail-fold {
   display: grid;
   gap: 8px;
@@ -263,13 +246,6 @@ dd {
 
 .approval-detail-fold[open] summary {
   margin-bottom: 8px;
-}
-
-.onsite-block {
-  border: 1px solid var(--ai-border);
-  border-radius: 18px;
-  padding: 12px;
-  background: var(--ai-surface-soft);
 }
 
 footer {

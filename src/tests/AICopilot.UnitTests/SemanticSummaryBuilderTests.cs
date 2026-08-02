@@ -1,4 +1,4 @@
-using AICopilot.AiGatewayService.Workflows;
+using AICopilot.AiGatewayService.BusinessQueries;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Services.Contracts;
 

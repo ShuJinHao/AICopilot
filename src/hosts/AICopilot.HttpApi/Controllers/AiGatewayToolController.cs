@@ -45,11 +45,9 @@ public class AiGatewayToolController(ISender sender) : ApiControllerBase(sender)
             request.Category,
             request.BusinessDomains,
             request.DataBoundary,
-            request.IsVisibleToPlanner,
             request.IsExecutableByAgent,
             request.SchemaVersion,
-            request.CatalogVersion,
-            request.ApprovalPolicy)));
+            request.CatalogVersion)));
     }
 
     [HttpPost("tools/definition")]

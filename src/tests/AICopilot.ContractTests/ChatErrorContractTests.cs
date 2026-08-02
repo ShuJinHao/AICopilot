@@ -1,7 +1,6 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Safety;
-using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.ContractTests;
@@ -9,10 +8,10 @@ namespace AICopilot.ContractTests;
 public sealed class ChatErrorContractTests
 {
     [Fact]
-    public void AgentWorkflowException_ShouldKeepWorkflowCodeAndUserMessage()
+    public void AgentRuntimeException_ShouldKeepCodeAndUserMessage()
     {
         var chunk = AgentStreamRuntime.CreateErrorChunk(
-            new AgentWorkflowException(
+            new AgentRuntimeException(
                 AppProblemCodes.ChatConfigurationMissing,
                 "Conversation template is missing.",
                 "当前对话模板不存在，请联系管理员检查配置。"),
@@ -98,10 +97,10 @@ public sealed class ChatErrorContractTests
     }
 
     [Fact]
-    public void WorkflowExceptionDetail_ShouldUseWhitelistedSafeDetail()
+    public void RuntimeExceptionDetail_ShouldUseWhitelistedSafeDetail()
     {
         var chunk = AgentStreamRuntime.CreateErrorChunk(
-            new AgentWorkflowException(
+            new AgentRuntimeException(
                 AppProblemCodes.ChatStreamFailed,
                 "Language model 'private-model' failed at https://provider.example/v1 with SELECT * FROM production.devices WHERE apiKey=secret at /Users/test/project/file.cs",
                 "对话执行失败，请稍后重试。"),
@@ -118,56 +117,13 @@ public sealed class ChatErrorContractTests
         chunk.Content.Should().NotContain("secret");
         chunk.Content.Should().NotContain("/Users/test");
 
-        var planCases = new[]
-        {
-            (
-                AppProblemCodes.AgentPlanInvalid,
-                "Agent task plan failed integrity validation.",
-                "计划草案未通过完整性校验，请刷新后重新生成。"),
-            (
-                AppProblemCodes.AgentPlanSchemaInvalid,
-                "Agent task plan does not match the required schema.",
-                "计划草案结构无效，请刷新后重新生成。"),
-            (
-                AppProblemCodes.PlanPayloadTooLarge,
-                "Agent task plan exceeds the maximum allowed size of 262144 UTF-8 bytes.",
-                "计划草案超过 262144 UTF-8 字节上限，请缩小请求后重试。")
-        };
-
-        foreach (var (code, expectedDetail, expectedUserFacingMessage) in planCases)
-        {
-            const string unsafeDetail = "opaque-plan-secret-9f4c raw owner=node-controlled SELECT payroll";
-            const string unsafeUserFacingMessage = "opaque-user-secret-7a31";
-            var exceptionChunk = AgentStreamRuntime.CreateErrorChunk(
-                new AgentTaskPlanPersistenceIntegrityException(Guid.NewGuid(), code, unsafeDetail),
-                "test",
-                AppProblemCodes.ChatStreamFailed,
-                "对话执行失败，请稍后重试。");
-            var directChunk = AgentStreamRuntime.CreateErrorChunk(
-                code,
-                unsafeDetail,
-                "test",
-                unsafeUserFacingMessage);
-
-            foreach (var planChunk in new[] { exceptionChunk, directChunk })
-            {
-                var planPayload = ReadPayload(planChunk.Content);
-                planPayload.Code.Should().Be(code);
-                planPayload.Detail.Should().Be(expectedDetail);
-                planPayload.UserFacingMessage.Should().Be(expectedUserFacingMessage);
-                planChunk.Content.Should().NotContain("opaque-plan-secret-9f4c")
-                    .And.NotContain("node-controlled")
-                    .And.NotContain("payroll")
-                    .And.NotContain("opaque-user-secret-7a31");
-            }
-        }
     }
 
     [Fact]
     public void ToolOutputSchemaFailure_ShouldUseDedicatedRecoveryMessageWithoutRawOutput()
     {
         var chunk = AgentStreamRuntime.CreateErrorChunk(
-            new AgentWorkflowException(
+            new AgentRuntimeException(
                 AppProblemCodes.ToolOutputSchemaInvalid,
                 "provider raw token=secret SELECT * FROM payroll",
                 "工具输出与注册契约不一致，请联系管理员。"),

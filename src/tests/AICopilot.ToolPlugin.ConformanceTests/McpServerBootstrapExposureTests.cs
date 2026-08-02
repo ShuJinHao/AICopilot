@@ -68,7 +68,7 @@ public sealed class McpServerBootstrapExposureTests
 
         var bootstrap = new McpServerBootstrap(
             new InMemoryReadRepository<McpServerInfo>([server]),
-            new TestApprovalRequirementReadService(),
+            new TestMcpToolRegistryReadService(),
             provider.GetRequiredService<AgentPluginLoader>(),
             NullLogger<McpServerBootstrap>.Instance);
 
@@ -194,8 +194,8 @@ public sealed class McpServerBootstrapExposureTests
                 opaqueRelabeledWriteServer,
                 unknownServer
             ]);
-        var approvalRequirementReadService = new TestApprovalRequirementReadService();
-        var toolRepository = new ToolRegistryGovernanceTestBase.InMemoryRepository<ToolRegistration>();
+        var toolRegistryReadService = new TestMcpToolRegistryReadService();
+        var toolRepository = new InMemoryRepository<ToolRegistration>();
         var registrySynchronizer = new McpToolRegistrySynchronizer(toolRepository);
 
         var services = new ServiceCollection();
@@ -207,7 +207,7 @@ public sealed class McpServerBootstrapExposureTests
         var bootstrapLogger = new RecordingBootstrapLogger();
         await using var bootstrap = new TestMcpServerBootstrap(
             serverRepository,
-            approvalRequirementReadService,
+            toolRegistryReadService,
             loader,
             bootstrapLogger,
             registrySynchronizer);
@@ -267,7 +267,7 @@ public sealed class McpServerBootstrapExposureTests
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
-        var approvalRequirementReadService = new TestApprovalRequirementReadService();
+        var toolRegistryReadService = new TestMcpToolRegistryReadService();
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -277,7 +277,7 @@ public sealed class McpServerBootstrapExposureTests
         var loader = provider.GetRequiredService<AgentPluginLoader>();
         var bootstrap = new McpServerBootstrap(
             serverRepository,
-            approvalRequirementReadService,
+            toolRegistryReadService,
             loader,
             NullLogger<McpServerBootstrap>.Instance);
 
@@ -307,7 +307,7 @@ public sealed class McpServerBootstrapExposureTests
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
-        var approvalRequirementReadService = new TestApprovalRequirementReadService();
+        var toolRegistryReadService = new TestMcpToolRegistryReadService();
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -316,7 +316,7 @@ public sealed class McpServerBootstrapExposureTests
 
         var bootstrap = new ThrowingMcpServerBootstrap(
             serverRepository,
-            approvalRequirementReadService,
+            toolRegistryReadService,
             provider.GetRequiredService<AgentPluginLoader>());
 
         var action = () => bootstrap.CreateRegistrationAsync(
@@ -348,11 +348,11 @@ public sealed class McpServerBootstrapExposureTests
 
     private sealed class ThrowingMcpServerBootstrap(
         IReadRepository<McpServerInfo> mcpServerRepository,
-        IApprovalRequirementReadService approvalRequirementReadService,
+        IMcpToolRegistryReadService toolRegistryReadService,
         IAgentPluginRegistry agentPluginRegistry)
         : McpServerBootstrap(
             mcpServerRepository,
-            approvalRequirementReadService,
+            toolRegistryReadService,
             agentPluginRegistry,
             NullLogger<McpServerBootstrap>.Instance)
     {

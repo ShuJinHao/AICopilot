@@ -35,7 +35,6 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IBusinessDataSourceProfileRegistry, BusinessDataSourceProfileRegistry>();
         builder.Services.AddSingleton<IBusinessQueryContextStore, BusinessQueryContextStore>();
         builder.Services.AddScoped<BusinessDatabaseAccessService>();
-        builder.Services.AddScoped<IBusinessDatabaseAuthorizationReadService, BusinessDatabaseAuthorizationReadService>();
         builder.Services.AddScoped<IBusinessDatabaseReadService, BusinessDatabaseReadService>();
         builder.Services.AddScoped<BusinessReadonlyQueryExecutor>();
         builder.Services.AddScoped<IBusinessTextToSqlRuntime, BusinessTextToSqlRuntime>();

@@ -3,28 +3,13 @@
   "unclassifiedCompatibilitySignals": 0,
   "compatibilityItems": [
     {
-      "id": "AI-COMPAT-COMPLETED-PLAN-V1-READONLY",
-      "deletionDeadline": "2026-12-31",
-      "maximumCallSites": 3
-    },
-    {
       "id": "AI-COMPAT-EF-HISTORY-SPLIT",
-      "deletionDeadline": "2026-10-31",
-      "maximumCallSites": 1
-    },
-    {
-      "id": "AI-COMPAT-OBSOLETE-TOOL-CATALOG",
       "deletionDeadline": "2026-10-31",
       "maximumCallSites": 1
     },
     {
       "id": "AI-COMPAT-SECRET-ENCV1",
       "deletionDeadline": "2026-09-30",
-      "maximumCallSites": 2
-    },
-    {
-      "id": "AI-COMPAT-WIDGET-PAYLOAD-V1",
-      "deletionDeadline": "2026-11-30",
       "maximumCallSites": 2
     }
   ]

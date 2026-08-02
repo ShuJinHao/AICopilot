@@ -1,4 +1,3 @@
-using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AgentPlugin;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
@@ -47,40 +46,38 @@ public sealed class GetToolRegistrationQueryHandler(
 }
 
 public sealed class GetToolCatalogQueryHandler(
-    AgentPlanToolGuard toolGuard,
-    ICurrentUser currentUser)
+    IReadRepository<ToolRegistration> repository,
+    IAgentPluginCatalog pluginCatalog)
     : IQueryHandler<GetToolCatalogQuery, Result<ToolRegistryCatalogDto>>
 {
     public async Task<Result<ToolRegistryCatalogDto>> Handle(
         GetToolCatalogQuery request,
         CancellationToken cancellationToken)
     {
-        if (currentUser.Id is not { } userId)
-        {
-            return Result.Unauthorized(new ApiProblemDescriptor(
-                AuthProblemCodes.Unauthorized,
-                "Current user id is missing or invalid."));
-        }
-
-        var catalog = await toolGuard.GetAvailableToolCatalogAsync(
-            userId,
-            request.SimulationOnly,
-            request.BusinessDomains,
-            cancellationToken);
-        if (!catalog.IsSuccess || catalog.Value is null)
-        {
-            return Result.From(catalog);
-        }
-
-        var riskSummary = catalog.Value.Tools
+        var requestedDomains = (request.BusinessDomains ?? [])
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Select(domain => domain.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var registrations = await repository.ListAsync(cancellationToken: cancellationToken);
+        var tools = registrations
+            .Where(tool =>
+                tool.IsEnabled &&
+                tool.IsExecutableByAgent &&
+                tool.RiskLevel is not AiToolRiskLevel.Blocked and not AiToolRiskLevel.Critical &&
+                (requestedDomains.Count == 0 ||
+                 tool.BusinessDomains.Any(requestedDomains.Contains)))
+            .OrderBy(tool => tool.ToolCode, StringComparer.OrdinalIgnoreCase)
+            .Select(tool => ToolRegistrationMapper.Map(tool, pluginCatalog))
+            .Where(tool => tool.RuntimeAvailable)
+            .ToArray();
+        var riskSummary = tools
             .GroupBy(tool => tool.RiskLevel, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
 
         return Result.Success(new ToolRegistryCatalogDto(
-            catalog.Value.Version,
-            catalog.Value.AvailableToolCount,
-            PlannerToolCatalogMetadata.IsMockMcpOnly(catalog.Value.Tools),
+            tools.Select(tool => tool.CatalogVersion).DefaultIfEmpty(0).Max(),
+            tools.Length,
             riskSummary,
-            catalog.Value.Tools));
+            tools));
     }
 }

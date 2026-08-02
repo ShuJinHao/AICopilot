@@ -123,7 +123,7 @@ internal sealed class BusinessQueryContextStore(
 
     public BusinessQueryContext Resolve(BusinessQueryContext requested)
     {
-        if (!confirmedContexts.TryGetValue(requested.TaskId, out var confirmed))
+        if (!confirmedContexts.TryGetValue(requested.SessionId, out var confirmed))
         {
             return requested;
         }
@@ -131,12 +131,12 @@ internal sealed class BusinessQueryContextStore(
         if (confirmed.ConfirmedAtUtc is not { } confirmedAt ||
             clock.GetUtcNow() - confirmedAt > ttl)
         {
-            confirmedContexts.TryRemove(requested.TaskId, out _);
+            confirmedContexts.TryRemove(requested.SessionId, out _);
             return requested;
         }
 
         if (requested.SourceExplicitlySelected &&
-            !confirmed.HasSameTaskAndSource(requested))
+            !confirmed.HasSameSessionAndSource(requested))
         {
             return requested;
         }
@@ -181,26 +181,26 @@ internal sealed class BusinessQueryContextStore(
     {
         if (!context.IsConfirmed ||
             context.ConfirmedAtUtc is null ||
-            context.TaskId == Guid.Empty)
+            context.SessionId == Guid.Empty)
         {
             return;
         }
 
-        confirmedContexts[context.TaskId] = context;
+        confirmedContexts[context.SessionId] = context;
     }
 
     public BusinessQueryConfirmationChallenge BeginConfirmation(BusinessQueryContext requested)
     {
-        if (requested.TaskId == Guid.Empty || requested.SemanticPlan is null)
+        if (requested.SessionId == Guid.Empty || requested.SemanticPlan is null)
         {
             throw new InvalidOperationException(
-                "A pending business query confirmation requires a task id and semantic scope.");
+                "A pending business query confirmation requires a session id and semantic scope.");
         }
 
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16))
             .ToLowerInvariant();
         var expiresAtUtc = clock.GetUtcNow() + ttl;
-        pendingConfirmations[requested.TaskId] = new PendingBusinessQueryConfirmation(
+        pendingConfirmations[requested.SessionId] = new PendingBusinessQueryConfirmation(
             token,
             requested,
             expiresAtUtc);
@@ -208,21 +208,21 @@ internal sealed class BusinessQueryContextStore(
     }
 
     public bool TryConfirmPending(
-        Guid taskId,
+        Guid sessionId,
         string userMessage,
         out BusinessQueryContext confirmed)
     {
         confirmed = null!;
-        if (taskId == Guid.Empty ||
+        if (sessionId == Guid.Empty ||
             string.IsNullOrWhiteSpace(userMessage) ||
-            !pendingConfirmations.TryGetValue(taskId, out var pending))
+            !pendingConfirmations.TryGetValue(sessionId, out var pending))
         {
             return false;
         }
 
         if (clock.GetUtcNow() > pending.ExpiresAtUtc)
         {
-            pendingConfirmations.TryRemove(taskId, out _);
+            pendingConfirmations.TryRemove(sessionId, out _);
             return false;
         }
 
@@ -239,7 +239,7 @@ internal sealed class BusinessQueryContextStore(
             return false;
         }
 
-        if (!pendingConfirmations.TryRemove(taskId, out var consumed))
+        if (!pendingConfirmations.TryRemove(sessionId, out var consumed))
         {
             return false;
         }

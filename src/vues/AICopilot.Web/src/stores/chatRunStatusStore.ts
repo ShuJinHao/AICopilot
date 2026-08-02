@@ -142,22 +142,6 @@ function parseAgentEvent(chunk: ChatChunk) {
   return isObject(parsed) ? parsed : null
 }
 
-function hasDataAnalysisIntent(chunk: ChatChunk) {
-  const parsed = parseJson(chunk.content)
-  if (!Array.isArray(parsed)) {
-    return false
-  }
-
-  return parsed.some((item) => {
-    if (!isObject(item)) {
-      return false
-    }
-
-    const intent = getString(item.intent)?.toLowerCase() ?? ''
-    return intent.includes('analysis') || intent.includes('devicelog')
-  })
-}
-
 export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
   const sessionStore = useSessionStore()
   const sessionStates = reactive<Record<string, SessionScopedState>>({})
@@ -282,14 +266,6 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
     }
 
     switch (chunk.type) {
-      case ChunkType.Intent:
-        advancePhase(
-          sessionId,
-          messageKey,
-          'querying',
-          hasDataAnalysisIntent(chunk) ? '正在准备 Cloud 只读查询' : '正在处理请求'
-        )
-        return
       case ChunkType.FunctionCall:
         advancePhase(
           sessionId,
@@ -322,14 +298,13 @@ export const useChatRunStatusStore = defineStore('chatRunStatus', () => {
 
         if (stage.includes('data') || metadataText.includes('cloudreadonly')) {
           advancePhase(sessionId, messageKey, 'querying', '正在查询 Cloud 只读数据')
-        } else if (stage.includes('intent') || stage.includes('understand')) {
+        } else if (stage.includes('understand')) {
           advancePhase(sessionId, messageKey, 'understanding', '正在理解问题')
         }
         return
       }
       case ChunkType.Text:
       case ChunkType.Widget:
-      case ChunkType.AgentTask:
         advancePhase(sessionId, messageKey, 'answering', '正在生成回答')
         return
       case ChunkType.Error: {

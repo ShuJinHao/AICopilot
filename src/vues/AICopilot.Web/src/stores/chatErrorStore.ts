@@ -78,45 +78,17 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? 'Cloud 只读工具尚未启用，请联系管理员在 Tool Registry 中开启。'
     case 'tool_requires_approval':
       return userFacingMessage ?? '该工具需要人工审批，请先处理审批队列。'
-    case 'agent_task_run_queued':
-      return userFacingMessage ?? '任务已经进入队列，请勿重复运行。'
-    case 'agent_task_run_in_progress':
-      return userFacingMessage ?? '任务正在执行中，请等待当前运行完成。'
-    case 'agent_worker_unavailable':
-      return userFacingMessage ?? '当前没有可用 DataWorker，请检查 Worker 状态。'
-    case 'agent_worker_workspace_mismatch':
-      return userFacingMessage ?? 'Worker 与 HttpApi 工作区不一致，请先修复部署配置。'
-    case 'artifact_finalized':
-      return userFacingMessage ?? '产物已正式输出，不能继续编辑。'
-    case 'workspace_manifest_invalid':
-      return userFacingMessage ?? '工作区清单无效，请刷新后重试或联系管理员检查产物目录。'
     case 'tool_disabled':
       return userFacingMessage ?? '该工具已被禁用，不能执行。'
     case 'tool_blocked':
       return userFacingMessage ?? '该工具被安全策略阻断。'
     case 'tool_permission_denied':
       return userFacingMessage ?? '当前账号没有调用该工具的权限。'
-    case 'agent_plan_invalid':
-      return userFacingMessage ?? 'Agent 计划未通过后端校验，请调整任务目标后重新生成。'
-    case 'planner_model_unavailable':
-      return userFacingMessage ?? '计划生成模型暂时不可用，请稍后重试或联系管理员检查模型配置。'
-    case 'plan_payload_too_large':
-      return userFacingMessage ?? '计划内容超过固定大小上限，请缩小目标范围或减少产物后重新生成。'
-    case 'evidence_payload_too_large':
-      return userFacingMessage ?? '证据载荷超过固定大小上限，请缩小查询或分批生成。'
-    case 'agent_plan_tool_denied':
-      return userFacingMessage ?? '计划包含超出当前请求范围或权限范围的工具，请调整目标后重新生成。'
-    case 'agent_plan_schema_invalid':
-      return userFacingMessage ?? '计划步骤输入不符合工具 schema，请重新生成计划。'
     case 'tool_output_schema_invalid':
       return (
         userFacingMessage ??
         '工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。'
       )
-    case 'planner_tool_schema_unsupported':
-      return userFacingMessage ?? 'Planner 收到不支持的工具 schema，请检查工具注册信息。'
-    case 'agent_task_retry_not_allowed':
-      return userFacingMessage ?? '当前任务状态不允许重试。'
     case 'approval_pending':
       return userFacingMessage ?? '当前会话已有待处理审批，请先处理审批请求。'
     case 'agent_session_reset_required':
@@ -125,23 +97,11 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
       return userFacingMessage ?? '上一次执行已中断；系统不会自动重放，请新建会话后继续。'
     case 'agent_session_version_conflict':
       return userFacingMessage ?? '会话状态已变化，请刷新后重试。'
-    case 'agent_approval_state_conflict':
-      return userFacingMessage ?? '审批状态与当前任务不一致，请刷新任务后重试。'
-    case 'agent_finalization_state_conflict':
-      return userFacingMessage ?? '产物终审状态不完整或不一致，请刷新任务并检查产物生成记录。'
-    case 'agent_approval_rejected':
-      return userFacingMessage ?? '本次产物终审已被拒绝，任务已结束。'
     case 'chat_context_expired':
     case 'approval_already_processed':
       return userFacingMessage ?? '审批上下文已失效，请重新发起请求。'
     case 'rate_limit_exceeded':
       return userFacingMessage ?? '请求过于频繁，请稍后再试。'
-    case 'onsite_presence_required':
-      return userFacingMessage ?? '该能力需要先确认现场有人在岗。'
-    case 'onsite_presence_expired':
-      return userFacingMessage ?? '当前会话的在岗声明已过期，请重新确认。'
-    case 'approval_reconfirmation_required':
-      return userFacingMessage ?? '审批前需要再次确认现场有人在岗。'
     case 'approval_stream_failed':
       return userFacingMessage ?? '审批处理失败，请稍后重试。'
     case 'chat_stream_failed':

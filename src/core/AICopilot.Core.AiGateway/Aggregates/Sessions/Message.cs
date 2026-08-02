@@ -53,8 +53,6 @@ public class Message : IEntity<int>
         RenderPayloadJson = normalizedRenderPayload;
         FinalModelId = modelSnapshot?.FinalModelId;
         FinalModelName = NormalizeOptionalText(modelSnapshot?.FinalModelName);
-        RoutingModelId = modelSnapshot?.RoutingModelId;
-        RoutingModelName = NormalizeOptionalText(modelSnapshot?.RoutingModelName);
         ContextWindowTokens = modelSnapshot?.ContextWindowTokens;
         MaxOutputTokens = modelSnapshot?.MaxOutputTokens;
     }
@@ -66,8 +64,6 @@ public class Message : IEntity<int>
     public int Sequence { get; private set; }
     public Guid? FinalModelId { get; private set; }
     public string? FinalModelName { get; private set; }
-    public Guid? RoutingModelId { get; private set; }
-    public string? RoutingModelName { get; private set; }
     public int? ContextWindowTokens { get; private set; }
     public int? MaxOutputTokens { get; private set; }
     public string? RenderPayloadJson { get; private set; }

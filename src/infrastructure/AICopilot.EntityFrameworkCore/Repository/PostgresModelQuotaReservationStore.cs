@@ -1,4 +1,4 @@
-using AICopilot.Core.AiGateway.Runtime.AgentExecution;
+using AICopilot.Core.AiGateway.Runtime.ModelQuota;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace AICopilot.EntityFrameworkCore.Repository;
 
 internal sealed class PostgresModelQuotaReservationStore(
-    AgentExecutionTransactionRunner transactionRunner)
+    AiGatewayTransactionRunner transactionRunner)
     : IModelQuotaReservationStore
 {
     public Task<ModelQuotaReservationOutcome> TryReserveAsync(
@@ -325,7 +325,7 @@ internal sealed class PostgresModelQuotaReservationStore(
         }
     }
 
-    private static AgentExecutionTransactionAttempt<T> Attempt<T>(T value) => new(value);
+    private static AiGatewayTransactionAttempt<T> Attempt<T>(T value) => new(value);
 
     private sealed record ReservationScopes(
         ModelQuotaReservation[] Endpoint,

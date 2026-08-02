@@ -2,17 +2,10 @@ using System.Reflection;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Outbox;
 using AICopilot.EntityFrameworkCore.Persistence;
-using AICopilot.Core.AiGateway.Aggregates.AgentTasks;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
-using AICopilot.Core.AiGateway.Aggregates.Approvals;
-using AICopilot.Core.AiGateway.Aggregates.Artifacts;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
-using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
-using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
-using AICopilot.Core.AiGateway.Aggregates.Uploads;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
@@ -33,16 +26,9 @@ public sealed class DddAggregateBoundaryTests
     private static readonly Type[] AllowedAggregateRoots =
     [
         typeof(Session),
-        typeof(AgentTask),
-        typeof(ArtifactWorkspace),
-        typeof(ApprovalRequest),
         typeof(LanguageModel),
         typeof(ConversationTemplate),
-        typeof(ApprovalPolicy),
-        typeof(RoutingModelConfiguration),
         typeof(ToolRegistration),
-        typeof(ChatRuntimeSettings),
-        typeof(UploadRecord),
         typeof(BusinessDatabase),
         typeof(DataSourcePermissionGrant),
         typeof(McpServerInfo),
@@ -57,12 +43,7 @@ public sealed class DddAggregateBoundaryTests
     private static readonly IReadOnlyDictionary<string, string> DbSetTypeClassifications =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["AgentTask"] = "Aggregate",
-            ["ApprovalPolicy"] = "Aggregate",
-            ["ApprovalRequest"] = "Aggregate",
-            ["ArtifactWorkspace"] = "Aggregate",
             ["BusinessDatabase"] = "Aggregate",
-            ["ChatRuntimeSettings"] = "Aggregate",
             ["ConversationTemplate"] = "Aggregate",
             ["DataSourcePermissionGrant"] = "AggregatePendingReview",
             ["EmbeddingModel"] = "Aggregate",
@@ -71,29 +52,15 @@ public sealed class DddAggregateBoundaryTests
             ["KnowledgeSupplement"] = "Aggregate",
             ["LanguageModel"] = "Aggregate",
             ["McpServerInfo"] = "Aggregate",
-            ["RoutingModelConfiguration"] = "Aggregate",
             ["Session"] = "Aggregate",
             ["ToolRegistration"] = "Aggregate",
-            ["UploadRecord"] = "Aggregate",
-            ["AgentStep"] = "AggregateChild",
-            ["Artifact"] = "AggregateChild",
             ["Document"] = "AggregateChild",
             ["DocumentChunk"] = "AggregateChild",
             ["Message"] = "AggregateChild",
             ["ModelParameters"] = "OwnedValueObject",
             ["TemplateSpecification"] = "OwnedValueObject",
-            ["MessageEvent"] = "Projection",
-            ["AgentTaskRunQueueItem"] = "Queue",
-            ["AgentTaskRunAttempt"] = "RuntimeRecord",
             ["AgentSessionState"] = "RuntimeRecord",
-            ["AgentNodeRun"] = "RuntimeRecord",
             ["ModelQuotaReservation"] = "RuntimeRecord",
-            ["ArtifactFileSetOperation"] = "RuntimeRecord",
-            ["AgentWorkerHeartbeat"] = "WorkerState",
-            ["AgentEvidenceRecord"] = "Audit",
-            ["AgentRunUsageLedgerEntry"] = "Audit",
-            ["AgentNodeReconciliationDecision"] = "Audit",
-            ["ToolExecutionRecord"] = "Audit",
             ["AuditLogEntry"] = "Audit",
             ["OutboxMessage"] = "Audit",
             ["PersistenceCommitMarker"] = "RuntimeRecord",

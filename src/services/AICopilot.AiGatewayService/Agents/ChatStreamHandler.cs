@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using AICopilot.AiGatewayService.AgentTasks;
+using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Sessions;
@@ -15,10 +15,7 @@ using MediatR;
 
 namespace AICopilot.AiGatewayService.Agents;
 
-/// <summary>
-/// The sole HTTP/SSE main-chat path. The legacy AgentWorkflowPipeline remains
-/// compiled for B2 compatibility, but is intentionally unreachable here.
-/// </summary>
+/// <summary>The sole HTTP/SSE main-chat path.</summary>
 public class ChatStreamHandler(
     IReadRepository<Session> sessionRepository,
     ICurrentUser currentUser,
@@ -27,9 +24,8 @@ public class ChatStreamHandler(
     IAgentSessionStateStore agentSessionStateStore,
     SessionMessagePersistenceService messagePersistenceService,
     IOperationalBoundaryPolicy operationalBoundaryPolicy,
-    IManufacturingSceneClassifier sceneClassifier,
     ISessionExecutionLock sessionExecutionLock,
-    IAgentExecutionMetadataAccessor executionMetadataAccessor,
+    IChatExecutionMetadataAccessor executionMetadataAccessor,
     IAgentStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ChatStreamRequest, ChatChunk>
 {
@@ -71,11 +67,10 @@ public class ChatStreamHandler(
             pendingMessages.Add(new SessionMessageAppend(request.Message, MessageType.User));
         }
 
-        var sceneDecision = sceneClassifier.Classify(request.Message);
         var blockedByPolicy = operationalBoundaryPolicy.TryBlockControlRequest(
             request.Message,
             out var policyDecision);
-        if (sceneDecision.Scene == ManufacturingSceneType.ControlBlocked || blockedByPolicy)
+        if (blockedByPolicy)
         {
             var boundary = policyDecision ?? new OperationalBoundaryDecision(
                 AppProblemCodes.ControlActionBlocked,
@@ -165,6 +160,11 @@ public class ChatStreamHandler(
                     tools,
                     checkpointSink,
                     ct);
+                var configurationSnapshot = scopedRuntime.ConfigurationSnapshot
+                    ?? throw new InvalidOperationException(
+                        "Main chat runtime did not return its effective model configuration.");
+                executionMetadataAccessor.SetFinalConfiguration(
+                    configurationSnapshot);
                 harnessAgent = scopedRuntime.Agent as IHarnessRuntimeChatAgent
                     ?? throw new InvalidOperationException(
                         "Main chat runtime did not return a Harness agent.");
@@ -211,6 +211,15 @@ public class ChatStreamHandler(
 
             await using (scopedRuntime!)
             {
+                var modelMetadata = AgentStreamRuntime.CreateMetadataChunk(
+                    scopedRuntime!.ConfigurationSnapshot!,
+                    "HarnessAgent");
+                if (modelMetadata is not null)
+                {
+                    assistantRenderChunks.Add(modelMetadata);
+                    yield return modelMetadata;
+                }
+
                 var approvals = new List<AgentApprovalBinding>();
                 await using var updates = harnessAgent!
                     .RunStreamingAsync(request.Message, harnessSession!, cancellationToken: ct)

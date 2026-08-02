@@ -1,6 +1,6 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
-using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.AiGatewayService.BusinessQueries;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Services.Contracts;

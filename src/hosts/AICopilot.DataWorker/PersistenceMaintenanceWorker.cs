@@ -39,13 +39,6 @@ public sealed class PersistenceMaintenanceWorker(
                     TimeSpan.FromDays(settings.MarkerRetentionDays),
                     settings.BatchSize,
                     stoppingToken);
-                var artifactFileSetMaintenance = scope.ServiceProvider
-                    .GetRequiredService<IArtifactFileSetMaintenanceService>();
-                var artifactFileSetResult = await artifactFileSetMaintenance.RunOnceAsync(
-                    DateTimeOffset.UtcNow,
-                    TimeSpan.FromMinutes(settings.ReconciliationDelayMinutes),
-                    settings.BatchSize,
-                    stoppingToken);
                 var quotaStore = scope.ServiceProvider.GetService<IModelQuotaReservationStore>();
                 var reclaimedQuotaReservations = quotaStore is null
                     ? 0
@@ -54,18 +47,13 @@ public sealed class PersistenceMaintenanceWorker(
                         settings.BatchSize,
                         stoppingToken);
                 logger.LogInformation(
-                    "Persistence maintenance completed. CommittedFiles={CommittedFiles}; RolledBackFiles={RolledBackFiles}; FailedFiles={FailedFiles}; ActiveFiles={ActiveFiles}; DeletedMarkers={DeletedMarkers}; MarkerCleanupSkipped={MarkerCleanupSkipped}; ArtifactFileSetsConfirmed={ArtifactFileSetsConfirmed}; ArtifactFileSetsRolledBack={ArtifactFileSetsRolledBack}; ArtifactFileSetsFailed={ArtifactFileSetsFailed}; ArtifactFileSetsActive={ArtifactFileSetsActive}; ArtifactJournalUnreadable={ArtifactJournalUnreadable}; ReclaimedQuotaReservations={ReclaimedQuotaReservations}",
+                    "Persistence maintenance completed. CommittedFiles={CommittedFiles}; RolledBackFiles={RolledBackFiles}; FailedFiles={FailedFiles}; ActiveFiles={ActiveFiles}; DeletedMarkers={DeletedMarkers}; MarkerCleanupSkipped={MarkerCleanupSkipped}; ReclaimedQuotaReservations={ReclaimedQuotaReservations}",
                     result.ReconciledCommittedFiles,
                     result.ReconciledRolledBackFiles,
                     result.FailedFileReconciliations,
                     result.SkippedActiveFileReconciliations,
                     result.DeletedCommitMarkers,
                     result.MarkerCleanupSkipped,
-                    artifactFileSetResult.ConfirmedOperations,
-                    artifactFileSetResult.RolledBackOperations,
-                    artifactFileSetResult.FailedOperations,
-                    artifactFileSetResult.ActiveOperations,
-                    artifactFileSetResult.HasUnreadableJournal,
                     reclaimedQuotaReservations);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

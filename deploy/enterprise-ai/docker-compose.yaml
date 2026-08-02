@@ -19,10 +19,8 @@ x-aicopilot-common-env: &aicopilot-common-env
   QDRANT_HTTPPORT: "6333"
   QDRANT_APIKEY: ${QDRANT_KEY}
   FileStorage__RootPath: /var/lib/aicopilot/storage
-  ArtifactWorkspace__RootPath: /var/lib/aicopilot/artifact-workspaces
   AgentSessionState__DataProtectionKeyPath: /var/lib/aicopilot/data-protection-keys
   AiGateway__Deployment__Mode: SingleInstance
-  AiGateway__FinalAgentContextStore__Provider: Memory
   Mcp__Runtime__Enabled: "false"
   CloudReadonly__Mode: ${CLOUD_READONLY_MODE:-Disabled}
   CloudReadonly__Real__Enabled: ${CLOUD_READONLY_REAL_ENABLED:-false}

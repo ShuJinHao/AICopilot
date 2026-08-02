@@ -5,7 +5,6 @@ import type {
   AgentEventChunk,
   ChatMessage,
   FunctionCallChunk,
-  IntentChunk,
   WidgetChunk
 } from '@/types/models'
 import type { ChatRunStatus } from '@/stores/sessionScopedState'
@@ -18,7 +17,6 @@ function createAssistantMessage(chunks: ChatMessage['chunks'] = []): ChatMessage
     isStreaming: false,
     timestamp: 1,
     finalModelName: 'deepseek-v4-pro',
-    routingModelName: 'deepseek-v4-flash',
     contextWindowTokens: 128000,
     maxOutputTokens: 4096
   }
@@ -32,19 +30,13 @@ describe('runtimeDetails', () => {
         type: ChunkType.AgentEvent,
         content: '{}',
         event: {
-          stage: 'capability_discovery',
+          stage: 'agent_session_state',
           detail: 'Discovering readonly capability.',
           recoverable: true,
           suggestedAction: null,
           metadata: { executesCloudQuery: 'false' }
         }
       } as AgentEventChunk,
-      {
-        source: 'IntentClassifier',
-        type: ChunkType.Intent,
-        content: '[]',
-        intents: [{ intent: 'DataAnalysis', confidence: 0.91 }]
-      } as IntentChunk,
       {
         source: 'DataAnalysisExecutor',
         type: ChunkType.FunctionCall,
@@ -94,8 +86,7 @@ describe('runtimeDetails', () => {
       summary: '回答已完成'
     })
     expect(details.modelBadges.map((item) => item.text)).toContain('回答模型：deepseek-v4-pro')
-    expect(details.events[0]).toMatchObject({ label: '发现能力', statusText: '可继续' })
-    expect(details.intents[0]).toMatchObject({ name: 'DataAnalysis', confidenceText: '91%' })
+    expect(details.events[0]).toMatchObject({ label: '会话状态', statusText: '可继续' })
     expect(details.tools[0]).toMatchObject({
       name: 'queryDeviceLogs',
       argsSummary: '设备：DEV-001 · 开始：2026-06-30T00:00:00Z · 限制：20',

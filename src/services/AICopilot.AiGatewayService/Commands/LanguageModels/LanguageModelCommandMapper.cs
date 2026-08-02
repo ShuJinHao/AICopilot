@@ -16,15 +16,6 @@ internal static class LanguageModelCommandMapper
             return LanguageModelUsage.Chat;
         }
 
-        var usage = LanguageModelUsage.None;
-        foreach (var item in usages)
-        {
-            if (Enum.TryParse<LanguageModelUsage>(item, ignoreCase: true, out var parsed))
-            {
-                usage |= parsed;
-            }
-        }
-
-        return usage == LanguageModelUsage.None ? LanguageModelUsage.Chat : usage;
+        return LanguageModelUsage.Chat;
     }
 }

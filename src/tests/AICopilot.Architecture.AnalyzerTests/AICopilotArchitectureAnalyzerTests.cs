@@ -1668,39 +1668,6 @@ public sealed class AICopilotArchitectureAnalyzerTests
     }
 
     [Fact]
-    public async Task AIARCH005_ShouldAllowOnlyTheExactInternalDevelopmentMockException()
-    {
-        const string valid = """
-            namespace AICopilot.AiGatewayService.AgentTasks
-            {
-                public interface IAgentToolExecutor { }
-                internal sealed class MockMcpAgentToolExecutor : IAgentToolExecutor { }
-            }
-            """;
-        const string invalid = """
-            namespace AICopilot.AiGatewayService.AgentTasks
-            {
-                public interface IAgentToolExecutor { }
-            }
-            namespace Fixture
-            {
-                internal sealed class MockMcpAgentToolExecutor :
-                    AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor { }
-            }
-            """;
-
-        var validDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
-            "AICopilot.AiGatewayService",
-            [valid]);
-        var invalidDiagnostics = await AnalyzerTestHarness.GetArchitectureDiagnosticsAsync(
-            "AICopilot.AiGatewayService",
-            [invalid]);
-
-        validDiagnostics.Should().NotContain(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AgentPluginBoundaryId);
-        invalidDiagnostics.Should().ContainSingle(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.AgentPluginBoundaryId);
-    }
-
-    [Fact]
     public async Task AIARCH006_ShouldFollowInterfaceDispatchFromCloudAiReadEntryToDatabaseWrite()
     {
         const string contracts = """
@@ -2585,7 +2552,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
             }
             namespace AICopilot.EntityFrameworkCore.Transactions
             {
-                public sealed class AgentExecutionTransactionRunner(
+                public sealed class AiGatewayTransactionRunner(
                     AICopilot.EntityFrameworkCore.AiGatewayDbContext db)
                 {
                     public Task<TResult> ExecuteAsync<TResult>(Func<TResult> action)
@@ -2598,7 +2565,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
             namespace AICopilot.EntityFrameworkCore.Repository
             {
                 public sealed class PostgresModelQuotaReservationStore(
-                    AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner runner)
+                    AICopilot.EntityFrameworkCore.Transactions.AiGatewayTransactionRunner runner)
                     : AICopilot.Services.Contracts.IModelQuotaReservationStore
                 {
                     public Task<AICopilot.Services.Contracts.ModelQuotaReservationOutcome> TryReserveAsync(
@@ -2687,13 +2654,13 @@ public sealed class AICopilotArchitectureAnalyzerTests
             }
             namespace AICopilot.EntityFrameworkCore.Transactions
             {
-                public sealed class AgentExecutionTransactionRunner(
+                public sealed class AiGatewayTransactionRunner(
                     AICopilot.EntityFrameworkCore.IdentityDbContext db) { }
             }
             namespace AICopilot.EntityFrameworkCore.Repository
             {
                 public sealed class PostgresModelQuotaReservationStore(
-                    AICopilot.EntityFrameworkCore.Transactions.AgentExecutionTransactionRunner runner)
+                    AICopilot.EntityFrameworkCore.Transactions.AiGatewayTransactionRunner runner)
                     : AICopilot.Services.Contracts.IModelQuotaReservationStore
                 {
                     public Task<AICopilot.Services.Contracts.ModelQuotaReservationOutcome> TryReserveAsync(
@@ -2780,7 +2747,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
     }
 
     [Fact]
-    public async Task AIARCH006_ShouldRejectCommandAndMcpWriteDispatchFromCloudReadOnlyWorkflows()
+    public async Task AIARCH006_ShouldRejectCommandDispatchFromCloudReadOnlyBusinessQuery()
     {
         const string source = """
             using System.Threading.Tasks;
@@ -2789,18 +2756,11 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 public sealed record UpdateCloudCommand : AICopilot.SharedKernel.Messaging.ICommand<int>;
                 public interface ISender { Task<int> Send(UpdateCloudCommand command); }
             }
-            namespace AICopilot.AiGatewayService.AgentTasks
+            namespace AICopilot.AiGatewayService.BusinessQueries
             {
-                public interface IAgentToolExecutor { Task ExecuteAsync(); }
-            }
-            namespace AICopilot.AiGatewayService.Workflows.Executors
-            {
-                public sealed class BusinessTextToSqlFallbackRunner(
-                    Fixture.ISender sender,
-                    AICopilot.AiGatewayService.AgentTasks.IAgentToolExecutor toolExecutor)
+                public sealed class BusinessTextToSqlFallbackRunner(Fixture.ISender sender)
                 {
                     public Task<int> DispatchCommandAsync() => sender.Send(new Fixture.UpdateCloudCommand());
-                    public Task DispatchMcpWriteAsync() => toolExecutor.ExecuteAsync();
                 }
             }
             """;
@@ -2811,16 +2771,12 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 public interface ICommand<T> { }
                 public sealed record UpdateCloudCommand : ICommand<int>;
                 public interface ISender { Task<int> Send(UpdateCloudCommand command); }
-                public sealed class McpAgentToolExecutor { public Task ExecuteAsync() => Task.CompletedTask; }
             }
-            namespace AICopilot.AiGatewayService.Workflows.Executors
+            namespace AICopilot.AiGatewayService.BusinessQueries
             {
-                public sealed class BusinessTextToSqlFallbackRunner(
-                    Fixture.ISender sender,
-                    Fixture.McpAgentToolExecutor toolExecutor)
+                public sealed class BusinessTextToSqlFallbackRunner(Fixture.ISender sender)
                 {
                     public Task<int> DispatchCommandAsync() => sender.Send(new Fixture.UpdateCloudCommand());
-                    public Task DispatchMcpWriteAsync() => toolExecutor.ExecuteAsync();
                 }
             }
             """;
@@ -2835,7 +2791,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
             [SharedKernelReference]);
 
         diagnostics.Count(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId)
-            .Should().Be(2);
+            .Should().Be(1);
         sameNameFakeDiagnostics.Should().NotContain(
             diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.CloudReadOnlyBoundaryId);
     }
@@ -2886,22 +2842,15 @@ public sealed class AICopilotArchitectureAnalyzerTests
     }
 
     [Fact]
-    public async Task AIARCH007_ShouldAllowOnlyExactResourceAuthorizationRequestAndOwnerPairs()
+    public async Task AIARCH007_ShouldRejectRetiredResourceAuthorizationOwnerMetadata()
     {
         const string source = """
-            namespace AICopilot.AiGatewayService.Workspaces
-            {
-                using AICopilot.Services.CrossCutting.Attributes;
-                public sealed class ArtifactWorkspaceQueryCoordinator { }
-                [ResourceAuthorizationOwner(typeof(ArtifactWorkspaceQueryCoordinator))]
-                public sealed record GetArtifactWorkspaceQuery : AICopilot.SharedKernel.Messaging.IQuery<string>;
-            }
             namespace Fixture
             {
                 using AICopilot.Services.CrossCutting.Attributes;
-                public sealed class ArtifactWorkspaceQueryCoordinator { }
-                [ResourceAuthorizationOwner(typeof(ArtifactWorkspaceQueryCoordinator))]
-                public sealed record GetArtifactWorkspaceQuery : AICopilot.SharedKernel.Messaging.IQuery<string>;
+                public sealed class QueryCoordinator { }
+                [ResourceAuthorizationOwner(typeof(QueryCoordinator))]
+                public sealed record ResourceQuery : AICopilot.SharedKernel.Messaging.IQuery<string>;
             }
             """;
 
@@ -2912,7 +2861,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
 
         diagnostics.Where(diagnostic => diagnostic.Id == AICopilotArchitectureAnalyzer.SecurityMetadataId)
             .Should().ContainSingle()
-            .Which.GetMessage().Should().Contain("Fixture.GetArtifactWorkspaceQuery");
+            .Which.GetMessage().Should().Contain("Fixture.ResourceQuery");
     }
 
     [Fact]

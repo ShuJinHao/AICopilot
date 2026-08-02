@@ -1,20 +1,6 @@
 import { reactive } from 'vue'
-import type { AgentChartPreview, SessionTimelineEvent } from '@/types/app'
-import type {
-  AgentApprovalRequest,
-  AgentArtifactPreview,
-  AgentTask,
-  AgentTaskAuditSummary,
-  ArtifactWorkspace,
-  UploadRecord
-} from '@/types/protocols'
 
-export type ChatRunPhase =
-  | 'understanding'
-  | 'querying'
-  | 'answering'
-  | 'completed'
-  | 'failed'
+export type ChatRunPhase = 'understanding' | 'querying' | 'answering' | 'completed' | 'failed'
 
 export interface ChatRunStatus {
   sessionId: string
@@ -34,31 +20,11 @@ export interface ChatRunStatus {
 }
 
 export interface SessionScopedState {
-  agentTasks: AgentTask[]
-  agentApprovals: AgentApprovalRequest[]
-  agentAuditSummary: AgentTaskAuditSummary[]
-  timelineEvents: SessionTimelineEvent[]
-  uploadedFiles: UploadRecord[]
-  currentWorkspace: ArtifactWorkspace | null
-  currentArtifactPreview: AgentArtifactPreview | null
-  chartPreview: AgentChartPreview | null
-  isAgentBusy: boolean
   chatRunStatus: ChatRunStatus | null
 }
 
 export function createSessionScopedState(): SessionScopedState {
-  return {
-    agentTasks: [],
-    agentApprovals: [],
-    agentAuditSummary: [],
-    timelineEvents: [],
-    uploadedFiles: [],
-    currentWorkspace: null,
-    currentArtifactPreview: null,
-    chartPreview: null,
-    isAgentBusy: false,
-    chatRunStatus: null
-  }
+  return { chatRunStatus: null }
 }
 
 export function createReactiveSessionScopedState() {

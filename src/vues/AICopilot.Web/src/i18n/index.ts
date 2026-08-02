@@ -8,10 +8,10 @@ export const i18n = createI18n({
     'zh-CN': {
       brand: {
         name: 'AICopilot',
-        subtitle: '制造 AI 运维工作台'
+        subtitle: '制造 AI 助理'
       },
       nav: {
-        chat: 'AI 工作台',
+        chat: 'AI 对话',
         config: '运行配置',
         knowledge: '知识库',
         access: '权限治理',
@@ -23,10 +23,10 @@ export const i18n = createI18n({
     'en-US': {
       brand: {
         name: 'AICopilot',
-        subtitle: 'Manufacturing AI Operations Workbench'
+        subtitle: 'Manufacturing AI Assistant'
       },
       nav: {
-        chat: 'AI Workbench',
+        chat: 'AI Chat',
         config: 'Runtime Config',
         knowledge: 'Knowledge Base',
         access: 'Access Governance',

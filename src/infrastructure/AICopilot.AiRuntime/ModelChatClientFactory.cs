@@ -185,12 +185,7 @@ internal sealed class ModelChatClientFactory(
 
         return request.Template.Scope switch
         {
-            ConversationTemplateScope.AgentPlanner => "PlannerPool",
-            ConversationTemplateScope.RagAnswer => "AnswerPool",
             ConversationTemplateScope.TextToSql => "TextToSqlPool",
-            ConversationTemplateScope.ToolCallPolicy => "PlannerPool",
-            _ when request.Model.SupportsUsage(LanguageModelUsage.Routing) &&
-                   !request.Model.SupportsUsage(LanguageModelUsage.Chat) => "RoutingPool",
             _ => "AnswerPool"
         };
     }

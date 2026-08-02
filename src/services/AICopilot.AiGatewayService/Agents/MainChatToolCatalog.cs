@@ -1,6 +1,5 @@
 using AICopilot.AgentPlugin;
-using AICopilot.AiGatewayService.Workflows;
-using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.AiGatewayService.BusinessQueries;
 using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Ai;
 
@@ -9,7 +8,7 @@ namespace AICopilot.AiGatewayService.Agents;
 public sealed class MainChatToolCatalog(
     IAgentPluginCatalog pluginCatalog,
     MainChatToolGate toolGate,
-    SemanticAnalysisRunner semanticAnalysisRunner,
+    BusinessQueryExecutor businessQueryExecutor,
     IKnowledgeBaseReadService knowledgeBaseReadService,
     IKnowledgeRetrievalService knowledgeRetrievalService)
 {
@@ -20,7 +19,7 @@ public sealed class MainChatToolCatalog(
         CancellationToken cancellationToken)
     {
         BusinessQueryContext? confirmedQuery = null;
-        if (semanticAnalysisRunner.TryConfirmPending(
+        if (businessQueryExecutor.TryConfirmPending(
                 session.Id,
                 userMessage,
                 out var restoredConfirmation))
@@ -41,7 +40,7 @@ public sealed class MainChatToolCatalog(
         {
             permittedTools.Add(MainChatBusinessQueryTool.CreateDefinition(
                 new MainChatBusinessQueryTool(
-                    semanticAnalysisRunner,
+                    businessQueryExecutor,
                     session,
                     confirmedQuery,
                     renderChunkBuffer)));

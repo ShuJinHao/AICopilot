@@ -102,7 +102,7 @@ export const useApprovalStore = defineStore('chatApproval', () => {
       chunks: missingApprovals.map(
         (approval) =>
           ({
-            source: 'FinalAgentRunExecutor',
+            source: 'HarnessAgent',
             type: ChunkType.ApprovalRequest,
             content: JSON.stringify(approval),
             request: approval,

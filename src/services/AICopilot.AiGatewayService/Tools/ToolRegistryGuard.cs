@@ -69,7 +69,7 @@ public sealed class ToolRegistryGuard(
         if (!inputSchema.IsValid)
         {
             return ToolRegistryDecision.Reject(
-                AppProblemCodes.PlannerToolSchemaUnsupported,
+                AppProblemCodes.ToolInputInvalid,
                 $"Tool '{tool.ToolCode}' has an unavailable input contract: {inputSchema.Error}");
         }
 
@@ -77,11 +77,11 @@ public sealed class ToolRegistryGuard(
         if (!outputSchema.IsValid)
         {
             return ToolRegistryDecision.Reject(
-                AppProblemCodes.PlannerToolSchemaUnsupported,
+                AppProblemCodes.ToolOutputSchemaInvalid,
                 $"Tool '{tool.ToolCode}' has an unavailable output contract: {outputSchema.Error}");
         }
 
-        var builtIn = BuiltInToolRegistrations.FindAgentRuntimeTool(tool.ToolCode);
+        var builtIn = BuiltInToolRegistrations.FindHarnessTool(tool.ToolCode);
         if (builtIn is not null)
         {
             var builtInSchema = ToolInputSchemaContractV1.Validate(builtIn.InputSchemaJson);
@@ -94,7 +94,7 @@ public sealed class ToolRegistryGuard(
                 tool.CatalogVersion != builtIn.CatalogVersion)
             {
                 return ToolRegistryDecision.Reject(
-                    AppProblemCodes.PlannerToolSchemaUnsupported,
+                    AppProblemCodes.ToolInputInvalid,
                     $"Built-in tool '{tool.ToolCode}' does not match its frozen catalog input/output contract/version.");
             }
         }
@@ -167,7 +167,8 @@ public sealed class ToolRegistryGuard(
             {
                 allowed.Add(decision.Tool!);
             }
-            else if (decision.Problem?.Code == AppProblemCodes.PlannerToolSchemaUnsupported)
+            else if (decision.Problem?.Code is
+                     AppProblemCodes.ToolInputInvalid or AppProblemCodes.ToolOutputSchemaInvalid)
             {
                 throw new ToolRegistryGuardException(decision.Problem);
             }

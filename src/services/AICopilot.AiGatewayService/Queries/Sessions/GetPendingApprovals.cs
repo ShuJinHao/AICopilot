@@ -1,5 +1,4 @@
 using System.Text.Json;
-using AICopilot.AiGatewayService.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Runtime.AgentSessions;
@@ -7,7 +6,6 @@ using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Messaging;
-using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Repository;
 using AICopilot.SharedKernel.Result;
 
@@ -20,9 +18,7 @@ public sealed record PendingApprovalDto(
     string? TargetType,
     string? TargetName,
     string? ToolName,
-    IReadOnlyDictionary<string, object?> Args,
-    bool RequiresOnsiteAttestation,
-    DateTimeOffset? AttestationExpiresAt);
+    IReadOnlyDictionary<string, object?> Args);
 
 [AuthorizeRequirement("AiGateway.Chat")]
 public sealed record GetPendingApprovalsQuery(Guid SessionId)
@@ -31,8 +27,7 @@ public sealed record GetPendingApprovalsQuery(Guid SessionId)
 public sealed class GetPendingApprovalsQueryHandler(
     IReadRepository<Session> sessionRepository,
     ICurrentUser currentUser,
-    IAgentSessionStateStore agentSessionStateStore,
-    ApprovalRequirementResolver approvalRequirementResolver)
+    IAgentSessionStateStore agentSessionStateStore)
     : IQueryHandler<GetPendingApprovalsQuery, Result<IList<PendingApprovalDto>>>
 {
     public async Task<Result<IList<PendingApprovalDto>>> Handle(
@@ -96,10 +91,6 @@ public sealed class GetPendingApprovalsQueryHandler(
             var toolName = string.IsNullOrWhiteSpace(approval.CanonicalToolName)
                 ? approval.ToolName
                 : approval.CanonicalToolName!;
-            var identity = BuildStoredIdentity(approval);
-            var requirement = await approvalRequirementResolver
-                .GetMergedRequirementByIdentityAsync(identity, cancellationToken);
-
             approvals.Add(new PendingApprovalDto(
                 approval.ToolCallId,
                 toolName,
@@ -107,9 +98,7 @@ public sealed class GetPendingApprovalsQueryHandler(
                 approval.TargetType?.ToString(),
                 approval.TargetName,
                 approval.CanonicalToolName,
-                NormalizeArguments(approval.Arguments),
-                requirement.RequiresOnsiteAttestation,
-                session.OnsiteConfirmationExpiresAt));
+                NormalizeArguments(approval.Arguments)));
         }
 
         return Result.Success<IList<PendingApprovalDto>>(approvals);
@@ -122,22 +111,6 @@ public sealed class GetPendingApprovalsQueryHandler(
             item => item.Key,
             item => NormalizeJsonElement(item.Value),
             StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static AiToolIdentity? BuildStoredIdentity(AgentApprovalBinding approval)
-    {
-        if (approval.TargetType is not { } targetType ||
-            string.IsNullOrWhiteSpace(approval.TargetName) ||
-            string.IsNullOrWhiteSpace(approval.CanonicalToolName))
-        {
-            return null;
-        }
-
-        return new AiToolIdentity(
-            approval.ToolKind,
-            targetType,
-            approval.TargetName,
-            approval.CanonicalToolName);
     }
 
     private static object? NormalizeJsonElement(object? value)

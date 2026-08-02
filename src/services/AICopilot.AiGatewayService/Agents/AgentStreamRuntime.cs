@@ -3,11 +3,9 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using AICopilot.AiGatewayService.Approvals;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Safety;
 using AICopilot.AiGatewayService.Sessions;
-using AICopilot.AiGatewayService.Workflows;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Ids;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
@@ -38,7 +36,7 @@ public interface IAgentStreamRuntime
         CancellationToken cancellationToken);
 }
 
-public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequirementResolver) : IAgentStreamRuntime
+public sealed class AgentStreamRuntime : IAgentStreamRuntime
 {
     private const int MaxFunctionResultPayloadBytes = 256 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -114,7 +112,6 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
                     var toolCall = content.Request.ToolCall;
                     var identity = toolCall.Identity;
                     var toolName = identity?.ToolName ?? toolCall.ToolName ?? toolCall.Name;
-                    var requirement = await approvalRequirementResolver.GetMergedRequirementByIdentityAsync(identity, ct);
                     var approval = new
                     {
                         callId = toolCall.CallId,
@@ -123,9 +120,7 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
                         targetType = identity?.TargetType.ToString(),
                         targetName = identity?.TargetName,
                         toolName,
-                        args = toolCall.Arguments,
-                        requiresOnsiteAttestation = requirement.RequiresOnsiteAttestation,
-                        attestationExpiresAt = session?.OnsiteConfirmationExpiresAt
+                        args = toolCall.Arguments
                     };
                     yield return new ChatChunk(source, ChunkType.ApprovalRequest, approval.ToJson());
                     break;
@@ -149,10 +144,7 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
             Id = session.Id,
             UserId = session.UserId,
             TemplateId = session.TemplateId.Value,
-            Title = session.Title,
-            OnsiteConfirmedAt = session.OnsiteConfirmedAt,
-            OnsiteConfirmedBy = session.OnsiteConfirmedBy,
-            OnsiteConfirmationExpiresAt = session.OnsiteConfirmationExpiresAt
+            Title = session.Title
         };
     }
 
@@ -168,23 +160,13 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         string fallbackCode,
         string fallbackUserFacingMessage)
     {
-        var planFailure = ResolvePlanPersistenceDisclosure(exception);
-        if (planFailure is not null)
+        if (exception is AgentRuntimeException runtimeException)
         {
             return CreateErrorChunk(
-                planFailure.Code,
-                planFailure.Detail,
+                runtimeException.Code,
+                BuildSafeRuntimeDetail(runtimeException.Code),
                 source,
-                planFailure.UserFacingMessage);
-        }
-
-        if (exception is AgentWorkflowException workflowException)
-        {
-            return CreateErrorChunk(
-                workflowException.Code,
-                BuildSafeWorkflowDetail(workflowException.Code),
-                source,
-                workflowException.UserFacingMessage);
+                runtimeException.UserFacingMessage);
         }
 
         if (ContainsException<TimeoutException>(exception)
@@ -234,12 +216,6 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         return false;
     }
 
-    internal static AgentPlanPersistenceFailureDisclosure? ResolvePlanPersistenceDisclosure(
-        Exception exception)
-    {
-        return AgentPlanPublicFailureDisclosurePolicy.Resolve(exception);
-    }
-
     public static ChatChunk CreateErrorChunk(
         StringBuilder assistantText,
         Exception exception,
@@ -270,14 +246,6 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
         string source = "Chat",
         string? userFacingMessage = null)
     {
-        var planFailure = AgentPlanPublicFailureDisclosurePolicy.Resolve(code);
-        if (planFailure is not null)
-        {
-            code = planFailure.Code;
-            detail = planFailure.Detail;
-            userFacingMessage = planFailure.UserFacingMessage;
-        }
-
         return new ChatChunk(
             source,
             ChunkType.Error,
@@ -290,15 +258,11 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
     }
 
     public static ChatChunk? CreateMetadataChunk(
-        ChatExecutionMetadataSnapshot snapshot,
+        RuntimeAgentConfigurationSnapshot snapshot,
         string source = "Chat")
     {
-        if (!snapshot.FinalModelId.HasValue
-            && string.IsNullOrWhiteSpace(snapshot.FinalModelName)
-            && !snapshot.RoutingModelId.HasValue
-            && string.IsNullOrWhiteSpace(snapshot.RoutingModelName)
-            && !snapshot.ContextWindowTokens.HasValue
-            && !snapshot.MaxOutputTokens.HasValue)
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.ModelId == Guid.Empty && string.IsNullOrWhiteSpace(snapshot.ModelName))
         {
             return null;
         }
@@ -307,10 +271,8 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
             source,
             ChunkType.Metadata,
             new ChatModelMetadataPayload(
-                snapshot.FinalModelId,
-                snapshot.FinalModelName,
-                snapshot.RoutingModelId,
-                snapshot.RoutingModelName,
+                snapshot.ModelId,
+                snapshot.ModelName,
                 snapshot.ContextWindowTokens,
                 snapshot.MaxOutputTokens).ToJson());
     }
@@ -336,23 +298,14 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
 
     public static string BuildApprovalSummary(
         string toolName,
-        bool isApproved,
-        bool onsiteConfirmed,
-        bool requiresOnsiteAttestation)
+        bool isApproved)
     {
         if (!isApproved)
         {
             return $"[审批拒绝] {toolName}";
         }
 
-        if (!requiresOnsiteAttestation)
-        {
-            return $"[审批通过] {toolName}";
-        }
-
-        return onsiteConfirmed
-            ? $"[审批通过] {toolName}（已再次确认现场有人在岗）"
-            : $"[审批通过] {toolName}";
+        return $"[审批通过] {toolName}";
     }
 
     private static string SanitizeErrorText(string detail)
@@ -394,14 +347,8 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
             : $"{sanitized[..1000]}...";
     }
 
-    private static string BuildSafeWorkflowDetail(string code)
+    private static string BuildSafeRuntimeDetail(string code)
     {
-        var planFailure = AgentPlanPublicFailureDisclosurePolicy.Resolve(code);
-        if (planFailure is not null)
-        {
-            return planFailure.Detail;
-        }
-
         return code switch
         {
             AppProblemCodes.ChatConfigurationMissing =>
@@ -422,14 +369,10 @@ public sealed class AgentStreamRuntime(ApprovalRequirementResolver approvalRequi
                 "错误码 control_action_blocked：该动作被 AICopilot 只读安全边界拦截。",
             AppProblemCodes.CapabilityNotAllowed =>
                 "错误码 capability_not_allowed：当前能力不允许执行该操作。",
-            AppProblemCodes.AgentPlanToolDenied =>
-                "错误码 agent_plan_tool_denied：计划引用了当前能力范围或安全策略不允许的工具。",
             AppProblemCodes.ToolOutputSchemaInvalid =>
                 "错误码 tool_output_schema_invalid：工具输出未通过 schema 或持久化绑定校验，请管理员检查工具运行时与注册契约。",
             AppProblemCodes.ToolBlocked =>
                 "错误码 tool_blocked：该工具被安全策略阻止执行。",
-            AppProblemCodes.ToolExecutionNotFound =>
-                "错误码 tool_execution_not_found：未找到可执行的工具运行时。",
             AppProblemCodes.ToolExecutionTimeout =>
                 "错误码 tool_execution_timeout：工具执行超过配置的超时时间。",
             AppProblemCodes.CloudReadonlyIntentUnsupported =>

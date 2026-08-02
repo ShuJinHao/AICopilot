@@ -17,7 +17,7 @@ public class LanguageModel : IAggregateRoot<LanguageModelId>
             apiKey,
             parameters,
             provider,
-            LanguageModelUsage.Chat | LanguageModelUsage.Routing,
+            LanguageModelUsage.Chat,
             true)
     {
     }

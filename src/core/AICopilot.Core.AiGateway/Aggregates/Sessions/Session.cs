@@ -9,7 +9,6 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
     public const string UntitledTitle = "未命名会话";
     public const int MaxTitleLength = 48;
     public const int MaxMessageSummaryLength = 200;
-    private static readonly TimeSpan MaxOnsiteAttestationLifetime = TimeSpan.FromMinutes(30);
     private readonly List<Message> _messages = [];
 
     protected Session()
@@ -37,9 +36,6 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
     public string? LastMessageSummary { get; private set; }
     public DateTime? LastMessageAt { get; private set; }
     public int MessageCount { get; private set; }
-    public DateTimeOffset? OnsiteConfirmedAt { get; private set; }
-    public string? OnsiteConfirmedBy { get; private set; }
-    public DateTimeOffset? OnsiteConfirmationExpiresAt { get; private set; }
 
     public IReadOnlyCollection<Message> Messages => _messages.AsReadOnly();
 
@@ -78,50 +74,12 @@ public class Session : BaseEntity<SessionId>, IAggregateRoot<SessionId>
         Title = BuildTitle(title);
     }
 
-    public void SetOnsiteAttestation(string confirmedBy, DateTimeOffset confirmedAtUtc, DateTimeOffset expiresAtUtc)
-    {
-        if (string.IsNullOrWhiteSpace(confirmedBy))
-        {
-            throw new ArgumentException("Onsite attestation operator is required.", nameof(confirmedBy));
-        }
-
-        if (expiresAtUtc <= confirmedAtUtc)
-        {
-            throw new ArgumentException("Onsite attestation expiration must be later than confirmation time.", nameof(expiresAtUtc));
-        }
-
-        if (expiresAtUtc - confirmedAtUtc > MaxOnsiteAttestationLifetime)
-        {
-            throw new ArgumentOutOfRangeException(nameof(expiresAtUtc), "Onsite attestation expiration cannot exceed 30 minutes.");
-        }
-
-        OnsiteConfirmedAt = confirmedAtUtc;
-        OnsiteConfirmedBy = confirmedBy.Trim();
-        OnsiteConfirmationExpiresAt = expiresAtUtc;
-        AddDomainEvent(new OnsiteAttestationSetEvent(Id.Value, OnsiteConfirmedBy, confirmedAtUtc, expiresAtUtc));
-    }
-
-    public void ClearOnsiteAttestation()
-    {
-        OnsiteConfirmedAt = null;
-        OnsiteConfirmedBy = null;
-        OnsiteConfirmationExpiresAt = null;
-    }
-
     public void EnsureMessageCountAtLeast(int messageCount)
     {
         if (messageCount > MessageCount)
         {
             MessageCount = messageCount;
         }
-    }
-
-    public bool HasValidOnsiteAttestation(DateTimeOffset nowUtc)
-    {
-        return OnsiteConfirmedAt.HasValue
-               && !string.IsNullOrWhiteSpace(OnsiteConfirmedBy)
-               && OnsiteConfirmationExpiresAt.HasValue
-               && OnsiteConfirmationExpiresAt.Value > nowUtc;
     }
 
     private bool IsAutoTitleCandidate()

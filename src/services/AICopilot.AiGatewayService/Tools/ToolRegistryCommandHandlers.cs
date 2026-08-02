@@ -1,4 +1,3 @@
-using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.AgentPlugin;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.Contracts;
@@ -19,13 +18,6 @@ public sealed class UpdateToolRegistrationCommandHandler(
         UpdateToolRegistrationCommand request,
         CancellationToken cancellationToken)
     {
-        if (BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.Contains(
-                request.ToolCode,
-                StringComparer.OrdinalIgnoreCase))
-        {
-            return Result.Invalid("The requested tool code has been retired and cannot be registered or activated.");
-        }
-
         var tool = await repository.GetAsync(
             item => item.ToolCode == request.ToolCode,
             cancellationToken: cancellationToken);
@@ -87,11 +79,9 @@ public sealed class UpdateToolRegistrationCommandHandler(
             request.Category ?? tool.Category,
             request.BusinessDomains ?? tool.BusinessDomains,
             dataBoundary ?? tool.DataBoundary,
-            request.IsVisibleToPlanner ?? tool.IsVisibleToPlanner,
             request.IsExecutableByAgent ?? tool.IsExecutableByAgent,
             request.SchemaVersion ?? tool.SchemaVersion,
-            request.CatalogVersion ?? tool.CatalogVersion,
-            request.ApprovalPolicy ?? tool.ApprovalPolicy);
+            request.CatalogVersion ?? tool.CatalogVersion);
 
         repository.Update(tool);
         await auditLogWriter.WriteAsync(
@@ -120,13 +110,6 @@ public sealed class UpsertToolDefinitionCommandHandler(
         UpsertToolDefinitionCommand request,
         CancellationToken cancellationToken)
     {
-        if (BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.Contains(
-                request.ToolCode,
-                StringComparer.OrdinalIgnoreCase))
-        {
-            return Result.Invalid("The requested tool code has been retired and cannot be registered or activated.");
-        }
-
         if (!Enum.TryParse<ToolAuditLevel>(request.AuditLevel, ignoreCase: true, out var auditLevel))
         {
             return Result.Invalid("AuditLevel is invalid.");
@@ -183,11 +166,9 @@ public sealed class UpsertToolDefinitionCommandHandler(
                 request.Category,
                 request.BusinessDomains,
                 dataBoundary,
-                request.IsVisibleToPlanner,
                 request.IsExecutableByAgent,
                 request.SchemaVersion,
-                request.CatalogVersion,
-                request.ApprovalPolicy);
+                request.CatalogVersion);
             repository.Add(tool);
         }
         else
@@ -210,11 +191,9 @@ public sealed class UpsertToolDefinitionCommandHandler(
                 request.Category,
                 request.BusinessDomains,
                 dataBoundary,
-                request.IsVisibleToPlanner,
                 request.IsExecutableByAgent,
                 request.SchemaVersion,
-                request.CatalogVersion,
-                request.ApprovalPolicy);
+                request.CatalogVersion);
             repository.Update(tool);
         }
 
@@ -245,13 +224,6 @@ public sealed class ActivateToolDefinitionVersionCommandHandler(
         ActivateToolDefinitionVersionCommand request,
         CancellationToken cancellationToken)
     {
-        if (BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.Contains(
-                request.ToolCode,
-                StringComparer.OrdinalIgnoreCase))
-        {
-            return Result.Invalid("The requested tool code has been retired and cannot be registered or activated.");
-        }
-
         var tool = await repository.GetAsync(item => item.ToolCode == request.ToolCode, cancellationToken: cancellationToken);
         if (tool is null)
         {
@@ -297,11 +269,9 @@ public sealed class ActivateToolDefinitionVersionCommandHandler(
             tool.Category,
             tool.BusinessDomains,
             tool.DataBoundary,
-            tool.IsVisibleToPlanner,
             tool.IsExecutableByAgent,
             request.SchemaVersion ?? tool.SchemaVersion,
-            request.CatalogVersion ?? tool.CatalogVersion,
-            tool.ApprovalPolicy);
+            request.CatalogVersion ?? tool.CatalogVersion);
         repository.Update(tool);
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
@@ -333,7 +303,7 @@ internal static class ToolRegistrationInputContractPolicy
             return contract;
         }
 
-        var builtIn = BuiltInToolRegistrations.FindAgentRuntimeTool(toolCode);
+        var builtIn = BuiltInToolRegistrations.FindHarnessTool(toolCode);
         if (builtIn is null)
         {
             return contract;
@@ -364,7 +334,7 @@ internal static class ToolRegistrationOutputContractPolicy
             return contract;
         }
 
-        var builtIn = BuiltInToolRegistrations.FindAgentRuntimeTool(toolCode);
+        var builtIn = BuiltInToolRegistrations.FindHarnessTool(toolCode);
         if (builtIn is null)
         {
             return contract;
@@ -415,11 +385,9 @@ public sealed class DisableToolDefinitionCommandHandler(
             tool.Category,
             tool.BusinessDomains,
             tool.DataBoundary,
-            tool.IsVisibleToPlanner,
             false,
             tool.SchemaVersion,
-            tool.CatalogVersion,
-            tool.ApprovalPolicy);
+            tool.CatalogVersion);
         repository.Update(tool);
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(

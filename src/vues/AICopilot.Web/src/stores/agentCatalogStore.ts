@@ -20,10 +20,6 @@ export const useAgentCatalogStore = defineStore('agentCatalog', () => {
         (knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId.value,
       ) ?? null,
   )
-  const selectedKnowledgeBaseIdsForPlan = computed(() =>
-    selectedKnowledgeBaseId.value ? [selectedKnowledgeBaseId.value] : [],
-  )
-
   async function loadKnowledgeBases(reportError?: ErrorReporter) {
     try {
       availableKnowledgeBases.value = await chatService.getKnowledgeBases()
@@ -71,7 +67,6 @@ export const useAgentCatalogStore = defineStore('agentCatalog', () => {
     availableKnowledgeBases,
     selectedKnowledgeBaseId,
     selectedKnowledgeBase,
-    selectedKnowledgeBaseIdsForPlan,
     loadKnowledgeBases,
     selectKnowledgeBase,
     resetSelections,

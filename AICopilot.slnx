@@ -41,7 +41,7 @@
     <Project Path="src/shared/AICopilot.Visualization/AICopilot.Visualization.csproj" Id="1ca00ef7-e8d3-41ae-bb71-4915e45478ce" />
   </Folder>
   <Folder Name="/src/testing/">
-    <Project Path="src/testing/AICopilot.AgentWorkflowTestKit/AICopilot.AgentWorkflowTestKit.csproj" />
+    <Project Path="src/testing/AICopilot.HarnessTestKit/AICopilot.HarnessTestKit.csproj" />
     <Project Path="src/testing/AICopilot.FilesystemTestKit/AICopilot.FilesystemTestKit.csproj" />
     <Project Path="src/testing/AICopilot.AspireIntegrationTestKit/AICopilot.AspireIntegrationTestKit.csproj" />
     <Project Path="src/testing/AICopilot.PersistenceTestKit/AICopilot.PersistenceTestKit.csproj" />
@@ -63,10 +63,7 @@
     <Project Path="src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj" />
     <Project Path="src/tests/AICopilot.PersistenceTests/AICopilot.PersistenceTests.csproj" />
     <Project Path="src/tests/AICopilot.PersistenceFilesystemTests/AICopilot.PersistenceFilesystemTests.csproj" />
-    <Project Path="src/tests/AICopilot.SimulationDockerTests/AICopilot.SimulationDockerTests.csproj" />
-    <Project Path="src/tests/AICopilot.SimulationTests/AICopilot.SimulationTests.csproj" />
     <Project Path="src/tests/AICopilot.ToolPlugin.ConformanceTests/AICopilot.ToolPlugin.ConformanceTests.csproj" />
     <Project Path="src/tests/AICopilot.UnitTests/AICopilot.UnitTests.csproj" />
-    <Project Path="src/tests/AICopilot.WorkflowTests/AICopilot.WorkflowTests.csproj" />
   </Folder>
 </Solution>

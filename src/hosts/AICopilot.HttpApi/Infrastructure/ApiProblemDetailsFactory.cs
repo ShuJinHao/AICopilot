@@ -13,28 +13,15 @@ public static class ApiProblemDetailsFactory
         string? fallbackDetail = null,
         string? traceIdentifier = null)
     {
-        var planFailure = AgentPlanPublicFailureDisclosurePolicy.Resolve(problem?.Code);
         var details = new ProblemDetails
         {
             Status = statusCode,
             Title = GetTitle(statusCode),
             Type = GetType(statusCode),
-            Detail = planFailure?.Detail ?? problem?.Detail ?? fallbackDetail
+            Detail = problem?.Detail ?? fallbackDetail
         };
 
-        if (planFailure is not null)
-        {
-            details.Extensions[ApiProblemExtensionKeys.UserFacingMessage] =
-                planFailure.UserFacingMessage;
-            if (problem?.Extensions is not null &&
-                problem.Extensions.TryGetValue("taskId", out var taskId) &&
-                taskId is Guid taskGuid &&
-                taskGuid != Guid.Empty)
-            {
-                details.Extensions["taskId"] = taskGuid;
-            }
-        }
-        else if (problem?.Extensions is not null)
+        if (problem?.Extensions is not null)
         {
             foreach (var (key, value) in problem.Extensions)
             {

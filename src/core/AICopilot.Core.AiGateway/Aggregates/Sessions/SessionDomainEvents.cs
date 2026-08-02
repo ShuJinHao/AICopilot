@@ -5,9 +5,3 @@ public sealed record MessageAddedToSessionEvent(
     string Content,
     MessageType Type,
     DateTime CreatedAtUtc);
-
-public sealed record OnsiteAttestationSetEvent(
-    Guid SessionId,
-    string ConfirmedBy,
-    DateTimeOffset ConfirmedAtUtc,
-    DateTimeOffset ExpiresAtUtc);

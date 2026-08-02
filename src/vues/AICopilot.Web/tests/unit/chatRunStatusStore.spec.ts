@@ -96,7 +96,7 @@ describe('chatRunStatusStore', () => {
     store.startRun('session-1', 'message-1')
 
     store.advanceFromChunk('session-1', 'message-1', {
-      source: 'FinalAgentRunExecutor',
+      source: 'HarnessAgent',
       type: ChunkType.Text,
       content: '分析结论'
     })
