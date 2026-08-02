@@ -59,7 +59,9 @@ Widget 是后端结构化展示契约，不是任意 ECharts 配置。前端只�
 ## 5. Harness Plan / Execute Discipline
 
 - Plan / Execute 模式是持久化 AgentSession 状态，切换必须提交 `expectedVersion`，冲突后重读 Session。
-- Plan 模式不得暴露任何可执行工具；Execute 模式的工具面仍必须经 Tool Gate、权限、schema 和批准绑定。
+- Plan / Execute 是 MAF 行为模式，不是前端权限或安全边界；两种模式使用同一份服务端受治理工具目录，前端不得按模式推断、隐藏或放大工具权限。
+- 模型可通过官方 `mode_set` 切换模式；前端必须以持久化后的 `agent_session_state` mode/version 为权威，现有带 `expectedVersion` 的用户切换 API 是并列入口。
+- 两种模式下的工具面都必须经 Tool Gate、身份、权限、schema 和批准绑定；模式切换不得扩大 Cloud/MES/ERP 写权限。
 - 主聊天一轮只支持一个待批工具调用；前端不得尝试排队、部分保留或自动批准多个调用。
 
 ## Pre-change Checklist

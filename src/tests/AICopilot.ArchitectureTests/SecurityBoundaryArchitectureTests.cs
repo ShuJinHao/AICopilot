@@ -154,6 +154,24 @@ public sealed class SecurityBoundaryArchitectureTests
             .Should().BeFalse("Text-to-SQL is an internal BusinessQuery fallback, not a model-visible tool");
     }
 
+    [Fact]
+    public void MainChatToolCatalog_ShouldRemainIndependentOfAgentMode()
+    {
+        var buildParameters = typeof(MainChatToolCatalog)
+            .GetMethod(nameof(MainChatToolCatalog.BuildAsync))!
+            .GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+        var gateParameters = typeof(MainChatToolGate)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .SelectMany(method => method.GetParameters())
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+
+        buildParameters.Should().NotContain(typeof(RuntimeAgentMode));
+        gateParameters.Should().NotContain(typeof(RuntimeAgentMode));
+    }
+
     [Theory]
     [InlineData(typeof(GetProviderReliabilityQuery), "AiGateway.GetProviderReliability")]
     [InlineData(typeof(SearchKnowledgeBaseQuery), "Rag.SearchKnowledgeBase")]

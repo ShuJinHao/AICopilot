@@ -8,8 +8,7 @@ namespace AICopilot.AiRuntime;
 
 internal sealed class HarnessRuntimeChatAgent(
     HarnessAgent agent,
-    AgentModeProvider modeProvider,
-    HarnessToolSurfacePolicy toolSurfacePolicy)
+    AgentModeProvider modeProvider)
     : IHarnessRuntimeChatAgent
 {
     private readonly MicrosoftAgentRuntimeChatAgent inner = new(agent);
@@ -40,33 +39,26 @@ internal sealed class HarnessRuntimeChatAgent(
         return ParseMode(mode);
     }
 
-    public async Task SetModeAsync(
+    public Task SetModeAsync(
         IRuntimeAgentSession session,
         RuntimeAgentMode mode,
-        CancellationToken cancellationToken = default)
-    {
-        await modeProvider.SetModeAsync(
+        CancellationToken cancellationToken = default) =>
+        modeProvider.SetModeAsync(
             MicrosoftAgentRuntimeChatAgent.UnwrapSession(session),
             FormatMode(mode),
             cancellationToken);
-        toolSurfacePolicy.SetMode(mode);
-    }
 
-    public async Task<StructuredAgentResponse<T>> RunStructuredAsync<T>(
+    public Task<StructuredAgentResponse<T>> RunStructuredAsync<T>(
         IEnumerable<AiChatMessage> messages,
         IRuntimeAgentSession? session,
         JsonSerializerOptions serializerOptions,
         RuntimeAgentRunOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        if (session is not null)
-        {
-            await SynchronizeToolSurfaceAsync(session, cancellationToken);
-        }
-
-        RejectAlwaysApprove(messages);
-        return await inner.RunStructuredAsync<T>(
-            messages,
+        var materialized = messages.ToArray();
+        RejectAlwaysApprove(materialized);
+        return inner.RunStructuredAsync<T>(
+            materialized,
             session,
             serializerOptions,
             options,
@@ -81,7 +73,6 @@ internal sealed class HarnessRuntimeChatAgent(
     {
         var materialized = messages.ToArray();
         RejectAlwaysApprove(materialized);
-        await SynchronizeToolSurfaceAsync(session, cancellationToken);
         await foreach (var update in inner.RunStreamingAsync(
                            materialized,
                            session,
@@ -102,13 +93,6 @@ internal sealed class HarnessRuntimeChatAgent(
             session,
             options,
             cancellationToken);
-
-    private async Task SynchronizeToolSurfaceAsync(
-        IRuntimeAgentSession session,
-        CancellationToken cancellationToken)
-    {
-        toolSurfacePolicy.SetMode(await GetModeAsync(session, cancellationToken));
-    }
 
     private static void RejectAlwaysApprove(IEnumerable<AiChatMessage> messages)
     {

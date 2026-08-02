@@ -174,6 +174,7 @@ Cloud AiRead 设备契约：
 
 - `Plan` 与 `Execute` 完全由官方 `AgentModeProvider` 持有并持久化在同一 `AgentSession`；新会话使用框架默认 `Plan`。模式是行为状态，不是安全隔离或授权边界，模式与授权正交。
 - `Plan` 用于交互式澄清、调查、调用受治理工具和形成 Todo；`Execute` 用于自主、连续地完成 Todo。两种模式看到的工具都必须先经过当前用户、Session、权限、注册、安全元数据和批准边界实时筛选，切换模式不得扩大或缩小用户权限、工具注册、数据边界或批准策略。
+- 两种模式使用同一份 `MainChatToolCatalog`；模式不是工具目录的筛选输入。provider 前的 `ToolInvocationGuardChatClient` 只校验本次有效 `ChatOptions.Tools`，不得删除、重排或按模式过滤官方与应用工具。
 - 模型保留官方 `mode_get` / `mode_set`。当前认证 owner 也可显式调用带 `expectedVersion` 的会话 API，并由该 API 调用官方 `SetModeAsync`；公开 API 是并列切换入口，不是唯一切换入口。
 - 空态文案和建议必须使用当前行为模式：`Plan` 建议澄清、调查和形成待办，`Execute` 建议连续完成待办；建议操作不得伪造权限变化或替用户隐式切换模式。
 - Harness 裁剪只允许使用官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。

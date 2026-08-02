@@ -122,6 +122,44 @@ public sealed class LegacyRetirementArchitectureTests
     }
 
     [Fact]
+    public void MainHarnessRuntime_ShouldRemainNativeMafAndModeIndependent()
+    {
+        var runtimeRoot = Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.AiRuntime");
+        var runtimeSource = string.Join(
+            '\n',
+            Directory.EnumerateFiles(runtimeRoot, "*.cs", SearchOption.AllDirectories)
+                .Where(path => !Path.GetRelativePath(runtimeRoot, path)
+                    .Split(Path.DirectorySeparatorChar)
+                    .Any(segment => segment is "bin" or "obj"))
+                .Select(File.ReadAllText));
+        var factorySource = File.ReadAllText(Path.Combine(
+            runtimeRoot,
+            "HarnessAgentRuntimeFactory.cs"));
+        var guardSource = File.ReadAllText(Path.Combine(
+            runtimeRoot,
+            "ToolInvocationGuardChatClient.cs"));
+        var runtimeAgentSource = File.ReadAllText(Path.Combine(
+            runtimeRoot,
+            "HarnessRuntimeChatAgent.cs"));
+
+        runtimeSource.Should().NotContain("HarnessToolSurfacePolicy");
+        runtimeSource.Should().NotContain("ToolSurfaceGuardChatClient");
+        runtimeSource.Should().NotContain("Never call mode_set");
+        factorySource.Should().Contain("AgentModeProviderOptions = null");
+        factorySource.Should().Contain("new ToolInvocationGuardChatClient(modelClient)");
+        guardSource.Should().NotContain("RuntimeAgentMode");
+        guardSource.Should().NotContain("mode_set");
+        guardSource.Should().NotContain(".Tools =");
+        guardSource.Should().Contain("ResolveAllowedToolNames(guardedOptions)");
+        runtimeAgentSource.Should().NotContain("SynchronizeToolSurface");
+        runtimeAgentSource.Should().NotContain("toolSurfacePolicy");
+    }
+
+    [Fact]
     public void AiGatewayDbContext_ShouldPersistOnlyHarnessRuntimeAndCurrentCatalogs()
     {
         var actualDbSets = typeof(AiGatewayDbContext)

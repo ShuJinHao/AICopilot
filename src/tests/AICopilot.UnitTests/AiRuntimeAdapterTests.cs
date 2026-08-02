@@ -69,6 +69,20 @@ public sealed class AiRuntimeAdapterTests
         options.ToolApprovalAgentOptions.Should().BeNull();
         options.ChatOptions.Should().NotBeNull();
         options.ChatOptions!.AllowMultipleToolCalls.Should().BeFalse();
+        options.AgentModeProviderOptions.Should().BeNull();
+        options.DisableFileMemory.Should().BeTrue();
+#pragma warning disable MAAI001
+        options.FileMemoryStore.Should().BeNull();
+        options.FileAccessStore.Should().BeNull();
+#pragma warning restore MAAI001
+        options.DisableWebSearch.Should().BeTrue();
+        options.DisableAgentSkillsProvider.Should().BeTrue();
+        options.AgentSkillsSource.Should().BeNull();
+#pragma warning disable MAAI001
+        options.BackgroundAgents.Should().BeEmpty();
+        options.LoopEvaluators.Should().BeEmpty();
+        options.DisableCompaction.Should().BeTrue();
+#pragma warning restore MAAI001
     }
 
     [Fact]
@@ -103,11 +117,10 @@ public sealed class AiRuntimeAdapterTests
     }
 
     [Fact]
-    public async Task ToolSurfaceGuard_ShouldExposeOnlyHarnessPlanningToolsInPlanMode()
+    public async Task ToolInvocationGuard_ShouldPreserveEffectiveToolSetAndOrder()
     {
         var inner = new CapturingChatClient();
-        var policy = new HarnessToolSurfacePolicy(["BusinessQuery", "KnowledgeQuery"]);
-        var guarded = new ToolSurfaceGuardChatClient(inner, policy);
+        var guarded = new ToolInvocationGuardChatClient(inner);
         var options = RuntimeToolAdapter.ToChatOptions(new AiChatOptions
         {
             Tools =
@@ -116,66 +129,53 @@ public sealed class AiRuntimeAdapterTests
                 CreateTool("KnowledgeQuery"),
                 CreateTool("mode_get"),
                 CreateTool("mode_set"),
-                CreateTool("todos_add")
+                CreateTool("todos_add"),
+                CreateTool("ApplicationDiagnostic")
             ]
         });
 
         _ = await guarded.GetResponseAsync(
-            [new ChatMessage(ChatRole.User, "plan")],
+            [new ChatMessage(ChatRole.User, "invoke")],
             options);
 
-        inner.LastToolNames.Should().BeEquivalentTo(["mode_get", "todos_add"]);
-    }
-
-    [Fact]
-    public async Task ToolSurfaceGuard_ShouldExposeAuthorizedBusinessToolsOnlyInExecuteMode()
-    {
-        var inner = new CapturingChatClient();
-        var policy = new HarnessToolSurfacePolicy(
-            ["BusinessQuery", "KnowledgeQuery", "shell_execute"]);
-        policy.SetMode(RuntimeAgentMode.Execute);
-        var guarded = new ToolSurfaceGuardChatClient(inner, policy);
-        var options = RuntimeToolAdapter.ToChatOptions(new AiChatOptions
-        {
-            Tools =
-            [
-                CreateTool("BusinessQuery"),
-                CreateTool("KnowledgeQuery"),
-                CreateTool("mode_get"),
-                CreateTool("mode_set"),
-                CreateTool("shell_execute")
-            ]
-        });
-
-        _ = await guarded.GetResponseAsync(
-            [new ChatMessage(ChatRole.User, "execute")],
-            options);
-
-        inner.LastToolNames.Should().BeEquivalentTo(
-            ["BusinessQuery", "KnowledgeQuery", "mode_get"]);
+        inner.LastToolNames.Should().Equal(
+            "BusinessQuery",
+            "KnowledgeQuery",
+            "mode_get",
+            "mode_set",
+            "todos_add",
+            "ApplicationDiagnostic");
+        inner.LastTools.Should().Equal(options.Tools!);
         inner.LastAllowMultipleToolCalls.Should().BeFalse();
     }
 
     [Fact]
-    public async Task ToolSurfaceGuard_ShouldFailClosedForForgedModeSetCall()
+    public async Task ToolInvocationGuard_ShouldFailClosedForUnexposedToolCall()
     {
         var inner = new CapturingChatClient(
             new FunctionCallContent(
                 "call-1",
-                "mode_set",
-                new Dictionary<string, object?> { ["mode"] = "execute" }));
-        var guarded = new ToolSurfaceGuardChatClient(
-            inner,
-            new HarnessToolSurfacePolicy(["BusinessQuery"]));
+                "ForgedTool",
+                new Dictionary<string, object?>()));
+        var guarded = new ToolInvocationGuardChatClient(inner);
+        var options = RuntimeToolAdapter.ToChatOptions(new AiChatOptions
+        {
+            Tools = [CreateTool("BusinessQuery")]
+        });
 
         var act = () => guarded.GetResponseAsync(
-            [new ChatMessage(ChatRole.User, "switch modes")]);
+            [new ChatMessage(ChatRole.User, "forge")],
+            options);
 
-        await act.Should().ThrowAsync<HarnessToolSurfaceViolationException>();
+        await act.Should().ThrowAsync<HarnessToolInvocationViolationException>();
     }
 
-    [Fact]
-    public async Task ToolSurfaceGuard_ShouldRejectMultipleToolCallsFromOneProviderResponse()
+    [Theory]
+    [InlineData("call-2", "BusinessQuery")]
+    [InlineData("call-1", "KnowledgeQuery")]
+    public async Task ToolInvocationGuard_ShouldRejectMultipleToolCallsFromOneProviderResponse(
+        string secondCallId,
+        string secondToolName)
     {
         var inner = new CapturingChatClient(
             new FunctionCallContent(
@@ -183,26 +183,27 @@ public sealed class AiRuntimeAdapterTests
                 "BusinessQuery",
                 new Dictionary<string, object?>()),
             new FunctionCallContent(
-                "call-2",
-                "BusinessQuery",
+                secondCallId,
+                secondToolName,
                 new Dictionary<string, object?>()));
-        var policy = new HarnessToolSurfacePolicy(["BusinessQuery"]);
-        policy.SetMode(RuntimeAgentMode.Execute);
-        var guarded = new ToolSurfaceGuardChatClient(inner, policy);
+        var guarded = new ToolInvocationGuardChatClient(inner);
+        var options = RuntimeToolAdapter.ToChatOptions(new AiChatOptions
+        {
+            Tools = [CreateTool("BusinessQuery"), CreateTool("KnowledgeQuery")]
+        });
 
         var act = () => guarded.GetResponseAsync(
-            [new ChatMessage(ChatRole.User, "return two calls")]);
+            [new ChatMessage(ChatRole.User, "return two calls")],
+            options);
 
         await act.Should().ThrowAsync<AgentRuntimeMultipleToolCallsException>();
     }
 
     [Fact]
-    public async Task ToolSurfaceGuard_ShouldRejectAlwaysApproveResponsesBeforeProviderDispatch()
+    public async Task ToolInvocationGuard_ShouldRejectAlwaysApproveResponsesBeforeProviderDispatch()
     {
         var inner = new CapturingChatClient();
-        var guarded = new ToolSurfaceGuardChatClient(
-            inner,
-            new HarnessToolSurfacePolicy(["BusinessQuery"]));
+        var guarded = new ToolInvocationGuardChatClient(inner);
         var approval = new ToolApprovalRequestContent(
             "approval-1",
             new FunctionCallContent(
@@ -237,15 +238,7 @@ public sealed class AiRuntimeAdapterTests
                 DisableWebSearch = true,
                 DisableTodoProvider = false,
                 DisableAgentModeProvider = false,
-                AgentModeProviderOptions = new AgentModeProviderOptions
-                {
-                    DefaultMode = "plan",
-                    Modes =
-                    [
-                        new AgentModeProviderOptions.AgentMode("plan", "Plan."),
-                        new AgentModeProviderOptions.AgentMode("execute", "Execute.")
-                    ]
-                },
+                AgentModeProviderOptions = null,
                 DisableAgentSkillsProvider = true,
                 BackgroundAgents = Array.Empty<AIAgent>(),
                 LoopEvaluators = Array.Empty<LoopEvaluator>(),
@@ -291,6 +284,8 @@ public sealed class AiRuntimeAdapterTests
     {
         public IReadOnlyList<string> LastToolNames { get; private set; } = [];
 
+        public IReadOnlyList<AITool> LastTools { get; private set; } = [];
+
         public int CallCount { get; private set; }
 
         public bool? LastAllowMultipleToolCalls { get; private set; }
@@ -306,6 +301,7 @@ public sealed class AiRuntimeAdapterTests
         {
             CallCount++;
             LastAllowMultipleToolCalls = options?.AllowMultipleToolCalls;
+            LastTools = options?.Tools?.ToArray() ?? [];
             LastToolNames = options?.Tools?
                 .Select(tool => tool is AIFunction function
                     ? function.Name

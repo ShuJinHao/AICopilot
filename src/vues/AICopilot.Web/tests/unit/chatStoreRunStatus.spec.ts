@@ -127,6 +127,42 @@ describe('chatStore current Harness lifecycle', () => {
     })
   })
 
+  it('applies a model mode change from the persisted AgentSession event', async () => {
+    activate(readySession({ agentMode: 'plan', agentSessionVersion: 3 }))
+    chatServiceMock.getSession.mockResolvedValue(
+      readySession({ agentMode: 'execute', agentSessionVersion: 4 }),
+    )
+    chatServiceMock.sendMessageStream.mockImplementation(
+      async (_sessionId, _message, callbacks) => {
+        callbacks.onChunkReceived({
+          source: 'HarnessAgent',
+          type: ChunkType.AgentEvent,
+          content: JSON.stringify({
+            stage: 'agent_session_state',
+            detail: 'Harness AgentSession state persisted.',
+            recoverable: true,
+            metadata: {},
+            sessionId: 'session-1',
+            mode: 'execute',
+            status: 'Ready',
+            version: 4,
+            pendingApproval: false,
+          }),
+        })
+        callbacks.onComplete()
+      },
+    )
+
+    const store = useChatStore()
+    expect(await store.sendMessage('切换后继续执行')).toBe(true)
+
+    expect(store.currentSession).toMatchObject({
+      agentMode: 'execute',
+      agentSessionVersion: 4,
+      agentSessionStatus: 'Ready',
+    })
+  })
+
   it('submits a protected decision without client-supplied tool identity', async () => {
     activate(readySession({ hasPendingApproval: true }))
     const chunk = addApprovalCard()

@@ -13,6 +13,7 @@ public sealed class ActiveContractFilesystemTests
         "docs/Agent工作流与异常契约.md",
         "docs/Cloud只读数据分析契约.md",
         "docs/DDD聚合根边界.md",
+        "src/vues/AICopilot.Web/AGENTS.md",
     ];
 
     [Fact]
@@ -126,10 +127,15 @@ public sealed class ActiveContractFilesystemTests
             "`Plan` 用于交互式澄清、调查、调用受治理工具和形成 Todo");
         businessRules.Should().Contain("模型保留官方 `mode_get` / `mode_set`");
         businessRules.Should().Contain("模式与授权正交");
+        businessRules.Should().Contain("两种模式使用同一份 `MainChatToolCatalog`");
+        businessRules.Should().Contain("模式不是工具目录的筛选输入");
         agentContract.Should().Contain(
             "`AgentModeProvider` 必须继续向模型提供 `mode_get` 与 `mode_set`");
         agentContract.Should().Contain("该公开 API 不是唯一切换入口");
         agentContract.Should().Contain("该业务安全边界不依赖 Plan / Execute");
+        agentContract.Should().Contain("`ToolInvocationGuardChatClient`");
+        agentContract.Should().Contain("不得删除、重排或按 Plan / Execute 过滤");
+        agentContract.Should().Contain("`agent_session_state` SSE");
         agentContract.Should().Contain(
             "官方 `HarnessAgentOptions`、`AgentModeProviderOptions`");
         agentContract.Should().Contain("禁止 fork MAF、反射私有成员或复制模式状态机");
@@ -142,15 +148,48 @@ public sealed class ActiveContractFilesystemTests
         persistenceContract.Should().Contain(
             "不是 Agent durable 编排、Tool checkpoint");
 
-        roadmap.Should().Contain("当前仍存在 `ToolSurfaceGuardChatClient`");
-        roadmap.Should().Contain("隐藏 `mode_set`、按模式过滤工具");
-        roadmap.Should().Contain("属于待退出兼容债");
-        roadmap.Should().Contain("MAF 原生模式尚未完成运行时对齐");
-        roadmap.Should().Contain("## 3. MAF 原生模式运行时退出门");
-        roadmap.Should().NotContain("MAF 原生模式已经收口");
+        roadmap.Should().Contain("MAF 原生模式运行时已对齐");
+        roadmap.Should().Contain("`ToolInvocationGuardChatClient`");
+        roadmap.Should().NotContain("ToolSurfaceGuardChatClient");
+        roadmap.Should().NotContain("HarnessToolSurfacePolicy");
+        roadmap.Should().NotContain("待退出兼容债");
+        roadmap.Should().NotContain("MAF 原生模式运行时退出门");
         roadmap.Should().Contain("源码已收口");
         roadmap.Should().Contain("生产状态继续保持“未验收”");
-        roadmap.Should().Contain("## 4. 候选验证退出门");
+        roadmap.Should().Contain("## 3. 候选验证退出门");
+    }
+
+    [Fact]
+    public void MainHarnessSource_ShouldKeepNativeMafModeRuntimeAlignment()
+    {
+        var root = FindRepositoryRoot();
+        var runtimeRoot = Path.Combine(
+            root,
+            "src",
+            "infrastructure",
+            "AICopilot.AiRuntime");
+        var factory = File.ReadAllText(Path.Combine(
+            runtimeRoot,
+            "HarnessAgentRuntimeFactory.cs"));
+        var runtimeAgent = File.ReadAllText(Path.Combine(
+            runtimeRoot,
+            "HarnessRuntimeChatAgent.cs"));
+        var invocationGuardPath = Path.Combine(
+            runtimeRoot,
+            "ToolInvocationGuardChatClient.cs");
+        var invocationGuard = File.ReadAllText(invocationGuardPath);
+
+        File.Exists(Path.Combine(runtimeRoot, "ToolSurfaceGuardChatClient.cs"))
+            .Should().BeFalse();
+        factory.Should().Contain("AgentModeProviderOptions = null");
+        factory.Should().Contain("new ToolInvocationGuardChatClient(modelClient)");
+        factory.Should().NotContain("Never call mode_set");
+        runtimeAgent.Should().NotContain("HarnessToolSurfacePolicy");
+        runtimeAgent.Should().NotContain("SynchronizeToolSurface");
+        invocationGuard.Should().NotContain("RuntimeAgentMode");
+        invocationGuard.Should().NotContain("mode_set");
+        invocationGuard.Should().NotContain(".Tools =");
+        invocationGuard.Should().Contain("ResolveAllowedToolNames(guardedOptions)");
     }
 
     [Fact]
@@ -170,6 +209,10 @@ public sealed class ActiveContractFilesystemTests
         var compactChatService = new string(chatService
             .Where(character => !char.IsWhiteSpace(character))
             .ToArray());
+        var chatPresentation = File.ReadAllText(Path.Combine(
+            frontendSourceRoot,
+            "protocol",
+            "chatPresentation.ts"));
 
         compactChatService.Should().Contain(
             "sendEventStream('/aigateway/chat',{sessionId,message},callbacks)");
@@ -177,6 +220,10 @@ public sealed class ActiveContractFilesystemTests
             "sendEventStream('/aigateway/approval/decision',{sessionId,callId,decision},callbacks");
         compactChatService.Should().Contain(
             "`/aigateway/session/${encodeURIComponent(sessionId)}/agent-mode`,{mode,expectedVersion}");
+        chatPresentation.Should().Contain("交互式澄清、调查并形成待办");
+        chatPresentation.Should().Contain("自主连续完成待办");
+        chatPresentation.Should().NotContain("不查询外部数据");
+        chatPresentation.Should().NotContain("只规划和整理待办");
 
         var frontendSource = string.Join(
             '\n',

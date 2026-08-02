@@ -7,16 +7,18 @@ import {
 } from '@/protocol/chatPresentation'
 
 describe('chat presentation contract', () => {
-  it('keeps the new-session Plan empty state planning-only', () => {
+  it('presents Plan and Execute as native MAF behavior modes', () => {
     const plan = getChatModePresentation(null)
     const execute = getChatModePresentation('execute')
 
     expect(plan.mode).toBe('plan')
-    expect(plan.description).toBe('只规划和整理待办，不查询外部数据。')
-    expect(plan.suggestions.join(' ')).not.toContain('查看 DEV-001')
-    expect(plan.suggestions).toContain('为 DEV-001 设备日志异常排查整理分析步骤，不执行查询')
+    expect(plan.description).toContain('交互式澄清、调查并形成待办')
+    expect(plan.description).toContain('受治理工具')
+    expect(plan.description).not.toContain('不查询外部数据')
+    expect(plan.suggestions).toContain('调查 DEV-001 设备日志异常，先确认范围并整理排查待办')
 
-    expect(execute.description).toBe('可直接回答，并按权限调用只读工具。')
+    expect(execute.description).toContain('自主连续完成待办')
+    expect(execute.description).toContain('受治理工具')
     expect(execute.suggestions.join(' ')).toContain('查看 DEV-001')
 
     expect(getChatModePresentation('plan').mode).toBe('plan')
