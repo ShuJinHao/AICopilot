@@ -29,10 +29,12 @@ public sealed class ModelQuotaReservationPersistenceTests(PostgresPersistenceFix
                     PostgresPersistenceTestOptions.CreateMarker(database.ConnectionString)),
                 new PersistenceCommitScope()));
         var request = CreateRequest();
+        (request.RequestedAtUtc.Ticks % TimeSpan.TicksPerMicrosecond).Should().NotBe(0);
 
         var reserved = await store.TryReserveAsync(request);
         reserved.Result.Should().Be(ModelQuotaReservationResult.Granted);
         reserved.Lease.Should().NotBeNull();
+        (reserved.Lease!.ExpiresAtUtc.Ticks % TimeSpan.TicksPerMicrosecond).Should().Be(0);
 
         var duplicate = await store.TryReserveAsync(request);
         duplicate.Result.Should().Be(ModelQuotaReservationResult.Duplicate);
@@ -59,6 +61,12 @@ public sealed class ModelQuotaReservationPersistenceTests(PostgresPersistenceFix
 
     private static ModelQuotaReservationRequest CreateRequest()
     {
+        var requestedAtUtc = DateTimeOffset.UtcNow;
+        if (requestedAtUtc.Ticks % TimeSpan.TicksPerMicrosecond == 0)
+        {
+            requestedAtUtc = requestedAtUtc.AddTicks(1);
+        }
+
         return new ModelQuotaReservationRequest(
             TenantKeyHash: $"tenant-{Guid.NewGuid():N}",
             UserId: Guid.NewGuid(),
@@ -85,7 +93,7 @@ public sealed class ModelQuotaReservationPersistenceTests(PostgresPersistenceFix
             TenantTpmLimit: 100_000,
             TenantConcurrencyLimit: 10,
             CorrelationHash: $"correlation-{Guid.NewGuid():N}",
-            RequestedAtUtc: DateTimeOffset.UtcNow,
+            RequestedAtUtc: requestedAtUtc,
             ReservationLease: TimeSpan.FromMinutes(1));
     }
 
