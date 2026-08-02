@@ -178,6 +178,14 @@ public sealed class ActiveContractFilesystemTests
             runtimeRoot,
             "ToolInvocationGuardChatClient.cs");
         var invocationGuard = File.ReadAllText(invocationGuardPath);
+        var builtInPrompts = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "core",
+            "AICopilot.Core.AiGateway",
+            "Aggregates",
+            "ConversationTemplate",
+            "BuiltInConversationTemplates.cs"));
 
         File.Exists(Path.Combine(runtimeRoot, "ToolSurfaceGuardChatClient.cs"))
             .Should().BeFalse();
@@ -190,6 +198,11 @@ public sealed class ActiveContractFilesystemTests
         invocationGuard.Should().NotContain("mode_set");
         invocationGuard.Should().NotContain(".Tools =");
         invocationGuard.Should().Contain("ResolveAllowedToolNames(guardedOptions)");
+        builtInPrompts.Should().Contain("MAF 原生行为模式");
+        builtInPrompts.Should().Contain("模型可使用官方 mode_get / mode_set");
+        builtInPrompts.Should().Contain("模式与授权正交");
+        builtInPrompts.Should().NotContain("Plan 只做规划，不执行外部或业务工具");
+        builtInPrompts.Should().NotContain("Never call mode_set");
     }
 
     [Fact]
