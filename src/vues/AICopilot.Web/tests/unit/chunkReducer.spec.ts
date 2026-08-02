@@ -9,7 +9,7 @@ function createMessage(): ChatMessage {
     role: MessageRole.Assistant,
     chunks: [],
     isStreaming: true,
-    timestamp: 1
+    timestamp: 1,
   }
 }
 
@@ -18,21 +18,76 @@ describe('chunkReducer', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
-    processChunk(message, { source: 'assistant', type: ChunkType.Text, content: 'hello' }, callbacks)
-    processChunk(message, { source: 'assistant', type: ChunkType.Text, content: ' world' }, callbacks)
+    processChunk(
+      message,
+      { source: 'assistant', type: ChunkType.Text, content: 'hello' },
+      callbacks,
+    )
+    processChunk(
+      message,
+      { source: 'assistant', type: ChunkType.Text, content: ' world' },
+      callbacks,
+    )
 
     expect(message.chunks).toHaveLength(1)
     expect(message.chunks[0]?.content).toBe('hello world')
+  })
+
+  it('keeps model-authored widget JSON as ordinary text', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn(),
+    }
+    const content = JSON.stringify({ type: 'Chart', data: [{ secret: 'model-authored' }] })
+
+    processChunk(
+      message,
+      { source: 'assistant', type: ChunkType.Text, content },
+      callbacks,
+    )
+
+    expect(message.chunks).toContainEqual(
+      expect.objectContaining({ type: ChunkType.Text, content }),
+    )
+    expect(message.chunks).not.toContainEqual(
+      expect.objectContaining({ type: ChunkType.Widget }),
+    )
+  })
+
+  it('renders only an explicit server widget chunk as a widget', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn(),
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'BusinessQuery',
+        type: ChunkType.Widget,
+        content: JSON.stringify({ type: 'Chart', data: [{ label: '设备 A', value: 3 }] }),
+      },
+      callbacks,
+    )
+
+    expect(message.chunks).toContainEqual(
+      expect.objectContaining({
+        type: ChunkType.Widget,
+        widget: expect.objectContaining({ type: 'Chart' }),
+      }),
+    )
   })
 
   it('matches function results back to the original function call', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -40,18 +95,23 @@ describe('chunkReducer', () => {
       {
         source: 'tool',
         type: ChunkType.FunctionCall,
-        content: JSON.stringify({ id: 'call-1', name: 'queryDeviceLogs', args: '{}' })
+        content: JSON.stringify({ id: 'call-1', name: 'queryDeviceLogs', args: '{}' }),
       },
-      callbacks
+      callbacks,
     )
     processChunk(
       message,
       {
         source: 'tool',
         type: ChunkType.FunctionResult,
-        content: JSON.stringify({ id: 'call-1', name: 'queryDeviceLogs', args: '{}', result: '[1]' })
+        content: JSON.stringify({
+          id: 'call-1',
+          name: 'queryDeviceLogs',
+          args: '{}',
+          result: '[1]',
+        }),
       },
-      callbacks
+      callbacks,
     )
 
     const callChunk = message.chunks[0] as FunctionCallChunk
@@ -63,7 +123,7 @@ describe('chunkReducer', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -77,10 +137,10 @@ describe('chunkReducer', () => {
           routingModelId: 'model-routing',
           routingModelName: 'deepseek-v4-flash',
           contextWindowTokens: 1000000,
-          maxOutputTokens: 4096
-        })
+          maxOutputTokens: 4096,
+        }),
       },
-      callbacks
+      callbacks,
     )
 
     expect(message.chunks).toHaveLength(0)
@@ -92,11 +152,49 @@ describe('chunkReducer', () => {
     expect(message.maxOutputTokens).toBe(4096)
   })
 
+  it('projects authoritative Harness AgentSession events', () => {
+    const message = createMessage()
+    const callbacks = {
+      setSessionError: vi.fn(),
+      onApprovalChunk: vi.fn(),
+      onAgentSessionState: vi.fn(),
+    }
+
+    processChunk(
+      message,
+      {
+        source: 'HarnessAgent',
+        type: ChunkType.AgentEvent,
+        content: JSON.stringify({
+          stage: 'agent_session_state',
+          detail: 'persisted',
+          recoverable: true,
+          metadata: {},
+          sessionId: 'session-1',
+          mode: 'execute',
+          status: 'Ready',
+          version: 4,
+          pendingApproval: false,
+        }),
+      },
+      callbacks,
+    )
+
+    expect(callbacks.onAgentSessionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        mode: 'execute',
+        status: 'Ready',
+        version: 4,
+      }),
+    )
+  })
+
   it('adds approval requests as pending chunks and notifies approval state', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -111,10 +209,10 @@ describe('chunkReducer', () => {
           targetName: 'cloud-read',
           toolName: 'queryDeviceLogs',
           args: {},
-          requiresOnsiteAttestation: false
-        })
+          requiresOnsiteAttestation: false,
+        }),
       },
-      callbacks
+      callbacks,
     )
 
     const approvalChunk = message.chunks[0] as ApprovalChunk
@@ -128,7 +226,7 @@ describe('chunkReducer', () => {
     const callbacks = {
       setSessionError: vi.fn(),
       onApprovalChunk: vi.fn(),
-      onAgentTaskChunk: vi.fn()
+      onAgentTaskChunk: vi.fn(),
     }
 
     processChunk(
@@ -153,16 +251,16 @@ describe('chunkReducer', () => {
           canSubmitFinalReview: false,
           canApproveFinal: false,
           isRunInProgress: false,
-          isRunQueued: false
-        })
+          isRunQueued: false,
+        }),
       },
-      callbacks
+      callbacks,
     )
 
     expect(message.chunks).toHaveLength(0)
     expect(callbacks.onAgentTaskChunk).toHaveBeenCalledWith(
       'session-1',
-      expect.objectContaining({ id: 'task-1', status: 'Draft' })
+      expect.objectContaining({ id: 'task-1', status: 'Draft' }),
     )
   })
 
@@ -171,7 +269,7 @@ describe('chunkReducer', () => {
     const callbacks = {
       setSessionError: vi.fn(),
       onApprovalChunk: vi.fn(),
-      onAgentTaskChunk: vi.fn()
+      onAgentTaskChunk: vi.fn(),
     }
     const digest = 'b'.repeat(64)
     const prefix = `{"schemaVersion":"2.0","planDigest":"${digest}","topologyProfile":"LinearV1","planKind":"PlanDraft","isExecutable":false,"padding":"`
@@ -205,10 +303,10 @@ describe('chunkReducer', () => {
           planDigest: digest,
           topologyProfile: 'LinearV1',
           isPlanExecutable: false,
-          planIntegrityStatus: 'ValidV2'
-        })
+          planIntegrityStatus: 'ValidV2',
+        }),
       },
-      callbacks
+      callbacks,
     )
 
     expect(new TextEncoder().encode(planJson)).toHaveLength(262_144)
@@ -218,8 +316,8 @@ describe('chunkReducer', () => {
         id: 'task-boundary',
         planJson,
         planDigest: digest,
-        planIntegrityStatus: 'ValidV2'
-      })
+        planIntegrityStatus: 'ValidV2',
+      }),
     )
   })
 
@@ -227,7 +325,7 @@ describe('chunkReducer', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -240,10 +338,10 @@ describe('chunkReducer', () => {
           detail: 'Discovering capabilities without execution.',
           recoverable: true,
           suggestedAction: null,
-          metadata: { executesCloudQuery: 'false' }
-        })
+          metadata: { executesCloudQuery: 'false' },
+        }),
       },
-      callbacks
+      callbacks,
     )
 
     expect(message.chunks).toHaveLength(1)
@@ -251,8 +349,8 @@ describe('chunkReducer', () => {
     expect(message.chunks[0]).toMatchObject({
       event: {
         stage: 'capability_discovery',
-        metadata: { executesCloudQuery: 'false' }
-      }
+        metadata: { executesCloudQuery: 'false' },
+      },
     })
   })
 
@@ -260,7 +358,7 @@ describe('chunkReducer', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -274,15 +372,15 @@ describe('chunkReducer', () => {
           detail: 'Planner model is not configured.',
           recoverable: true,
           suggestedAction: '请先配置模型。',
-          metadata: {}
-        })
+          metadata: {},
+        }),
       },
-      callbacks
+      callbacks,
     )
 
     expect(callbacks.setSessionError).toHaveBeenCalledWith(
       'session-1',
-      '计划生成模型暂时不可用，请稍后重试或联系管理员检查模型配置。'
+      '计划生成模型暂时不可用，请稍后重试或联系管理员检查模型配置。',
     )
   })
 
@@ -290,7 +388,7 @@ describe('chunkReducer', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -304,15 +402,15 @@ describe('chunkReducer', () => {
           detail: 'Provider endpoint /internal/model failed.',
           recoverable: true,
           suggestedAction: '检查内部 endpoint。',
-          metadata: {}
-        })
+          metadata: {},
+        }),
       },
-      callbacks
+      callbacks,
     )
 
     expect(callbacks.setSessionError).toHaveBeenCalledWith(
       'session-1',
-      '计划草案生成失败，请调整目标后重试。'
+      '计划草案生成失败，请调整目标后重试。',
     )
   })
 
@@ -320,7 +418,7 @@ describe('chunkReducer', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -328,18 +426,18 @@ describe('chunkReducer', () => {
       {
         source: 'assistant',
         type: ChunkType.Text,
-        content: '<mm:think>内部推理</mm:think>最终回答'
+        content: '<mm:think>内部推理</mm:think>最终回答',
       },
-      callbacks
+      callbacks,
     )
     processChunk(
       message,
       {
         source: 'assistant',
         type: ChunkType.Text,
-        content: '\nmm:think用户说了半句\n继续回答'
+        content: '\nmm:think用户说了半句\n继续回答',
       },
-      callbacks
+      callbacks,
     )
 
     expect(message.chunks).toHaveLength(1)
@@ -351,7 +449,7 @@ describe('chunkReducer', () => {
     const callbacks = {
       setSessionError: vi.fn(),
       onApprovalChunk: vi.fn(),
-      onAgentTaskChunk: vi.fn()
+      onAgentTaskChunk: vi.fn(),
     }
 
     processChunk(
@@ -359,9 +457,9 @@ describe('chunkReducer', () => {
       {
         source: 'PlanAgentTaskStreamHandler',
         type: ChunkType.AgentTask,
-        content: 'not-json'
+        content: 'not-json',
       },
-      callbacks
+      callbacks,
     )
 
     expect(callbacks.onAgentTaskChunk).not.toHaveBeenCalled()
@@ -373,17 +471,19 @@ describe('chunkReducer', () => {
       getErrorCode({
         source: 'executor',
         type: ChunkType.Error,
-        content: JSON.stringify({ code: 'approval_pending' })
-      })
+        content: JSON.stringify({ code: 'approval_pending' }),
+      }),
     ).toBe('approval_pending')
-    expect(getErrorCode({ source: 'executor', type: ChunkType.Error, content: 'not-json' })).toBeNull()
+    expect(
+      getErrorCode({ source: 'executor', type: ChunkType.Error, content: 'not-json' }),
+    ).toBeNull()
   })
 
   it('shows backend user-facing message from error chunks', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -394,24 +494,29 @@ describe('chunkReducer', () => {
         content: JSON.stringify({
           code: 'model_request_timeout',
           detail: 'Model provider did not return in time.',
-          userFacingMessage: '模型这次响应超时，请稍后重试。'
-        })
+          userFacingMessage: '模型这次响应超时，请稍后重试。',
+        }),
       },
-      callbacks
+      callbacks,
     )
 
-    expect(message.chunks).toContainEqual(expect.objectContaining({
-      type: ChunkType.Text,
-      content: '模型这次响应超时，请稍后重试。'
-    }))
-    expect(callbacks.setSessionError).toHaveBeenCalledWith('session-1', '模型这次响应超时，请稍后重试。')
+    expect(message.chunks).toContainEqual(
+      expect.objectContaining({
+        type: ChunkType.Text,
+        content: '模型这次响应超时，请稍后重试。',
+      }),
+    )
+    expect(callbacks.setSessionError).toHaveBeenCalledWith(
+      'session-1',
+      '模型这次响应超时，请稍后重试。',
+    )
   })
 
   it('does not render raw error detail as visible text', () => {
     const message = createMessage()
     const callbacks = {
       setSessionError: vi.fn(),
-      onApprovalChunk: vi.fn()
+      onApprovalChunk: vi.fn(),
     }
 
     processChunk(
@@ -421,19 +526,23 @@ describe('chunkReducer', () => {
         type: ChunkType.Error,
         content: JSON.stringify({
           code: 'unknown_backend_code',
-          detail: 'SQL table dbo.SecretTable failed at /internal/model.'
-        })
+          detail: 'SQL table dbo.SecretTable failed at /internal/model.',
+        }),
       },
-      callbacks
+      callbacks,
     )
 
-    expect(message.chunks).toContainEqual(expect.objectContaining({
-      type: ChunkType.Text,
-      content: '请求失败，请稍后重试。'
-    }))
-    expect(message.chunks).not.toContainEqual(expect.objectContaining({
-      content: expect.stringContaining('SecretTable')
-    }))
+    expect(message.chunks).toContainEqual(
+      expect.objectContaining({
+        type: ChunkType.Text,
+        content: '请求失败，请稍后重试。',
+      }),
+    )
+    expect(message.chunks).not.toContainEqual(
+      expect.objectContaining({
+        content: expect.stringContaining('SecretTable'),
+      }),
+    )
     expect(callbacks.setSessionError).toHaveBeenCalledWith('session-1', '请求失败，请稍后重试。')
   })
 })

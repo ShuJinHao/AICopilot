@@ -253,6 +253,14 @@ public sealed class AiToolDefinition
 
     public AiToolRiskLevel RiskLevel { get; init; } = AiToolRiskLevel.Low;
 
+    public string? RequiredPermission { get; init; }
+
+    public string? AuditLevel { get; init; }
+
+    public string? DataBoundary { get; init; }
+
+    public int SchemaVersion { get; init; } = 1;
+
     public bool ReadOnlyDeclared { get; init; }
 
     public bool? McpReadOnlyHint { get; init; }
@@ -332,6 +340,23 @@ public sealed class AiToolDefinition
         return Copy(requiresApproval: requiresApproval);
     }
 
+    public AiToolDefinition WithGovernance(
+        bool requiresApproval,
+        AiToolRiskLevel riskLevel,
+        string? requiredPermission,
+        string? auditLevel,
+        string? dataBoundary,
+        int schemaVersion)
+    {
+        return Copy(
+            requiresApproval: requiresApproval,
+            riskLevel: riskLevel,
+            requiredPermission: requiredPermission,
+            auditLevel: auditLevel,
+            dataBoundary: dataBoundary,
+            schemaVersion: schemaVersion);
+    }
+
     private AiToolDefinition Copy(
         string? name = null,
         string? toolName = null,
@@ -342,6 +367,10 @@ public sealed class AiToolDefinition
         AiToolExternalSystemType? externalSystemType = null,
         AiToolCapabilityKind? capabilityKind = null,
         AiToolRiskLevel? riskLevel = null,
+        string? requiredPermission = null,
+        string? auditLevel = null,
+        string? dataBoundary = null,
+        int? schemaVersion = null,
         bool? readOnlyDeclared = null,
         bool? mcpReadOnlyHint = null,
         bool? mcpDestructiveHint = null,
@@ -360,6 +389,10 @@ public sealed class AiToolDefinition
             ExternalSystemType = externalSystemType ?? ExternalSystemType,
             CapabilityKind = capabilityKind ?? CapabilityKind,
             RiskLevel = riskLevel ?? RiskLevel,
+            RequiredPermission = requiredPermission ?? RequiredPermission,
+            AuditLevel = auditLevel ?? AuditLevel,
+            DataBoundary = dataBoundary ?? DataBoundary,
+            SchemaVersion = schemaVersion ?? SchemaVersion,
             ReadOnlyDeclared = readOnlyDeclared ?? ReadOnlyDeclared,
             McpReadOnlyHint = mcpReadOnlyHint ?? McpReadOnlyHint,
             McpDestructiveHint = mcpDestructiveHint ?? McpDestructiveHint,

@@ -606,7 +606,7 @@ if ($Mode -eq 'Quality') {
                 continue
             }
             $webRelative = $file.Substring($webRoot.Length)
-            if ($webRelative -match '^(?:package(?:-lock)?\.json|vite\.config\.|vitest\.config\.|tsconfig|playwright\.|e2e/)') {
+            if ($webRelative -match '^(?:vite\.config\.|vitest\.config\.|tsconfig|playwright\.|e2e/)') {
                 $unclassified.Add($file)
                 [void]$requiredExplicitMode.Add('Full')
             } else {

@@ -4,6 +4,13 @@ using Projects;
 var builder = DistributedApplication.CreateBuilder(args);
 
 var appHostOptions = AppHostOptions.FromConfiguration(builder.Configuration);
+Directory.CreateDirectory(appHostOptions.AgentSessionStateDataProtectionKeyPath);
+if (!OperatingSystem.IsWindows())
+{
+    File.SetUnixFileMode(
+        appHostOptions.AgentSessionStateDataProtectionKeyPath,
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+}
 var cloudReadonlyMode = builder.Configuration["CloudReadonly:Mode"] ?? "Disabled";
 var cloudReadonlySimulationEnabled = builder.Configuration
     .GetValue("CloudReadonly:Simulation:Enabled", false)
@@ -107,6 +114,7 @@ var httpapi = builder.AddProject<AICopilot_HttpApi>("aicopilot-httpapi")
     .WithEnvironment("BootstrapAdmin__Password", bootstrapAdminPassword)
     .WithEnvironment("CloudOidc__BootstrapAdminUserName", bootstrapAdminUserName)
     .WithEnvironment("ArtifactWorkspace__RootPath", appHostOptions.ArtifactWorkspaceRootPath)
+    .WithEnvironment("AgentSessionState__DataProtectionKeyPath", appHostOptions.AgentSessionStateDataProtectionKeyPath)
     .WithEnvironment("AiGateway__FinalAgentContextStore__Provider", "Redis")
     .WithEnvironment("CloudReadonly__Mode", cloudReadonlyMode)
     .WithEnvironment("CloudReadonly__Simulation__Enabled", cloudReadonlySimulationEnabled)
@@ -166,7 +174,8 @@ internal sealed record AppHostOptions(
     string PostgresVolumeName,
     string QdrantVolumeName,
     string RedisVolumeName,
-    string ArtifactWorkspaceRootPath)
+    string ArtifactWorkspaceRootPath,
+    string AgentSessionStateDataProtectionKeyPath)
 {
     public static AppHostOptions FromConfiguration(IConfiguration configuration)
     {
@@ -177,6 +186,12 @@ internal sealed record AppHostOptions(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AICopilot",
                 "artifact-workspaces"));
+        var agentSessionStateDataProtectionKeyPath = Path.GetFullPath(
+            configuration["AgentSessionState:DataProtectionKeyPath"]
+            ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AICopilot",
+                "data-protection-keys"));
 
         return new AppHostOptions(
             configuration.GetValue("AppHost:EnableDockerComposeEnvironment", true),
@@ -190,6 +205,7 @@ internal sealed record AppHostOptions(
             configuration["AppHost:PostgresVolumeName"] ?? "postgres-aicopilot",
             configuration["AppHost:QdrantVolumeName"] ?? "qdrant-datas",
             configuration["AppHost:RedisVolumeName"] ?? "redis-aicopilot",
-            artifactWorkspaceRootPath);
+            artifactWorkspaceRootPath,
+            agentSessionStateDataProtectionKeyPath);
     }
 }

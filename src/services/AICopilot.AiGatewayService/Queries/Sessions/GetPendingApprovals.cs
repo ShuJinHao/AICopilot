@@ -2,6 +2,7 @@ using System.Text.Json;
 using AICopilot.AiGatewayService.Approvals;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Ids;
+using AICopilot.Core.AiGateway.Runtime.AgentSessions;
 using AICopilot.Core.AiGateway.Specifications.Sessions;
 using AICopilot.Services.Contracts;
 using AICopilot.Services.CrossCutting.Attributes;
@@ -30,7 +31,7 @@ public sealed record GetPendingApprovalsQuery(Guid SessionId)
 public sealed class GetPendingApprovalsQueryHandler(
     IReadRepository<Session> sessionRepository,
     ICurrentUser currentUser,
-    IFinalAgentContextStore finalAgentContextStore,
+    IAgentSessionStateStore agentSessionStateStore,
     ApprovalRequirementResolver approvalRequirementResolver)
     : IQueryHandler<GetPendingApprovalsQuery, Result<IList<PendingApprovalDto>>>
 {
@@ -53,29 +54,59 @@ public sealed class GetPendingApprovalsQueryHandler(
             return Result.NotFound();
         }
 
-        var storedContext = await finalAgentContextStore.GetAsync(request.SessionId, cancellationToken);
-        if (storedContext?.PendingApprovals.Count is not > 0)
+        AgentSessionStateSnapshot state;
+        try
+        {
+            state = await agentSessionStateStore.LoadOwnedAsync(
+                request.SessionId,
+                userId,
+                currentUser.CloudTenantId,
+                cancellationToken);
+        }
+        catch (AgentSessionStateException exception)
+        {
+            return exception.Failure switch
+            {
+                AgentSessionStateFailure.OwnershipMismatch => Result.NotFound(),
+                AgentSessionStateFailure.Interrupted =>
+                    Result.Invalid(new ApiProblemDescriptor(
+                        AppProblemCodes.AgentSessionInterrupted,
+                        "The AgentSession is interrupted and pending approvals are invalid.")),
+                _ => Result.Invalid(new ApiProblemDescriptor(
+                    AppProblemCodes.AgentSessionResetRequired,
+                    "The persisted AgentSession cannot be restored safely."))
+            };
+        }
+
+        if (state.Status == AgentSessionRuntimeStatus.Interrupted)
+        {
+            return Result.Invalid(new ApiProblemDescriptor(
+                AppProblemCodes.AgentSessionInterrupted,
+                "The AgentSession is interrupted and pending approvals are invalid."));
+        }
+
+        if (state.PendingApprovals.Count == 0)
         {
             return Result.Success<IList<PendingApprovalDto>>([]);
         }
 
-        var approvals = new List<PendingApprovalDto>(storedContext.PendingApprovals.Count);
-        foreach (var approval in storedContext.PendingApprovals)
+        var approvals = new List<PendingApprovalDto>(state.PendingApprovals.Count);
+        foreach (var approval in state.PendingApprovals)
         {
-            var toolName = string.IsNullOrWhiteSpace(approval.ToolName)
-                ? approval.CallId
-                : approval.ToolName!;
+            var toolName = string.IsNullOrWhiteSpace(approval.CanonicalToolName)
+                ? approval.ToolName
+                : approval.CanonicalToolName!;
             var identity = BuildStoredIdentity(approval);
             var requirement = await approvalRequirementResolver
                 .GetMergedRequirementByIdentityAsync(identity, cancellationToken);
 
             approvals.Add(new PendingApprovalDto(
-                approval.CallId,
+                approval.ToolCallId,
                 toolName,
-                approval.RuntimeName,
-                approval.TargetType,
-                approval.TargetName,
                 approval.ToolName,
+                approval.TargetType?.ToString(),
+                approval.TargetName,
+                approval.CanonicalToolName,
                 NormalizeArguments(approval.Arguments),
                 requirement.RequiresOnsiteAttestation,
                 session.OnsiteConfirmationExpiresAt));
@@ -93,22 +124,20 @@ public sealed class GetPendingApprovalsQueryHandler(
             StringComparer.OrdinalIgnoreCase);
     }
 
-    private static AiToolIdentity? BuildStoredIdentity(StoredToolApprovalRequest approval)
+    private static AiToolIdentity? BuildStoredIdentity(AgentApprovalBinding approval)
     {
-        if (!Enum.TryParse<AiToolTargetType>(approval.TargetType, ignoreCase: true, out var targetType)
-            || string.IsNullOrWhiteSpace(approval.TargetName)
-            || string.IsNullOrWhiteSpace(approval.ToolName))
+        if (approval.TargetType is not { } targetType ||
+            string.IsNullOrWhiteSpace(approval.TargetName) ||
+            string.IsNullOrWhiteSpace(approval.CanonicalToolName))
         {
             return null;
         }
 
-        var kind = Enum.TryParse<AiToolCallKind>(approval.ToolKind, ignoreCase: true, out var parsedKind)
-            ? parsedKind
-            : targetType == AiToolTargetType.McpServer
-                ? AiToolCallKind.Mcp
-                : AiToolCallKind.Function;
-
-        return new AiToolIdentity(kind, targetType, approval.TargetName, approval.ToolName);
+        return new AiToolIdentity(
+            approval.ToolKind,
+            targetType,
+            approval.TargetName,
+            approval.CanonicalToolName);
     }
 
     private static object? NormalizeJsonElement(object? value)

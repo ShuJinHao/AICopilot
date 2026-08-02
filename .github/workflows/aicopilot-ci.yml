@@ -126,6 +126,11 @@ jobs:
         working-directory: src/vues/AICopilot.Web
         run: npm ci
 
+      - name: Audit web dependencies
+        if: ${{ steps.select.outputs.web_affected == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'quality' || inputs.mode == 'full')) }}
+        working-directory: src/vues/AICopilot.Web
+        run: npm audit --audit-level=moderate --registry=https://registry.npmjs.org
+
       - name: Lint, type-check, build and test affected web scope
         if: ${{ steps.select.outputs.web_affected == 'true' }}
         shell: pwsh

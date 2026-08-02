@@ -47,6 +47,29 @@ export const useChatStore = defineStore('chat', () => {
   const sessions = computed(() => sessionStore.sessions)
   const currentSessionId = computed(() => sessionStore.currentSessionId)
   const currentSession = computed(() => sessionStore.currentSession)
+  const agentMode = computed(() => currentSession.value?.agentMode ?? null)
+  const agentSessionStatus = computed(() => currentSession.value?.agentSessionStatus ?? null)
+  const isAgentSessionUnavailable = computed(
+    () =>
+      Boolean(currentSession.value?.agentSessionResetRequired) ||
+      agentSessionStatus.value === 'Interrupted' ||
+      agentSessionStatus.value === 'ResetRequired',
+  )
+  const agentSessionNotice = computed(() => {
+    if (
+      currentSession.value?.agentSessionResetRequired ||
+      agentSessionStatus.value === 'ResetRequired'
+    ) {
+      return '此旧会话没有可恢复的 AgentSession 状态，请新建会话后继续。'
+    }
+    if (agentSessionStatus.value === 'Interrupted') {
+      return '上一次执行已中断；系统不会自动重放模型或工具调用，请新建会话后继续。'
+    }
+    if (agentSessionStatus.value === 'Running' && !streamStore.isStreaming) {
+      return '检测到未完成的运行状态；下一次请求会先执行中断保护，不会自动重放。'
+    }
+    return ''
+  })
   const composerSessionId = computed(() => sessionStore.activeSession?.id ?? null)
   const resolvedSessionId = computed(() =>
     sessionStore.isSessionActivating ? null : composerSessionId.value,
@@ -140,8 +163,19 @@ export const useChatStore = defineStore('chat', () => {
   )
   const canEditComposerContext = computed(
     () =>
+      !isAgentSessionUnavailable.value &&
       !agentTaskStore.isAgentBusy &&
       (!sessionStore.isSessionActivating || preserveComposerContextDuringActivation.value),
+  )
+  const canChangeAgentMode = computed(() =>
+    Boolean(
+      resolvedSessionId.value &&
+      currentSession.value?.agentSessionVersion &&
+      agentSessionStatus.value === 'Ready' &&
+      !currentSession.value?.hasPendingApproval &&
+      !approvalStore.isWaitingForApproval &&
+      !isSessionTransitionBlocked.value,
+    ),
   )
   const latestAgentTask = computed(() => agentTaskStore.latestAgentTask)
   const selectedKnowledgeBase = computed(() => catalogStore.selectedKnowledgeBase)
@@ -158,7 +192,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   const referencedAgentTask = computed(() => {
     const sessionId = composerSessionId.value
-    return sessionId ? referencedAgentTasks.value[sessionId] ?? null : null
+    return sessionId ? (referencedAgentTasks.value[sessionId] ?? null) : null
   })
   const referencedAgentTaskId = computed(() => referencedAgentTask.value?.taskId ?? null)
 
@@ -193,6 +227,41 @@ export const useChatStore = defineStore('chat', () => {
 
   function clearAllReferencedAgentTasks() {
     referencedAgentTasks.value = {}
+  }
+
+  function applyAgentSessionEvent(event: {
+    sessionId?: string
+    mode?: 'plan' | 'execute'
+    status?: string
+    version?: number
+    pendingApproval?: boolean
+  }) {
+    if (
+      !event.sessionId ||
+      (event.mode !== 'plan' && event.mode !== 'execute') ||
+      typeof event.status !== 'string' ||
+      typeof event.version !== 'number' ||
+      typeof event.pendingApproval !== 'boolean'
+    ) {
+      return
+    }
+
+    sessionStore.applyAgentSessionState(event.sessionId, {
+      mode: event.mode,
+      status: event.status,
+      version: event.version,
+      pendingApproval: event.pendingApproval,
+    })
+  }
+
+  function canReadPendingApprovals(sessionId: string) {
+    const session = sessionStore.sessions.find((item) => item.id === sessionId)
+    return Boolean(
+      session &&
+      !session.agentSessionResetRequired &&
+      session.agentSessionStatus !== 'Interrupted' &&
+      session.agentSessionStatus !== 'ResetRequired',
+    )
   }
 
   function bindErrorSession() {
@@ -393,9 +462,11 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadHistory(sessionId: string, force = false) {
     if (!force && messageStore.messagesMap[sessionId]?.length) {
-      await approvalStore.refreshPendingApprovals(sessionId)
-      await loadAgentTasks(sessionId)
-      await loadTimeline(sessionId)
+      if (canReadPendingApprovals(sessionId)) {
+        await approvalStore.refreshPendingApprovals(sessionId)
+      } else {
+        approvalStore.reconcilePendingApprovalCards(sessionId, [])
+      }
       return
     }
 
@@ -404,9 +475,11 @@ export const useChatStore = defineStore('chat', () => {
       const history = await chatService.getHistory(sessionId)
       messageStore.setHistory(sessionId, history.items)
       updateHistoryCursor(sessionId, history)
-      await approvalStore.refreshPendingApprovals(sessionId)
-      await loadAgentTasks(sessionId)
-      await loadTimeline(sessionId)
+      if (canReadPendingApprovals(sessionId)) {
+        await approvalStore.refreshPendingApprovals(sessionId)
+      } else {
+        approvalStore.reconcilePendingApprovalCards(sessionId, [])
+      }
     } finally {
       sessionStore.isLoadingHistory = false
     }
@@ -1157,6 +1230,7 @@ export const useChatStore = defineStore('chat', () => {
       sessionStore.persistCurrentSession(id)
       bindErrorSession()
       errorStore.clearSessionError(id)
+      await sessionStore.refreshSession(id)
       approvalStore.sync(id)
       await loadHistory(id, options.forceReload ?? false)
       sessionStore.completeSessionActivation(id)
@@ -1321,9 +1395,47 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+  async function changeAgentMode(mode: 'plan' | 'execute') {
+    const sessionId = resolvedSessionId.value
+    const expectedVersion = currentSession.value?.agentSessionVersion
+    if (!sessionId || !expectedVersion || !canChangeAgentMode.value) {
+      return false
+    }
+    if (agentMode.value === mode) {
+      return true
+    }
+
+    try {
+      return await runSessionOperation(async () => {
+        clearCurrentSessionError()
+        const updated = await chatService.updateAgentMode(sessionId, mode, expectedVersion)
+        sessionStore.applyAgentSessionState(sessionId, {
+          mode: updated.mode,
+          version: updated.version,
+          status: 'Ready',
+          pendingApproval: false,
+        })
+        return true
+      })
+    } catch (error) {
+      errorStore.setSessionError(sessionId, toFriendlyMessage(error))
+      try {
+        await sessionStore.refreshSession(sessionId)
+      } catch (refreshError) {
+        console.error('Failed to reconcile AgentSession mode after mutation failure.', refreshError)
+      }
+      return false
+    }
+  }
+
   async function sendMessage(input: string) {
     const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value || approvalStore.isWaitingForApproval) {
+    if (
+      !sessionId ||
+      isAgentSessionUnavailable.value ||
+      isSessionTransitionBlocked.value ||
+      approvalStore.isWaitingForApproval
+    ) {
       return
     }
 
@@ -1380,6 +1492,7 @@ export const useChatStore = defineStore('chat', () => {
               processChunk(assistantMessage, chunk, {
                 setSessionError: errorStore.setSessionError,
                 onApprovalChunk: approvalStore.sync,
+                onAgentSessionState: applyAgentSessionEvent,
               })
             },
             onComplete() {
@@ -1416,6 +1529,11 @@ export const useChatStore = defineStore('chat', () => {
       } finally {
         streamStore.stop()
         assistantMessage.isStreaming = false
+        try {
+          await sessionStore.refreshSession(sessionId)
+        } catch (error) {
+          console.error('Failed to refresh AgentSession state after chat.', error)
+        }
         approvalStore.sync(sessionId)
       }
     })
@@ -1478,6 +1596,7 @@ export const useChatStore = defineStore('chat', () => {
               processChunk(targetMessage!, incomingChunk, {
                 setSessionError: errorStore.setSessionError,
                 onApprovalChunk: approvalStore.sync,
+                onAgentSessionState: applyAgentSessionEvent,
               })
             },
             onComplete() {
@@ -1512,8 +1631,18 @@ export const useChatStore = defineStore('chat', () => {
           targetMessage.isStreaming = false
         }
 
+        try {
+          await sessionStore.refreshSession(sessionId)
+        } catch (error) {
+          console.error('Failed to refresh AgentSession state after approval.', error)
+        }
+
         if (approvalFailed) {
-          await approvalStore.refreshPendingApprovals(sessionId)
+          if (canReadPendingApprovals(sessionId)) {
+            await approvalStore.refreshPendingApprovals(sessionId)
+          } else {
+            approvalStore.reconcilePendingApprovalCards(sessionId, [])
+          }
         }
 
         approvalStore.sync(sessionId)
@@ -1546,6 +1675,11 @@ export const useChatStore = defineStore('chat', () => {
     sessions,
     currentSessionId,
     currentSession,
+    agentMode,
+    agentSessionStatus,
+    agentSessionNotice,
+    isAgentSessionUnavailable,
+    canChangeAgentMode,
     composerSessionId,
     resolvedSessionId,
     isSessionActivating,
@@ -1593,6 +1727,7 @@ export const useChatStore = defineStore('chat', () => {
     clearCurrentSessionError,
     confirmOnsitePresence,
     clearOnsitePresence,
+    changeAgentMode,
     uploadSessionFile,
     planAgentTask,
     runAgentTask,

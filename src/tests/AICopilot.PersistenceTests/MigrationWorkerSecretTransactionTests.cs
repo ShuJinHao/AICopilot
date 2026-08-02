@@ -72,16 +72,12 @@ public sealed class MigrationWorkerSecretTransactionTests(PostgresPersistenceFix
                 await command.ExecuteNonQueryAsync();
             }
 
-            await using (var migratingAiGateway = new AiGatewayDbContext(aiGatewayOptions))
-            await using (var migratingRag = new RagDbContext(ragOptions))
-            {
-                var action = () => MigrationWorkerSecretMigrator.MigrateAsync(
-                    migratingAiGateway,
-                    migratingRag,
-                    CancellationToken.None);
+            var action = () => MigrationWorkerSecretMigrator.MigrateAsync(
+                aiGatewayOptions,
+                ragOptions,
+                CancellationToken.None);
 
-                await action.Should().ThrowAsync<DbUpdateException>();
-            }
+            await action.Should().ThrowAsync<DbUpdateException>();
 
             await using var verifyAiGateway = new AiGatewayDbContext(aiGatewayOptions);
             await using var verifyRag = new RagDbContext(ragOptions);
@@ -131,17 +127,13 @@ public sealed class MigrationWorkerSecretTransactionTests(PostgresPersistenceFix
                 await setupRag.SaveChangesAsync();
             }
 
-            await using (var migratingAiGateway = new AiGatewayDbContext(aiGatewayOptions))
-            await using (var migratingRag = new RagDbContext(ragOptions))
-            {
-                var result = await MigrationWorkerSecretMigrator.MigrateAsync(
-                    migratingAiGateway,
-                    migratingRag,
-                    CancellationToken.None);
+            var result = await MigrationWorkerSecretMigrator.MigrateAsync(
+                aiGatewayOptions,
+                ragOptions,
+                CancellationToken.None);
 
-                result.LanguageModelPlaintextCount.Should().Be(1);
-                result.EmbeddingModelLegacyCipherCount.Should().Be(1);
-            }
+            result.LanguageModelPlaintextCount.Should().Be(1);
+            result.EmbeddingModelLegacyCipherCount.Should().Be(1);
 
             await using var verifyAiGateway = new AiGatewayDbContext(aiGatewayOptions);
             await using var verifyRag = new RagDbContext(ragOptions);
@@ -197,6 +189,109 @@ public sealed class MigrationWorkerSecretTransactionTests(PostgresPersistenceFix
             embeddingAssertion.Which.Message.Should()
                 .Contain("EmbeddingModel.ApiKey")
                 .And.NotContain(rawEmbeddingSecret);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(EnvVarName, original);
+        }
+    }
+
+    [Fact]
+    public async Task MigrateAsync_ShouldReloadBothContexts_WhenTransientFailureRetriesAfterLanguageSave()
+    {
+        var original = Environment.GetEnvironmentVariable(EnvVarName);
+        Environment.SetEnvironmentVariable(EnvVarName, TestEncryptionKey);
+
+        try
+        {
+            await using var database = await PostgresScratchDatabase.CreateAsync(
+                fixture.ConnectionString,
+                "aicopilot_secret_retry");
+            var aiGatewayOptions = new DbContextOptionsBuilder<AiGatewayDbContext>()
+                .UseNpgsql(
+                    database.ConnectionString,
+                    npgsql =>
+                    {
+                        npgsql.MigrationsHistoryTable(
+                            MigrationHistoryTables.AiGateway.TableName,
+                            MigrationHistoryTables.AiGateway.Schema);
+                        npgsql.EnableRetryOnFailure(
+                            maxRetryCount: 2,
+                            maxRetryDelay: TimeSpan.Zero,
+                            errorCodesToAdd: null);
+                    })
+                .Options;
+            var ragOptions = PostgresPersistenceTestOptions.Create<RagDbContext>(
+                database.ConnectionString,
+                MigrationHistoryTables.Rag);
+            const string languagePlaintext = "sk-language-retry";
+            const string embeddingPlaintext = "sk-embedding-retry";
+
+            await using (var setupAiGateway = new AiGatewayDbContext(aiGatewayOptions))
+            {
+                await setupAiGateway.Database.MigrateAsync();
+                setupAiGateway.LanguageModels.Add(CreateLanguageModel(languagePlaintext));
+                await setupAiGateway.SaveChangesAsync();
+            }
+
+            await using (var setupRag = new RagDbContext(ragOptions))
+            {
+                await setupRag.Database.MigrateAsync();
+                setupRag.EmbeddingModels.Add(CreateEmbeddingModel(embeddingPlaintext));
+                await setupRag.SaveChangesAsync();
+            }
+
+            await using (var connection = new NpgsqlConnection(database.ConnectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE SEQUENCE rag.secret_migration_retry_once;
+
+                    CREATE FUNCTION rag.fail_first_embedding_secret_migration()
+                    RETURNS trigger
+                    LANGUAGE plpgsql
+                    AS $$
+                    BEGIN
+                        IF nextval('rag.secret_migration_retry_once') = 1 THEN
+                            RAISE EXCEPTION 'simulated transient embedding migration failure'
+                                USING ERRCODE = '40001';
+                        END IF;
+                        RETURN NEW;
+                    END;
+                    $$;
+
+                    CREATE TRIGGER fail_first_embedding_secret_migration
+                    BEFORE UPDATE OF api_key ON rag.embedding_models
+                    FOR EACH ROW
+                    EXECUTE FUNCTION rag.fail_first_embedding_secret_migration();
+                    """;
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var result = await MigrationWorkerSecretMigrator.MigrateAsync(
+                aiGatewayOptions,
+                ragOptions,
+                CancellationToken.None);
+
+            result.LanguageModelPlaintextCount.Should().Be(1);
+            result.EmbeddingModelPlaintextCount.Should().Be(1);
+            await using var verifyAiGateway = new AiGatewayDbContext(aiGatewayOptions);
+            await using var verifyRag = new RagDbContext(ragOptions);
+            var migratedLanguageSecret = (await verifyAiGateway.LanguageModels
+                    .AsNoTracking()
+                    .SingleAsync())
+                .ApiKey;
+            var migratedEmbeddingSecret = (await verifyRag.EmbeddingModels
+                    .AsNoTracking()
+                    .SingleAsync())
+                .ApiKey;
+            migratedLanguageSecret.Should().StartWith(SecretStringEncryptor.CipherPrefix);
+            migratedLanguageSecret.Should().NotBe(languagePlaintext);
+            SecretStringEncryptor.Decrypt(migratedLanguageSecret).Should().Be(languagePlaintext);
+            migratedEmbeddingSecret.Should().StartWith(SecretStringEncryptor.CipherPrefix);
+            migratedEmbeddingSecret.Should().NotBe(embeddingPlaintext);
+            SecretStringEncryptor.Decrypt(migratedEmbeddingSecret).Should().Be(embeddingPlaintext);
         }
         finally
         {

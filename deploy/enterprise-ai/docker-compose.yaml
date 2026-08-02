@@ -20,6 +20,7 @@ x-aicopilot-common-env: &aicopilot-common-env
   QDRANT_APIKEY: ${QDRANT_KEY}
   FileStorage__RootPath: /var/lib/aicopilot/storage
   ArtifactWorkspace__RootPath: /var/lib/aicopilot/artifact-workspaces
+  AgentSessionState__DataProtectionKeyPath: /var/lib/aicopilot/data-protection-keys
   AiGateway__Deployment__Mode: SingleInstance
   AiGateway__FinalAgentContextStore__Provider: Memory
   Mcp__Runtime__Enabled: "false"

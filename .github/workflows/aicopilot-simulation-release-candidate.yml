@@ -49,7 +49,7 @@ jobs:
 
       - name: Frontend vulnerability scan
         working-directory: src/vues/AICopilot.Web
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=moderate --registry=https://registry.npmjs.org
 
       - name: Require Linux Docker runtime
         run: docker info

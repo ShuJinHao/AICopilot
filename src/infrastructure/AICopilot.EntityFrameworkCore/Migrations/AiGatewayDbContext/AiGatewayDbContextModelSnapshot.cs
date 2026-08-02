@@ -2135,6 +2135,69 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
                     b.ToTable("sessions", "aigateway");
                 });
 
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Runtime.AgentSessions.AgentSessionState", b =>
+                {
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<Guid?>("ActiveTurnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("active_turn_id");
+
+                    b.Property<int>("AgentSchemaVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("agent_schema_version");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<string>("ProtectedApprovalBindings")
+                        .HasColumnType("text")
+                        .HasColumnName("protected_approval_bindings");
+
+                    b.Property<string>("ProtectedState")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("protected_state");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TenantId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("SessionId");
+
+                    b.HasIndex("UserId", "ExpiresAtUtc")
+                        .HasDatabaseName("ix_agent_session_states_user_expiry");
+
+                    b.ToTable("agent_session_states", "aigateway");
+                });
+
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Tools.ToolExecutionRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2647,6 +2710,15 @@ namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.AgentTasks.AgentTask", b =>
                 {
                     b.Navigation("Steps");
+                });
+
+            modelBuilder.Entity("AICopilot.Core.AiGateway.Runtime.AgentSessions.AgentSessionState", b =>
+                {
+                    b.HasOne("AICopilot.Core.AiGateway.Aggregates.Sessions.Session", null)
+                        .WithOne()
+                        .HasForeignKey("AICopilot.Core.AiGateway.Runtime.AgentSessions.AgentSessionState", "SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("AICopilot.Core.AiGateway.Aggregates.Artifacts.ArtifactWorkspace", b =>

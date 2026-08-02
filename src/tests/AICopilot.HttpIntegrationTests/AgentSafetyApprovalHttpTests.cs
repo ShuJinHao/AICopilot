@@ -2,13 +2,10 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using AICopilot.AgentPlugin;
-using AICopilot.AiGatewayService.Plugins;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
+using System.Text.RegularExpressions;
+using AICopilot.Core.AiGateway.Runtime.AgentSessions;
 using AICopilot.EntityFrameworkCore;
-using AICopilot.Services.Contracts;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.AI;
 
 namespace AICopilot.HttpIntegrationTests;
 
@@ -27,147 +24,88 @@ public sealed class AgentSafetyApprovalHttpTests
         _fixture = fixture;
     }
 
-    [Fact]
-    public async Task ApprovalDecision_ShouldRequireValidOnsiteAttestation_AndExplicitReconfirmation()
+    [Theory]
+    [InlineData("approved")]
+    [InlineData("rejected")]
+    public async Task ApprovalDecision_ShouldResumeSingleRegisteredHarnessToolWithoutLegacyPolicyOrOnsite(
+        string decision)
     {
         await AuthenticateAsAdminAsync();
 
         Guid languageModelId = Guid.Empty;
-        Guid routingConfigurationId = Guid.Empty;
         Guid generalTemplateId = Guid.Empty;
-        Guid intentRoutingTemplateId = Guid.Empty;
-        Guid approvalPolicyId = Guid.Empty;
         Guid sessionId = Guid.Empty;
 
         try
         {
-            languageModelId = await CreateLanguageModelAsync($"safety-lm-{Guid.NewGuid():N}");
-            await DeleteConversationTemplateIfExistsAsync("IntentRoutingAgent");
-
-            intentRoutingTemplateId = await CreateConversationTemplateAsync(
-                "IntentRoutingAgent",
-                languageModelId,
-                "intent routing",
-                "Select the best matching intent from the list and return a JSON array only. {{$IntentList}}");
-            routingConfigurationId = await CreateActiveRoutingModelAsync(languageModelId);
-
+            languageModelId = await CreateLanguageModelAsync(
+                $"harness-approval-{decision}-{Guid.NewGuid():N}");
             generalTemplateId = await CreateConversationTemplateAsync(
-                $"safety-general-{Guid.NewGuid():N}",
+                $"harness-approval-{decision}-general-{Guid.NewGuid():N}",
                 languageModelId,
                 "general assistant",
                 "You are a concise manufacturing copilot.");
-
-            approvalPolicyId = await CreateApprovalPolicyAsync(
-                $"safety-approval-{Guid.NewGuid():N}",
-                ApprovalTargetType.Plugin,
-                new DiagnosticAdvisorPlugin().Name,
-                [GetDiagnosticChecklistToolName()],
-                isEnabled: true,
-                requiresOnsiteAttestation: true);
-
             sessionId = await CreateSessionAsync(generalTemplateId);
+
+            var executeMode = await PutJsonAsync<AgentSessionModeDto>(
+                $"/api/aigateway/session/{sessionId}/agent-mode",
+                new
+                {
+                    mode = "execute",
+                    expectedVersion = 1
+                });
+            executeMode.Should().Be(new AgentSessionModeDto(sessionId, "execute", 2));
 
             var approvalEvents = await PostChatAsync(new
             {
                 sessionId,
                 message = "please prepare a diagnostic checklist for device DEV-001"
             });
-
-            approvalEvents.Should().Contain(
-                item => item.Type == "ApprovalRequest",
-                string.Join(" | ", approvalEvents.Select(item => $"{item.Type}:{item.Content}")));
-            var approvalChunk = approvalEvents.Single(item => item.Type == "ApprovalRequest");
+            var approvalChunk = approvalEvents.Should()
+                .ContainSingle(item => item.Type == "ApprovalRequest")
+                .Which;
             using var approvalPayload = JsonDocument.Parse(approvalChunk.Content);
             var callId = approvalPayload.RootElement.GetProperty("callId").GetString();
-
             callId.Should().NotBeNullOrWhiteSpace();
-            approvalPayload.RootElement.GetProperty("requiresOnsiteAttestation").GetBoolean().Should().BeTrue();
+            approvalPayload.RootElement
+                .GetProperty("requiresOnsiteAttestation")
+                .GetBoolean()
+                .Should().BeFalse();
+
             var pendingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
                 $"/api/aigateway/approval/pending?sessionId={sessionId}");
-            var pendingApproval = pendingApprovals.Single(item => item.CallId == callId);
+            var pendingApproval = pendingApprovals.Should()
+                .ContainSingle(item => item.CallId == callId)
+                .Which;
 
-            var missingOnsiteEvents = await PostApprovalDecisionAsync(new
+            var toolResultRequestsBeforeDecision = _fixture.FakeAiToolResultRequestCount;
+            var decisionEvents = await PostApprovalDecisionAsync(new
             {
                 sessionId,
                 callId,
-                decision = "approved",
-                onsiteConfirmed = true,
-                targetType = pendingApproval.TargetType,
-                targetName = pendingApproval.TargetName,
-                toolName = pendingApproval.ToolName
-            });
-
-            ReadSingleError(missingOnsiteEvents).Code.Should().Be("onsite_presence_required");
-
-            var attestedSession = await PutJsonAsync<SessionDto>("/api/aigateway/session/safety-attestation", new
-            {
-                sessionId,
-                isOnsiteConfirmed = true,
-                expiresInMinutes = 30
-            });
-
-            attestedSession.OnsiteConfirmedAt.Should().NotBeNull();
-            attestedSession.OnsiteConfirmedBy.Should().Be(_fixture.BootstrapAdminUserName);
-            attestedSession.OnsiteConfirmationExpiresAt.Should().NotBeNull();
-
-            await ExpireSessionAttestationAsync(sessionId);
-
-            var expiredEvents = await PostApprovalDecisionAsync(new
-            {
-                sessionId,
-                callId,
-                decision = "approved",
-                onsiteConfirmed = true,
-                targetType = pendingApproval.TargetType,
-                targetName = pendingApproval.TargetName,
-                toolName = pendingApproval.ToolName
-            });
-
-            ReadSingleError(expiredEvents).Code.Should().Be("onsite_presence_expired");
-
-            await PutJsonAsync<SessionDto>("/api/aigateway/session/safety-attestation", new
-            {
-                sessionId,
-                isOnsiteConfirmed = true,
-                expiresInMinutes = 30
-            });
-
-            var missingReconfirmationEvents = await PostApprovalDecisionAsync(new
-            {
-                sessionId,
-                callId,
-                decision = "approved",
+                decision,
                 onsiteConfirmed = false,
                 targetType = pendingApproval.TargetType,
                 targetName = pendingApproval.TargetName,
                 toolName = pendingApproval.ToolName
             });
 
-            ReadSingleError(missingReconfirmationEvents).Code.Should().Be("approval_reconfirmation_required");
+            decisionEvents.Should().NotContain(item => item.Type == "Error");
+            string.Concat(decisionEvents
+                    .Where(item => item.Type == "Text")
+                    .Select(item => item.Content))
+                .Should().NotBeNullOrWhiteSpace();
+            _fixture.FakeAiToolResultRequestCount
+                .Should().Be(toolResultRequestsBeforeDecision + 1);
 
-            var approvedEvents = await PostApprovalDecisionAsync(new
-            {
-                sessionId,
-                callId,
-                decision = "approved",
-                onsiteConfirmed = true,
-                targetType = pendingApproval.TargetType,
-                targetName = pendingApproval.TargetName,
-                toolName = pendingApproval.ToolName
-            });
+            var remainingApprovals = await GetJsonAsync<List<PendingApprovalDto>>(
+                $"/api/aigateway/approval/pending?sessionId={sessionId}");
+            remainingApprovals.Should().BeEmpty();
 
-            string.Concat(approvedEvents.Where(item => item.Type == "Text").Select(item => item.Content))
-                .Should().Contain("已批准并执行工具");
-
-            var approvalAuditLogs = await GetJsonAsync<AuditLogListDto>("/api/identity/audit-log/list?page=1&pageSize=50&actionGroup=Approval");
-            approvalAuditLogs.Items.Should().Contain(item =>
-                item.ActionCode == "AiGateway.SetOnsiteAttestation"
-                && item.TargetType == "Session"
-                && item.TargetId == sessionId.ToString());
-            approvalAuditLogs.Items.Should().Contain(item =>
-                item.ActionCode == "Approval.Approve"
-                && item.TargetType == "ToolApproval"
-                && item.Result == "Succeeded");
+            var projection = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            projection.AgentSessionStatus.Should().Be(nameof(AgentSessionRuntimeStatus.Ready));
+            projection.HasPendingApproval.Should().BeFalse();
         }
         finally
         {
@@ -175,32 +113,120 @@ public sealed class AgentSafetyApprovalHttpTests
 
             if (sessionId != Guid.Empty)
             {
-                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/session", new { id = sessionId }, HttpStatusCode.NoContent);
-            }
-
-            if (approvalPolicyId != Guid.Empty)
-            {
-                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/approval-policy", new { id = approvalPolicyId }, HttpStatusCode.NoContent);
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/session",
+                    new { id = sessionId },
+                    HttpStatusCode.NoContent);
             }
 
             if (generalTemplateId != Guid.Empty)
             {
-                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = generalTemplateId }, HttpStatusCode.NoContent);
-            }
-
-            if (intentRoutingTemplateId != Guid.Empty)
-            {
-                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/conversation-template", new { id = intentRoutingTemplateId }, HttpStatusCode.NoContent);
-            }
-
-            if (routingConfigurationId != Guid.Empty)
-            {
-                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/routing-model", new { id = routingConfigurationId }, HttpStatusCode.NoContent);
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/conversation-template",
+                    new { id = generalTemplateId },
+                    HttpStatusCode.NoContent);
             }
 
             if (languageModelId != Guid.Empty)
             {
-                await SendJsonAsync(HttpMethod.Delete, "/api/aigateway/language-model", new { id = languageModelId }, HttpStatusCode.NoContent);
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/language-model",
+                    new { id = languageModelId },
+                    HttpStatusCode.NoContent);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ChatStream_ShouldInterruptWithoutExecutingWhenProviderReturnsTwoApprovalCalls()
+    {
+        await AuthenticateAsAdminAsync();
+
+        Guid languageModelId = Guid.Empty;
+        Guid templateId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+
+        try
+        {
+            languageModelId = await CreateLanguageModelAsync(
+                $"multiple-approval-lm-{Guid.NewGuid():N}");
+            templateId = await CreateConversationTemplateAsync(
+                $"multiple-approval-template-{Guid.NewGuid():N}",
+                languageModelId,
+                "provider contract violation",
+                "Use only one governed tool call per response.");
+            sessionId = await CreateSessionAsync(templateId);
+
+            _ = await PutJsonAsync<AgentSessionModeDto>(
+                $"/api/aigateway/session/{sessionId}/agent-mode",
+                new
+                {
+                    mode = "execute",
+                    expectedVersion = 1
+                });
+
+            var toolResultRequestsBeforeTurn = _fixture.FakeAiToolResultRequestCount;
+            var events = await PostChatAsync(new
+            {
+                sessionId,
+                message = "force two diagnostic approvals for device DEV-001"
+            });
+
+            ReadSingleError(events).Code.Should().Be("agent_session_interrupted");
+            events.Should().NotContain(item =>
+                item.Type == "FunctionCall" ||
+                item.Type == "FunctionResult" ||
+                item.Type == "ApprovalRequest");
+            _fixture.FakeAiToolResultRequestCount
+                .Should().Be(toolResultRequestsBeforeTurn);
+
+            await using (var dbContext = await CreateAiGatewayDbContextAsync())
+            {
+                var persistedState = await dbContext.AgentSessionStates.SingleAsync(
+                    item => item.SessionId == sessionId);
+                persistedState.Status.Should().Be(AgentSessionRuntimeStatus.Interrupted);
+                persistedState.ActiveTurnId.Should().BeNull();
+                persistedState.ProtectedApprovalBindings.Should().BeNull();
+            }
+
+            var projection = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            projection.AgentSessionStatus.Should().Be(nameof(AgentSessionRuntimeStatus.Interrupted));
+            projection.AgentSessionResetRequired.Should().BeFalse();
+            projection.HasPendingApproval.Should().BeFalse();
+        }
+        finally
+        {
+            await AuthenticateAsAdminAsync();
+
+            if (sessionId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/session",
+                    new { id = sessionId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (templateId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/conversation-template",
+                    new { id = templateId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (languageModelId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/language-model",
+                    new { id = languageModelId },
+                    HttpStatusCode.NoContent);
             }
         }
     }
@@ -279,21 +305,196 @@ public sealed class AgentSafetyApprovalHttpTests
         }
     }
 
+    [Fact]
+    public async Task BusinessQuery_ShouldStreamTrustedWidgetSeparatelyFromModelText()
+    {
+        await AuthenticateAsAdminAsync();
+
+        Guid languageModelId = Guid.Empty;
+        Guid generalTemplateId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+
+        try
+        {
+            languageModelId = await CreateLanguageModelAsync(
+                $"harness-widget-{Guid.NewGuid():N}");
+            generalTemplateId = await CreateConversationTemplateAsync(
+                $"harness-widget-general-{Guid.NewGuid():N}",
+                languageModelId,
+                "trusted widget stream",
+                "Use the governed BusinessQuery tool for the requested business data.");
+            sessionId = await CreateSessionAsync(generalTemplateId);
+
+            _ = await PutJsonAsync<AgentSessionModeDto>(
+                $"/api/aigateway/session/{sessionId}/agent-mode",
+                new
+                {
+                    mode = "execute",
+                    expectedVersion = 1
+                });
+
+            var challengeEvents = await PostChatAsync(new
+            {
+                sessionId,
+                message = "查看设备 DEV-001 最新日志并显示 inline business widget"
+            });
+            challengeEvents.Should().NotContain(item => item.Type == "Widget");
+            var challengeText = string.Concat(challengeEvents
+                .Where(item => item.Type == "Text")
+                .Select(item => item.Content));
+            var confirmation = Regex.Match(
+                challengeText,
+                @"确认查询 [0-9a-f]{32}",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            confirmation.Success.Should().BeTrue();
+
+            var resultEvents = await PostChatAsync(new
+            {
+                sessionId,
+                message = confirmation.Value
+            });
+
+            resultEvents.Should().NotContain(item => item.Type == "Error");
+            var widgets = resultEvents
+                .Where(item => item.Type == "Widget")
+                .ToArray();
+            widgets.Should().NotBeEmpty(
+                "the governed result must cross SSE independently; received events: {0}",
+                JsonSerializer.Serialize(resultEvents, JsonOptions));
+            foreach (var widget in widgets)
+            {
+                using var payload = JsonDocument.Parse(widget.Content);
+                payload.RootElement.GetProperty("type").GetString()
+                    .Should().BeOneOf("Chart", "DataTable", "StatsCard");
+            }
+
+            var modelText = string.Concat(resultEvents
+                .Where(item => item.Type == "Text")
+                .Select(item => item.Content));
+            modelText.Should().NotContain("\"type\":\"Chart\"");
+            modelText.Should().NotContain("\"type\":\"DataTable\"");
+            modelText.Should().NotContain("\"type\":\"StatsCard\"");
+        }
+        finally
+        {
+            await AuthenticateAsAdminAsync();
+
+            if (sessionId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/session",
+                    new { id = sessionId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (generalTemplateId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/conversation-template",
+                    new { id = generalTemplateId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (languageModelId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/language-model",
+                    new { id = languageModelId },
+                    HttpStatusCode.NoContent);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ChatStream_ShouldInterruptLeftoverRunningSessionWithoutReplay()
+    {
+        await AuthenticateAsAdminAsync();
+
+        Guid languageModelId = Guid.Empty;
+        Guid templateId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+
+        try
+        {
+            languageModelId = await CreateLanguageModelAsync(
+                $"interrupted-session-lm-{Guid.NewGuid():N}");
+            templateId = await CreateConversationTemplateAsync(
+                $"interrupted-session-template-{Guid.NewGuid():N}",
+                languageModelId,
+                "interrupted session",
+                "You are a concise manufacturing copilot.");
+            sessionId = await CreateSessionAsync(templateId);
+
+            await using (var dbContext = await CreateAiGatewayDbContextAsync())
+            {
+                var persistedState = await dbContext.AgentSessionStates.SingleAsync(
+                    item => item.SessionId == sessionId);
+                var nowUtc = DateTimeOffset.UtcNow;
+                persistedState.BeginTurn(
+                    Guid.NewGuid(),
+                    nowUtc,
+                    nowUtc.AddDays(30));
+                await dbContext.SaveChangesAsync();
+            }
+
+            var events = await PostChatAsync(new
+            {
+                sessionId,
+                message = "do not replay the abandoned turn"
+            });
+
+            ReadSingleError(events).Code.Should().Be("agent_session_interrupted");
+            events.Should().NotContain(item =>
+                item.Type == "FunctionCall" ||
+                item.Type == "FunctionResult" ||
+                item.Type == "ApprovalRequest");
+
+            var projection = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            projection.AgentSessionStatus.Should().Be(nameof(AgentSessionRuntimeStatus.Interrupted));
+            projection.AgentSessionResetRequired.Should().BeFalse();
+            projection.AgentSessionVersion.Should().Be(3);
+        }
+        finally
+        {
+            await AuthenticateAsAdminAsync();
+
+            if (sessionId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/session",
+                    new { id = sessionId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (templateId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/conversation-template",
+                    new { id = templateId },
+                    HttpStatusCode.NoContent);
+            }
+
+            if (languageModelId != Guid.Empty)
+            {
+                await SendJsonAsync(
+                    HttpMethod.Delete,
+                    "/api/aigateway/language-model",
+                    new { id = languageModelId },
+                    HttpStatusCode.NoContent);
+            }
+        }
+    }
+
     private static ProblemChunkDto ReadSingleError(IReadOnlyCollection<ChatChunkDto> events)
     {
         var errorChunk = events.Single(item => item.Type == "Error");
         return JsonSerializer.Deserialize<ProblemChunkDto>(errorChunk.Content, JsonOptions)!;
-    }
-
-    private async Task ExpireSessionAttestationAsync(Guid sessionId)
-    {
-        await using var dbContext = await CreateAiGatewayDbContextAsync();
-        var session = await dbContext.Sessions.SingleAsync(item => item.Id == sessionId);
-        session.SetOnsiteAttestation(
-            _fixture.BootstrapAdminUserName,
-            DateTimeOffset.UtcNow.AddMinutes(-20),
-            DateTimeOffset.UtcNow.AddMinutes(-1));
-        await dbContext.SaveChangesAsync();
     }
 
     private async Task AuthenticateAsAdminAsync()
@@ -378,28 +579,6 @@ public sealed class AgentSafetyApprovalHttpTests
                 new { id = template.Id },
                 HttpStatusCode.NoContent);
         }
-    }
-
-    private async Task<Guid> CreateApprovalPolicyAsync(
-        string name,
-        ApprovalTargetType targetType,
-        string targetName,
-        IReadOnlyCollection<string> toolNames,
-        bool isEnabled,
-        bool requiresOnsiteAttestation)
-    {
-        var created = await PostJsonAsync<CreatedApprovalPolicyDto>("/api/aigateway/approval-policy", new
-        {
-            name,
-            description = "integration-test",
-            targetType,
-            targetName,
-            toolNames,
-            isEnabled,
-            requiresOnsiteAttestation
-        });
-
-        return created.Id;
     }
 
     private async Task<Guid> CreateSessionAsync(Guid templateId)
@@ -526,15 +705,6 @@ public sealed class AgentSafetyApprovalHttpTests
         return new AiGatewayDbContext(options);
     }
 
-    private static string GetDiagnosticChecklistToolName()
-    {
-        var plugin = new DiagnosticAdvisorPlugin();
-        var tool = plugin.GetTools()
-            ?.First(function => function.Name.Contains("GenerateDiagnosticChecklist", StringComparison.OrdinalIgnoreCase));
-
-        return tool?.Name ?? "GenerateDiagnosticChecklist";
-    }
-
     private sealed record LoginUserDto(string UserName, string Token);
 
     private sealed record CreatedLanguageModelDto(Guid Id, string Provider, string Name);
@@ -545,16 +715,16 @@ public sealed class AgentSafetyApprovalHttpTests
 
     private sealed record ConversationTemplateDto(Guid Id, string Name);
 
-    private sealed record CreatedApprovalPolicyDto(Guid Id, string Name);
-
     private sealed record CreatedSessionDto(Guid Id, string Title);
 
-    private sealed record SessionDto(
+    private sealed record AgentSessionModeDto(Guid SessionId, string Mode, long Version);
+
+    private sealed record AgentSessionProjectionDto(
         Guid Id,
-        string Title,
-        DateTimeOffset? OnsiteConfirmedAt,
-        string? OnsiteConfirmedBy,
-        DateTimeOffset? OnsiteConfirmationExpiresAt);
+        long? AgentSessionVersion,
+        string? AgentSessionStatus,
+        bool AgentSessionResetRequired,
+        bool HasPendingApproval);
 
     private sealed record PendingApprovalDto(
         string CallId,
@@ -566,24 +736,6 @@ public sealed class AgentSafetyApprovalHttpTests
         IReadOnlyDictionary<string, object?> Args,
         bool RequiresOnsiteAttestation,
         DateTimeOffset? AttestationExpiresAt);
-
-    private sealed record AuditLogListDto(
-        IReadOnlyCollection<AuditLogSummaryDto> Items,
-        int Page,
-        int PageSize,
-        int TotalCount);
-
-    private sealed record AuditLogSummaryDto(
-        Guid Id,
-        string ActionGroup,
-        string ActionCode,
-        string TargetType,
-        string? TargetId,
-        string? TargetName,
-        string Result,
-        string Summary,
-        IReadOnlyCollection<string> ChangedFields,
-        DateTime CreatedAt);
 
     private sealed record ChatChunkDto(string Source, string Type, string Content);
 

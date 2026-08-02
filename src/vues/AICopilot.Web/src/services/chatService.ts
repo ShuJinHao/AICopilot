@@ -10,6 +10,7 @@ import type {
 import type {
   AgentApprovalRequest,
   AgentArtifactPreview,
+  AgentSessionModeResponse,
   AgentTask,
   AgentTaskRuntimeSnapshot,
   AgentTaskAuditSummary,
@@ -100,11 +101,7 @@ async function sendEventStream(path: string, payload: unknown, callbacks: Stream
 }
 
 function postAgentTaskAction(path: string, id: string, extra: Record<string, unknown> = {}) {
-  return apiClient.post<AgentTask>(
-    path,
-    { id, ...extra },
-    CHAT_MUTATION_REQUEST_OPTIONS,
-  )
+  return apiClient.post<AgentTask>(path, { id, ...extra }, CHAT_MUTATION_REQUEST_OPTIONS)
 }
 
 export const chatService = {
@@ -118,6 +115,18 @@ export const chatService = {
 
   async createSession() {
     return await apiClient.post<Session>('/aigateway/session', {}, CHAT_MUTATION_REQUEST_OPTIONS)
+  },
+
+  async getSession(id: string) {
+    return await apiClient.get<Session>('/aigateway/session', { id }, CHAT_READ_REQUEST_OPTIONS)
+  },
+
+  async updateAgentMode(sessionId: string, mode: 'plan' | 'execute', expectedVersion: number) {
+    return await apiClient.put<AgentSessionModeResponse>(
+      `/aigateway/session/${encodeURIComponent(sessionId)}/agent-mode`,
+      { mode, expectedVersion },
+      CHAT_MUTATION_REQUEST_OPTIONS,
+    )
   },
 
   async deleteSession(id: string) {
@@ -283,11 +292,9 @@ export const chatService = {
   },
 
   async rejectAgentTaskPlan(id: string) {
-    return await postAgentTaskAction(
-      '/aigateway/agent/task/reject-plan',
-      id,
-      { reason: 'Plan rejected from primary PlanDraft action.' },
-    )
+    return await postAgentTaskAction('/aigateway/agent/task/reject-plan', id, {
+      reason: 'Plan rejected from primary PlanDraft action.',
+    })
   },
 
   async runAgentTask(id: string) {

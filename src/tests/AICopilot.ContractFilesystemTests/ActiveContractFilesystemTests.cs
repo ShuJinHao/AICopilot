@@ -29,7 +29,7 @@ public sealed class ActiveContractFilesystemTests
     }
 
     [Fact]
-    public void AiAuthorityDocuments_ShouldKeepTheB01SourceTruthMarkers()
+    public void AiAuthorityDocuments_ShouldKeepTheB1HarnessSourceTruthMarkers()
     {
         var root = FindRepositoryRoot();
         var businessRules = File.ReadAllText(
@@ -44,11 +44,14 @@ public sealed class ActiveContractFilesystemTests
         businessRules.Should().Contain("Cloud provider / AI consumer 跨版本发布顺序");
         businessRules.Should().Contain("完工弹夹数");
 
-        agentContract.Should().Contain("严格审批元组");
-        agentContract.Should().Contain("decision proof");
-        agentContract.Should().Contain("checkpoint 损坏");
-        agentContract.Should().Contain("旧同步入口 fail-closed");
-        agentContract.Should().Contain("2026-12-31");
+        agentContract.Should().Contain("Microsoft Agent Framework Harness");
+        agentContract.Should().Contain("MainChatToolGate");
+        agentContract.Should().Contain("TrustedRenderChunkBuffer");
+        agentContract.Should().Contain("KnowledgeQuery(question, knowledgeBaseNames)");
+        agentContract.Should().Contain("/var/lib/aicopilot/data-protection-keys");
+        agentContract.Should().Contain("SingleInstance");
+        agentContract.Should().Contain("待 B2 物理删除的不可达结构");
+        agentContract.Should().Contain("当前不是活动契约");
 
         roadmap.Should().Contain(
             "| 能力 | 当前源码 SHA | 源码状态 | 验证状态 | 生产状态 | 阻断项 |");

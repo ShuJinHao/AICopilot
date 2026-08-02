@@ -235,6 +235,39 @@ public sealed class IdentityAccessManagementTests
 
             sessionId = createdSession.Id;
 
+            var initialAgentSession = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            initialAgentSession.AgentMode.Should().Be("plan");
+            initialAgentSession.AgentSessionVersion.Should().Be(1);
+            initialAgentSession.AgentSessionStatus.Should().Be("Ready");
+            initialAgentSession.AgentSessionResetRequired.Should().BeFalse();
+
+            var changedMode = await PutJsonAsync<AgentSessionModeDto>(
+                $"/api/aigateway/session/{sessionId}/agent-mode",
+                new
+                {
+                    mode = "execute",
+                    expectedVersion = initialAgentSession.AgentSessionVersion
+                });
+            changedMode.Should().Be(new AgentSessionModeDto(sessionId, "execute", 2));
+
+            using var staleModeResponse = await SendJsonRawAsync(
+                HttpMethod.Put,
+                $"/api/aigateway/session/{sessionId}/agent-mode",
+                new
+                {
+                    mode = "plan",
+                    expectedVersion = initialAgentSession.AgentSessionVersion
+                });
+            staleModeResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await ReadJsonAsync<ProblemDetailsDto>(staleModeResponse)).Code
+                .Should().Be("agent_session_version_conflict");
+
+            var refreshedAgentSession = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            refreshedAgentSession.AgentMode.Should().Be("execute");
+            refreshedAgentSession.AgentSessionVersion.Should().Be(2);
+
             using var sessionListResponse = await _fixture.HttpClient.GetAsync("/api/aigateway/session/list");
             sessionListResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -873,6 +906,15 @@ public sealed class IdentityAccessManagementTests
     private sealed record CreatedConversationTemplateDto(Guid Id, string Name);
 
     private sealed record CreatedSessionDto(Guid Id, string Title);
+
+    private sealed record AgentSessionProjectionDto(
+        Guid Id,
+        string? AgentMode,
+        long? AgentSessionVersion,
+        string? AgentSessionStatus,
+        bool AgentSessionResetRequired);
+
+    private sealed record AgentSessionModeDto(Guid SessionId, string Mode, long Version);
 
     private sealed record AuditLogListDto(
         IReadOnlyCollection<AuditLogSummaryDto> Items,

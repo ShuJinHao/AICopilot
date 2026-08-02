@@ -58,6 +58,33 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         queueColumns["run_attempt_id"].Should().Be("uuid");
         queueColumns["lease_expires_at"].Should().Be("timestamp with time zone");
         queueColumns["available_at"].Should().Be("timestamp with time zone");
+
+        var agentSessionColumns = await QueryColumnMetadataAsync(
+            connection,
+            "aigateway",
+            "agent_session_states",
+            [
+                "session_id",
+                "user_id",
+                "tenant_id",
+                "agent_schema_version",
+                "protected_state",
+                "status",
+                "active_turn_id",
+                "version",
+                "expires_at_utc",
+                "protected_approval_bindings"
+            ]);
+        agentSessionColumns["session_id"].Should().Be("uuid");
+        agentSessionColumns["user_id"].Should().Be("uuid");
+        agentSessionColumns["tenant_id"].Should().Be("character varying");
+        agentSessionColumns["agent_schema_version"].Should().Be("integer");
+        agentSessionColumns["protected_state"].Should().Be("text");
+        agentSessionColumns["status"].Should().Be("character varying");
+        agentSessionColumns["active_turn_id"].Should().Be("uuid");
+        agentSessionColumns["version"].Should().Be("bigint");
+        agentSessionColumns["expires_at_utc"].Should().Be("timestamp with time zone");
+        agentSessionColumns["protected_approval_bindings"].Should().Be("text");
     }
 
     [Fact]

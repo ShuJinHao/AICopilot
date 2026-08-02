@@ -109,13 +109,22 @@ export function resolveChatErrorMessage(payload: ChatErrorPayload) {
     case 'agent_plan_schema_invalid':
       return userFacingMessage ?? '计划步骤输入不符合工具 schema，请重新生成计划。'
     case 'tool_output_schema_invalid':
-      return userFacingMessage ?? '工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。'
+      return (
+        userFacingMessage ??
+        '工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。'
+      )
     case 'planner_tool_schema_unsupported':
       return userFacingMessage ?? 'Planner 收到不支持的工具 schema，请检查工具注册信息。'
     case 'agent_task_retry_not_allowed':
       return userFacingMessage ?? '当前任务状态不允许重试。'
     case 'approval_pending':
       return userFacingMessage ?? '当前会话已有待处理审批，请先处理审批请求。'
+    case 'agent_session_reset_required':
+      return userFacingMessage ?? '当前会话的 AgentSession 已过期或无法恢复，请新建会话后继续。'
+    case 'agent_session_interrupted':
+      return userFacingMessage ?? '上一次执行已中断；系统不会自动重放，请新建会话后继续。'
+    case 'agent_session_version_conflict':
+      return userFacingMessage ?? '会话状态已变化，请刷新后重试。'
     case 'agent_approval_state_conflict':
       return userFacingMessage ?? '审批状态与当前任务不一致，请刷新任务后重试。'
     case 'agent_finalization_state_conflict':

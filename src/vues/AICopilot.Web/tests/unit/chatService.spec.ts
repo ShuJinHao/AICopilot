@@ -62,6 +62,22 @@ describe('chatService bounded requests', () => {
     )
   })
 
+  it('sends an optimistic version with the authenticated Agent mode mutation', async () => {
+    serviceMocks.put.mockResolvedValue({
+      sessionId: 'session/1',
+      mode: 'execute',
+      version: 12,
+    })
+
+    await chatService.updateAgentMode('session/1', 'execute', 11)
+
+    expect(serviceMocks.put).toHaveBeenCalledWith(
+      '/aigateway/session/session%2F1/agent-mode',
+      { mode: 'execute', expectedVersion: 11 },
+      { timeoutMs: 60_000 },
+    )
+  })
+
   it('aborts a silent stream and reports a bounded timeout', async () => {
     vi.useFakeTimers()
     serviceMocks.fetchEventSource.mockImplementation(

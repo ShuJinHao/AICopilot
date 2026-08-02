@@ -33,6 +33,7 @@ public static class DependencyInjection
 {
     public static void AddEfCore(this IHostApplicationBuilder builder)
     {
+        AgentSessionStateDataProtection.Configure(builder.Services, builder.Configuration);
         SecretStringEncryptor.EnsureConfigured();
         builder.AddNpgsqlDbContext<AiCopilotDbContext>(
             "ai-copilot",
@@ -69,6 +70,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IRepository<RoutingModelConfiguration>>(provider => provider.GetRequiredService<AiGatewayRepository<RoutingModelConfiguration>>());
         builder.Services.AddScoped<IReadRepository<Session>>(provider => provider.GetRequiredService<AiGatewayRepository<Session>>());
         builder.Services.AddScoped<IRepository<Session>>(provider => provider.GetRequiredService<AiGatewayRepository<Session>>());
+        builder.Services.AddScoped<IAgentSessionStateStore, ProtectedAgentSessionStateStore>();
         builder.Services.AddScoped<IMessageTimelineProjectionStore, MessageTimelineProjectionStore>();
         builder.Services.AddScoped<IReadRepository<AgentTask>>(provider => provider.GetRequiredService<AiGatewayRepository<AgentTask>>());
         builder.Services.AddScoped<IRepository<AgentTask>>(provider => provider.GetRequiredService<AiGatewayRepository<AgentTask>>());

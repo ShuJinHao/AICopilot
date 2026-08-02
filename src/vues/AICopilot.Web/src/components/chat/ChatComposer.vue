@@ -1,53 +1,29 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onClickOutside, useEventListener } from '@vueuse/core'
-import {
-  FolderOpen,
-  ListChecks,
-  MessageCircle,
-  Plus,
-  Send,
-  Sparkles,
-  X,
-} from 'lucide-vue-next'
-import { useAgentWorkbench } from '@/composables/useAgentWorkbench'
+import { ListChecks, MessageCircle, Send } from 'lucide-vue-next'
 import { useChatStore } from '@/stores/chatStore'
 import { shouldResetComposerForSessionChange } from '@/utils/composerSession'
 
-type ComposerMode = 'plan' | 'chat'
+type AgentMode = 'plan' | 'execute'
 
 const store = useChatStore()
-const { canCreatePlan } = useAgentWorkbench()
-
 const inputValue = ref('')
-const agentGoal = ref('')
-const composerMode = ref<ComposerMode>('chat')
-const planAdvancedOpen = ref(false)
-const planAdvancedButton = ref<HTMLElement | null>(null)
-const planAdvancedPanel = ref<HTMLElement | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
+const isAgentModeChanging = ref(false)
 let lastCommittedComposerSessionId = store.composerSessionId
 
 const isComposerEditingDisabled = computed(
   () => !store.canEditComposerContext || store.isStreaming || store.hasPendingApproval,
 )
-const isChatSubmissionBlocked = computed(
+const isSubmissionBlocked = computed(
   () => isComposerEditingDisabled.value || store.isApprovalAuthorityUnknown,
 )
 const isSessionReady = computed(() =>
   Boolean(store.resolvedSessionId && !store.isSessionTransitionBlocked),
 )
-const attachmentSummary = computed(() =>
-  store.uploadedFiles.length ? `${store.uploadedFiles.length} 个附件` : '未添加附件',
-)
-const referencedTaskDigestLabel = computed(() => {
-  const digest = store.referencedAgentTask?.evidenceSetDigest
-  return digest ? `${digest.slice(0, 8)}…${digest.slice(-8)}` : null
-})
-const planPathSummary = computed(() => '自动生成执行路径')
-const composerPrimaryLabel = computed(() => (composerMode.value === 'plan' ? '生成计划' : '发送'))
-const composerPrimaryIcon = computed(() => (composerMode.value === 'plan' ? ListChecks : Send))
 const composerPlaceholder = computed(() => {
+  if (store.isAgentSessionUnavailable) {
+    return '当前会话不可恢复，请新建会话'
+  }
   if (store.hasPendingApproval) {
     return '请先处理待审批请求'
   }
@@ -55,21 +31,18 @@ const composerPlaceholder = computed(() => {
     return '正在确认待审批状态，可继续编辑'
   }
 
-  return composerMode.value === 'plan'
-    ? '输入目标，先生成可确认的计划'
-    : '输入一个简单问题，直接回答'
+  return store.agentMode === 'plan'
+    ? 'Plan 模式：描述目标，助手仅规划与整理待办'
+    : 'Execute 模式：输入问题，助手可按权限使用只读业务与知识工具'
 })
-const isComposerSubmitDisabled = computed(
-  () =>
-    !isSessionReady.value ||
-    !inputValue.value.trim() ||
-    (composerMode.value === 'plan'
-      ? !canCreatePlan.value || store.isAgentBusy
-      : isChatSubmissionBlocked.value),
+const isSubmitDisabled = computed(
+  () => !isSessionReady.value || !inputValue.value.trim() || isSubmissionBlocked.value,
 )
-async function sendDirectMessage() {
+
+async function submitMessage() {
   const content = inputValue.value.trim()
-  if (!content || !isSessionReady.value || isChatSubmissionBlocked.value) return
+  if (!content || !isSessionReady.value || isSubmissionBlocked.value) return
+
   inputValue.value = ''
   await store.sendMessage(content)
 }
@@ -77,74 +50,21 @@ async function sendDirectMessage() {
 function handleComposerKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
-    void submitComposer()
+    void submitMessage()
   }
 }
 
-function openFilePicker() {
-  if (!isSessionReady.value) return
-  fileInput.value?.click()
-}
+async function setAgentMode(mode: AgentMode) {
+  if (!store.canChangeAgentMode || isAgentModeChanging.value || store.agentMode === mode) return
 
-function handleKnowledgeBaseChange(event: Event) {
-  const target = event.target as HTMLSelectElement
-  store.selectKnowledgeBase(target.value || null)
-}
-
-async function handleFileChange(event: Event) {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (!file || !isSessionReady.value) {
-    target.value = ''
-    return
-  }
-  await store.uploadSessionFile(file)
-  target.value = ''
-}
-
-async function createAgentPlan() {
-  const goal = inputValue.value.trim() || agentGoal.value.trim()
-  if (!goal || !isSessionReady.value || !canCreatePlan.value) return
-  agentGoal.value = goal
-  inputValue.value = ''
-  await store.planAgentTask(goal)
-}
-
-async function submitComposer() {
-  if (isComposerSubmitDisabled.value) return
-
-  if (composerMode.value === 'chat') {
-    await sendDirectMessage()
-    return
-  }
-
-  await createAgentPlan()
-}
-
-function setComposerMode(mode: ComposerMode) {
-  if (!store.canEditComposerContext) return
-
-  composerMode.value = mode
-  if (mode === 'plan') {
-    store.clearReferencedAgentTask()
-  }
-  planAdvancedOpen.value = false
+  isAgentModeChanging.value = true
   store.clearCurrentSessionError()
-}
-
-onClickOutside(
-  planAdvancedPanel,
-  () => {
-    planAdvancedOpen.value = false
-  },
-  { ignore: [planAdvancedButton] },
-)
-
-useEventListener('keydown', (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && planAdvancedOpen.value) {
-    planAdvancedOpen.value = false
+  try {
+    await store.changeAgentMode(mode)
+  } finally {
+    isAgentModeChanging.value = false
   }
-})
+}
 
 watch(
   () => store.composerSessionId,
@@ -156,12 +76,9 @@ watch(
       nextSessionId,
     )
     lastCommittedComposerSessionId = nextSessionId
-    if (!shouldReset) return
-
-    inputValue.value = ''
-    agentGoal.value = ''
-    composerMode.value = 'chat'
-    planAdvancedOpen.value = false
+    if (shouldReset) {
+      inputValue.value = ''
+    }
   },
 )
 </script>
@@ -169,110 +86,29 @@ watch(
 <template>
   <footer class="command-composer">
     <div class="composer-mode-bar">
-      <div class="mode-switch" role="group" aria-label="输入模式">
+      <div class="mode-switch" role="group" aria-label="Harness Agent 运行模式">
         <button
           type="button"
-          :class="{ active: composerMode === 'chat' }"
-          :disabled="!store.canEditComposerContext"
-          @click="setComposerMode('chat')"
-        >
-          <MessageCircle :size="16" />
-          聊天模式
-        </button>
-        <button
-          type="button"
-          :class="{ active: composerMode === 'plan' }"
-          :disabled="!store.canEditComposerContext"
-          @click="setComposerMode('plan')"
+          :class="{ active: store.agentMode === 'plan' }"
+          :disabled="!store.canChangeAgentMode || isAgentModeChanging"
+          @click="setAgentMode('plan')"
         >
           <ListChecks :size="16" />
-          计划模式
+          Plan · 规划
+        </button>
+        <button
+          type="button"
+          :class="{ active: store.agentMode === 'execute' }"
+          :disabled="!store.canChangeAgentMode || isAgentModeChanging"
+          @click="setAgentMode('execute')"
+        >
+          <MessageCircle :size="16" />
+          Execute · 执行
         </button>
       </div>
-      <button
-        class="composer-add-button"
-        type="button"
-        :disabled="!isSessionReady || store.isAgentBusy"
-        @click="openFilePicker"
-      >
-        <Plus :size="17" />
-        添加
-      </button>
       <span class="composer-context-line">
-        <template v-if="composerMode === 'plan'">
-          {{ planPathSummary }} · {{ attachmentSummary }}
-        </template>
-        <template v-else-if="referencedTaskDigestLabel">
-          基于已完成任务证据 {{ referencedTaskDigestLabel }} · {{ attachmentSummary }}
-        </template>
-        <template v-else>普通聊天 · {{ attachmentSummary }}</template>
+        服务端权威模式：{{ store.agentMode === 'execute' ? 'Execute' : 'Plan' }} · Harness 主链
       </span>
-      <button
-        v-if="composerMode === 'chat' && store.referencedAgentTaskId"
-        class="composer-add-button"
-        type="button"
-        :disabled="!store.canEditComposerContext"
-        aria-label="取消任务结果引用"
-        @click="store.clearReferencedAgentTask()"
-      >
-        <X :size="16" />
-        取消结果引用
-      </button>
-    </div>
-
-    <input ref="fileInput" class="hidden-file" type="file" @change="handleFileChange" />
-
-    <div v-if="composerMode === 'plan'" class="composer-plan-strip">
-      <div>
-        <strong>输入目标，系统会自动生成可确认的计划</strong>
-        <span>系统根据目标生成业务能力和执行节点；需要限定资料范围时再展开高级选项。</span>
-      </div>
-      <button
-        ref="planAdvancedButton"
-        class="composer-advanced-toggle"
-        type="button"
-        :disabled="!store.canEditComposerContext"
-        :aria-expanded="planAdvancedOpen"
-        @click="planAdvancedOpen = !planAdvancedOpen"
-      >
-        <Sparkles :size="16" />
-        高级选项
-      </button>
-    </div>
-
-    <div
-      v-if="composerMode === 'plan' && planAdvancedOpen"
-      ref="planAdvancedPanel"
-      class="composer-options-panel"
-    >
-      <section
-        v-if="store.availableKnowledgeBases.length"
-        class="composer-option-group"
-      >
-        <div class="option-title">
-          <FolderOpen :size="17" />
-          <span>知识库</span>
-        </div>
-        <label class="select-field">
-          <select
-            :value="store.selectedKnowledgeBaseId || ''"
-            :disabled="!store.canEditComposerContext"
-            aria-label="选择知识库"
-            @change="handleKnowledgeBaseChange"
-          >
-            <option value="">不使用知识库</option>
-            <option
-              v-for="knowledgeBase in store.availableKnowledgeBases"
-              :key="knowledgeBase.id"
-              :value="knowledgeBase.id"
-            >
-              {{ knowledgeBase.name }}
-            </option>
-          </select>
-        </label>
-        <p>{{ store.selectedKnowledgeBase?.description || '需要限定资料范围时再手动选择。' }}</p>
-      </section>
-
     </div>
 
     <div class="composer-input-row">
@@ -286,12 +122,12 @@ watch(
       <button
         class="send-button"
         type="button"
-        :disabled="isComposerSubmitDisabled"
-        :aria-label="composerPrimaryLabel"
-        @click="submitComposer"
+        :disabled="isSubmitDisabled"
+        aria-label="发送"
+        @click="submitMessage"
       >
-        <component :is="composerPrimaryIcon" :size="19" />
-        <span>{{ composerPrimaryLabel }}</span>
+        <Send :size="19" />
+        <span>发送</span>
       </button>
     </div>
   </footer>

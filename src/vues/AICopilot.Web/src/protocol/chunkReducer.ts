@@ -6,7 +6,7 @@ import {
   type ChatErrorPayload,
   type ChatModelMetadataPayload,
   type FunctionApprovalRequest,
-  type IntentResult
+  type IntentResult,
 } from '@/types/protocols'
 import type {
   ApprovalChunk,
@@ -15,33 +15,24 @@ import type {
   FunctionCall,
   FunctionCallChunk,
   IntentChunk,
-  WidgetChunk
+  WidgetChunk,
 } from '@/types/models'
 import { resolveChatErrorMessage } from '@/stores/chatErrorStore'
 import { stripThinkingTags } from './modelOutputSanitizer'
-import { parseWidgetFromTextChunk } from './widgetPayloadParser'
 import { formatPlanDraftFailure } from './agentEventDisplay'
 
 export interface ChunkReducerCallbacks {
   setSessionError: (sessionId: string, message: string) => void
   onApprovalChunk: (sessionId: string) => void
   onAgentTaskChunk?: (sessionId: string, task: AgentTask) => void
+  onAgentSessionState?: (event: AgentEventPayload) => void
 }
 
 export function processChunk(
   message: ChatMessage,
   chunk: ChatChunk,
-  callbacks: ChunkReducerCallbacks
+  callbacks: ChunkReducerCallbacks,
 ) {
-  const parsedWidget = parseWidgetFromTextChunk(message, chunk)
-  if (parsedWidget) {
-    addWidgetChunk(message, chunk, parsedWidget.widget)
-    if (parsedWidget.remainingText) {
-      addTextChunk(message, { ...chunk, content: parsedWidget.remainingText })
-    }
-    return
-  }
-
   switch (chunk.type) {
     case ChunkType.Text:
       addTextChunk(message, chunk)
@@ -134,9 +125,8 @@ function addTextChunk(message: ChatMessage, chunk: ChatChunk) {
     return
   }
 
-  const sanitizedChunk = sanitizedContent === chunk.content
-    ? chunk
-    : { ...chunk, content: sanitizedContent }
+  const sanitizedChunk =
+    sanitizedContent === chunk.content ? chunk : { ...chunk, content: sanitizedContent }
   const previousChunk = message.chunks[message.chunks.length - 1]
 
   if (!previousChunk) {
@@ -156,7 +146,7 @@ function addWidgetChunk(message: ChatMessage, chunk: ChatChunk, parsedWidget: un
   message.chunks.push({
     ...chunk,
     type: ChunkType.Widget,
-    widget: parsedWidget
+    widget: parsedWidget,
   } as WidgetChunk)
 }
 
@@ -185,9 +175,11 @@ function addFunctionResultChunk(message: ChatMessage, chunk: ChatChunk) {
   try {
     const functionResult = JSON.parse(chunk.content) as FunctionCall
     const functionCallChunks = message.chunks.filter(
-      (item) => item.type === ChunkType.FunctionCall
+      (item) => item.type === ChunkType.FunctionCall,
     ) as FunctionCallChunk[]
-    const functionCallChunk = functionCallChunks.find((item) => item.functionCall.id === functionResult.id)
+    const functionCallChunk = functionCallChunks.find(
+      (item) => item.functionCall.id === functionResult.id,
+    )
 
     if (functionCallChunk) {
       functionCallChunk.functionCall.result = functionResult.result
@@ -202,14 +194,14 @@ function addFunctionResultChunk(message: ChatMessage, chunk: ChatChunk) {
 function addApprovalRequestChunk(
   message: ChatMessage,
   chunk: ChatChunk,
-  callbacks: ChunkReducerCallbacks
+  callbacks: ChunkReducerCallbacks,
 ) {
   try {
     const request = JSON.parse(chunk.content) as FunctionApprovalRequest
     message.chunks.push({
       ...chunk,
       request,
-      status: 'pending'
+      status: 'pending',
     } as ApprovalChunk)
     callbacks.onApprovalChunk(message.sessionId)
   } catch (error) {
@@ -221,17 +213,27 @@ function addApprovalRequestChunk(
 function addAgentEventChunk(
   message: ChatMessage,
   chunk: ChatChunk,
-  callbacks: ChunkReducerCallbacks
+  callbacks: ChunkReducerCallbacks,
 ) {
   try {
     const event = JSON.parse(chunk.content) as AgentEventPayload
     message.chunks.push({
       ...chunk,
-      event
+      event,
     } as AgentEventChunk)
 
     if (event.stage === 'plan_draft_failed') {
       callbacks.setSessionError(message.sessionId, formatPlanDraftFailure(event))
+    }
+    if (
+      event.stage === 'agent_session_state' &&
+      event.sessionId &&
+      (event.mode === 'plan' || event.mode === 'execute') &&
+      typeof event.version === 'number' &&
+      typeof event.status === 'string' &&
+      typeof event.pendingApproval === 'boolean'
+    ) {
+      callbacks.onAgentSessionState?.(event)
     }
   } catch (error) {
     console.error('Failed to parse agent event chunk payload.', error)
@@ -242,7 +244,7 @@ function addAgentEventChunk(
 function addAgentTaskChunk(
   message: ChatMessage,
   chunk: ChatChunk,
-  callbacks: ChunkReducerCallbacks
+  callbacks: ChunkReducerCallbacks,
 ) {
   try {
     const task = JSON.parse(chunk.content) as AgentTask
@@ -253,11 +255,7 @@ function addAgentTaskChunk(
   }
 }
 
-function addErrorChunk(
-  message: ChatMessage,
-  chunk: ChatChunk,
-  callbacks: ChunkReducerCallbacks
-) {
+function addErrorChunk(message: ChatMessage, chunk: ChatChunk, callbacks: ChunkReducerCallbacks) {
   try {
     const payload = JSON.parse(chunk.content) as ChatErrorPayload
     const userFacingMessage = resolveChatErrorMessage(payload)
@@ -266,7 +264,7 @@ function addErrorChunk(
       addTextChunk(message, {
         ...chunk,
         type: ChunkType.Text,
-        content: userFacingMessage
+        content: userFacingMessage,
       })
     }
 

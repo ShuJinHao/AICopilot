@@ -40,9 +40,8 @@ export const useSessionStore = defineStore('chatSession', () => {
   }
 
   function activateSession(sessionId: string | null) {
-    activeSessionId.value = sessionId && sessions.value.some((session) => session.id === sessionId)
-      ? sessionId
-      : null
+    activeSessionId.value =
+      sessionId && sessions.value.some((session) => session.id === sessionId) ? sessionId : null
   }
 
   function beginSessionActivation(nextSessionId?: string | null) {
@@ -65,7 +64,7 @@ export const useSessionStore = defineStore('chatSession', () => {
   function upsertSession(session: Session) {
     const index = sessions.value.findIndex((item) => item.id === session.id)
     if (index >= 0) {
-      sessions.value[index] = session
+      sessions.value[index] = { ...sessions.value[index], ...session }
       return
     }
 
@@ -74,9 +73,42 @@ export const useSessionStore = defineStore('chatSession', () => {
 
   async function loadSessions() {
     sessions.value = await chatService.getSessions()
-    if (activeSessionId.value && !sessions.value.some((session) => session.id === activeSessionId.value)) {
+    if (
+      activeSessionId.value &&
+      !sessions.value.some((session) => session.id === activeSessionId.value)
+    ) {
       activeSessionId.value = null
     }
+  }
+
+  async function refreshSession(id: string) {
+    const session = await chatService.getSession(id)
+    upsertSession(session)
+    return session
+  }
+
+  function applyAgentSessionState(
+    sessionId: string,
+    state: {
+      mode: 'plan' | 'execute'
+      version: number
+      status: string
+      pendingApproval: boolean
+    },
+  ) {
+    const existing = sessions.value.find((session) => session.id === sessionId)
+    if (!existing) {
+      return
+    }
+
+    upsertSession({
+      ...existing,
+      agentMode: state.mode,
+      agentSessionVersion: state.version,
+      agentSessionStatus: state.status,
+      agentSessionResetRequired: false,
+      hasPendingApproval: state.pendingApproval,
+    })
   }
 
   async function createSession() {
@@ -120,8 +152,10 @@ export const useSessionStore = defineStore('chatSession', () => {
     failSessionActivation,
     upsertSession,
     loadSessions,
+    refreshSession,
+    applyAgentSessionState,
     createSession,
     deleteSession,
-    reset
+    reset,
   }
 })

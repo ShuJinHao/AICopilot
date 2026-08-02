@@ -49,6 +49,9 @@ public static partial class AppProblemCodes
     public const string ToolExecutionTimeout = "tool_execution_timeout";
     public const string CloudReadonlyToolDisabled = "cloud_readonly_tool_disabled";
     public const string CloudReadonlyIntentUnsupported = "cloud_readonly_intent_unsupported";
+    public const string AgentSessionResetRequired = "agent_session_reset_required";
+    public const string AgentSessionInterrupted = "agent_session_interrupted";
+    public const string AgentSessionVersionConflict = "agent_session_version_conflict";
 }
 
 public static class ApiProblemExtensionKeys

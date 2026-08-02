@@ -1,42 +1,54 @@
+using System.Runtime.ExceptionServices;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
 
 namespace AICopilot.MigrationWorkApp;
 
 internal static class MigrationWorkerSecretMigrator
 {
     public static async Task<SecretMigrationResult> MigrateAsync(
-        AiGatewayDbContext aiGatewayDbContext,
-        RagDbContext ragDbContext,
+        DbContextOptions<AiGatewayDbContext> aiGatewayDbContextOptions,
+        DbContextOptions<RagDbContext> ragDbContextOptions,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(aiGatewayDbContext);
-        ArgumentNullException.ThrowIfNull(ragDbContext);
+        ArgumentNullException.ThrowIfNull(aiGatewayDbContextOptions);
+        ArgumentNullException.ThrowIfNull(ragDbContextOptions);
 
-        var strategy = aiGatewayDbContext.Database.CreateExecutionStrategy();
+        await using var executionStrategyContext =
+            new AiGatewayDbContext(aiGatewayDbContextOptions);
+        var strategy = executionStrategyContext.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
-            await aiGatewayDbContext.Database.OpenConnectionAsync(cancellationToken);
-            await using var transaction = await aiGatewayDbContext.Database.BeginTransactionAsync(cancellationToken);
+            // A failed attempt may already have accepted encrypted values into its
+            // ChangeTracker before the shared transaction rolls back. Every retry
+            // therefore owns fresh contexts and reloads both source tables.
+            await using var transactionalAiGatewayDbContext =
+                new AiGatewayDbContext(aiGatewayDbContextOptions);
+            await transactionalAiGatewayDbContext.Database.OpenConnectionAsync(cancellationToken);
+            await using var transaction =
+                await transactionalAiGatewayDbContext.Database.BeginTransactionAsync(cancellationToken);
             var committed = false;
 
             try
             {
-                var ragOptions = new DbContextOptionsBuilder<RagDbContext>()
-                    .UseNpgsql(aiGatewayDbContext.Database.GetDbConnection())
+                var transactionalRagOptions =
+                    new DbContextOptionsBuilder<RagDbContext>(ragDbContextOptions)
+                    .UseNpgsql(transactionalAiGatewayDbContext.Database.GetDbConnection())
                     .Options;
 
-                await using var transactionalRagDbContext = new RagDbContext(ragOptions);
+                await using var transactionalRagDbContext =
+                    new RagDbContext(transactionalRagOptions);
                 await transactionalRagDbContext.Database.UseTransactionAsync(
                     transaction.GetDbTransaction(),
                     cancellationToken);
 
                 var result = await MigrateInCurrentTransactionAsync(
-                    aiGatewayDbContext,
+                    transactionalAiGatewayDbContext,
                     transactionalRagDbContext,
                     cancellationToken);
 
@@ -44,6 +56,20 @@ internal static class MigrationWorkerSecretMigrator
                 committed = true;
 
                 return result;
+            }
+            catch (Exception exception)
+            {
+                var retryable = FindRetryableProviderException(exception);
+                if (retryable is null)
+                {
+                    throw;
+                }
+
+                // The non-retrying strategy on the secondary context wraps a
+                // provider transient in InvalidOperationException. Restore only
+                // the explicit Npgsql transient so the outer strategy can retry.
+                ExceptionDispatchInfo.Capture(retryable).Throw();
+                throw;
             }
             finally
             {
@@ -53,6 +79,19 @@ internal static class MigrationWorkerSecretMigrator
                 }
             }
         });
+    }
+
+    private static Exception? FindRetryableProviderException(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is NpgsqlException { IsTransient: true })
+            {
+                return current;
+            }
+        }
+
+        return null;
     }
 
     private static async Task<SecretMigrationResult> MigrateInCurrentTransactionAsync(

@@ -355,7 +355,9 @@ public sealed class SemanticAnalysisRunner(
         AgentWorkflowSink? sink,
         CancellationToken cancellationToken)
     {
-        if (sink is null || plan.Target != SemanticQueryTarget.DeviceLog)
+        if (sink is null ||
+            rows.Count == 0 ||
+            plan.Target != SemanticQueryTarget.DeviceLog)
         {
             return;
         }

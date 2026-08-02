@@ -38,7 +38,8 @@ RUN apt-get -o Acquire::Retries=5 update \
     && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         libgssapi-krb5-2 \
         tzdata \
-    && mkdir -p /app /var/lib/aicopilot/storage /var/lib/aicopilot/artifact-workspaces \
+    && mkdir -p /app /var/lib/aicopilot/storage /var/lib/aicopilot/artifact-workspaces /var/lib/aicopilot/data-protection-keys \
+    && chmod 700 /var/lib/aicopilot/data-protection-keys \
     && chown -R app:app /app /var/lib/aicopilot \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
