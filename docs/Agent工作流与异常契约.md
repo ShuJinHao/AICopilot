@@ -4,8 +4,8 @@
 
 ## 1. 唯一运行主链
 
-- `POST /api/aigateway/chat` 与 `POST /api/aigateway/approval/decision` 只能构造并续流同一个 `HarnessAgent`。`ChatStreamHandler`、`ApprovalDecisionStreamHandler` 不得调用 `AgentWorkflowPipeline`，不得保留第二套路由、planner、fan-out/fan-in 或 worker 执行入口。
-- 前端只有一个聊天输入框。用户输入无论当前是 `Plan` 还是 `Execute` 都进入 Harness；不得显示或调用旧 composer mode、计划高级面板、聊天附件、`PlanDraftCard`、`AgentRunThread`、`AgentTask`、业务审批或 `ArtifactWorkspace`。
+- `POST /api/aigateway/chat` 与 `POST /api/aigateway/approval/decision` 只能构造并续流同一个 `HarnessAgent`。`ChatStreamHandler`、`ApprovalDecisionStreamHandler` 不得保留第二套路由、计划编译、fan-out/fan-in 或 worker 执行入口。
+- 前端只有一个聊天输入框。用户输入无论当前是 `Plan` 还是 `Execute` 都进入 Harness；不得显示或调用已退出的任务面板、业务审批、文件工作台或聊天附件。
 - 对话运行时公开入口只保留 Session、消息历史、Chat、Agent mode 与 Harness tool approval。`/agent/task/**`、`/agent/approval/**`、`/workspace/**`、`/artifact/**`、`/upload/**`、`/approval-policy/**`、`session/timeline` 和 `session/safety-attestation` 当前必须不可达。
 - Harness 主聊天固定使用 `Microsoft.Agents.AI.Harness` / `Microsoft.Agents.AI` `1.16.0`，每轮最多 8 次模型调用。必须关闭 FileMemory、WebSearch、AgentSkills、BackgroundAgents、LoopEvaluators 与 compaction，不注册 FileAccessStore、Shell 或文件 Artifact；聊天只允许文本和服务端可信 inline Widget。
 - 模型端点、认证、配额、熔断和遥测由轻量 `IChatClient` 工厂负责，且作用于每一次真实模型调用。Text-to-SQL、分类和结构化生成直接使用轻量客户端，禁止嵌套 Harness；主聊天不得恢复 `Microsoft.Agents.AI.Workflows` 依赖。
@@ -13,7 +13,7 @@
 
 ### 1.1 Plan / Execute
 
-- `Plan` 与 `Execute` 是同一 Harness `AgentSession` 的服务端权威模式；新会话默认 `Plan`。它们不是旧 `PlanDraft` / `ExecutablePlan` / `AgentTask` 状态机。
+- `Plan` 与 `Execute` 是同一 Harness `AgentSession` 的服务端权威模式；新会话默认 `Plan`，不得映射为另一套任务状态机。
 - `Plan` 只允许 Harness Todo 与 `mode_get`，不得向模型公开 Cloud、RAG、MCP、`BusinessQuery`、`KnowledgeQuery` 或其它外部/业务工具，也不得执行真实业务动作。
 - `Execute` 可以直接回答，或调用经过当前用户、当前会话和实时安全门禁筛选的工具。模式切换不能扩大注册表、权限、风险、批准或数据边界。
 - 模式切换唯一入口是认证的 `PUT /api/aigateway/session/{sessionId}/agent-mode`，请求携带 `plan|execute` 与 `expectedVersion`，仅 owner 可调用，并通过 Harness 官方 `SetModeAsync` 修改。活跃 turn、待批准、Interrupted 或版本冲突必须拒绝。
@@ -71,7 +71,7 @@ Cloud 只读正式能力为：
 - 每次批准绑定用户、租户、session、request id、toolCallId、规范工具身份、schema version 与 canonical 参数 SHA-256。续流前重新验证全部绑定；漂移、跨 owner/session、重复或外来 call、Interrupted 后旧批准全部 fail-closed。
 - 本版批准协议每个 governed turn 只允许一个不同的工具调用。provider 即使忽略 `AllowMultipleToolCalls=false` 返回第二个不同的待批调用，也不得执行任一工具、不得续批或保存部分绑定；服务端必须清空批准绑定，将 AgentSession 标记为 `Interrupted`，返回既有 `agent_session_interrupted` 并要求用户新建会话。
 - 主聊天只允许批准 AICopilot 自身、可逆、幂等或结果可查询的动作。Cloud/MES/ERP 写入、设备启停、生产控制、不可逆或结果不可查询动作即使用户批准也继续硬阻断。
-- 权威入口只有 `GET /api/aigateway/approval/pending` 与 `POST /api/aigateway/approval/decision`。旧 AgentTask 业务审批和 ApprovalPolicy 管理入口不属于 Harness approval。
+- 权威入口只有 `GET /api/aigateway/approval/pending` 与 `POST /api/aigateway/approval/decision`。业务审批与策略管理不属于 Harness approval。
 
 ## 4. Cloud 写入禁止
 
@@ -94,22 +94,17 @@ Cloud 只读正式能力为：
 - 运行详情默认折叠，只展示工具名、查询次数、返回行数、截断状态、Widget 类型、业务过滤条件和安全摘要；不得展示 SQL、连接信息、内部路径、原始结果行或未脱敏错误。
 - 消息、SSE、运行状态、Harness approval、inline Widget 与 Interrupted / ResetRequired 新建会话提示均以服务端状态为权威。
 
-## 7. 待 B2 物理删除的不可达结构
+## 7. 物理边界与禁止回潮
 
-以下结构当前不是活动契约，不能被 UI、HTTP API 或主聊天调用；仅因 B1/B2 原子拆分暂留内部源码与数据库对象，待 B2 同批物理删除：
-
-- Plan v1/v2、PlanDraft、ExecutablePlan、编译器、intent routing 和旧四分支 workflow。
-- AgentTask、step、run attempt、queue、node run、checkpoint、lease、worker 和业务审批。
-- ApprovalRequest / ApprovalPolicy、现场确认、Artifact / ArtifactWorkspace、聊天上传与 ReferencedAgentTask。
-- RoutingModel、ChatRuntimeSettings 和只服务旧编排的 ConversationTemplate scope。
-
-不得为修复、兼容旧测试或补充能力重新公开这些结构；任何恢复公开可达性的修改都视为违反主链唯一性。
+- 当前二进制、DI、HTTP 路由、数据库 baseline 和前端不得包含另一套计划编译、意图分支、耐久任务队列、业务审批、文件工作台、路由模型或时间线投影。
+- AiGateway 文件上传、报告/PDF/PPTX/XLSX 生成、预览和下载不属于主聊天。RAG 文档上传与可信 inline Widget 保持独立活动契约。
+- 不得为兼容旧客户端、旧测试或旧数据恢复已退出路由、类型、配置、权限、错误码、表或种子。历史只通过 Git 和本批保留的恢复 bundle 追溯。
 
 ## 8. 源码归属与门禁
 
 - Harness 主链：`src/services/AICopilot.AiGatewayService/Agents`。
 - 工具注册、安全与 MCP：`src/services/AICopilot.AiGatewayService/Tools`、`src/services/AICopilot.McpService`、`src/infrastructure/AICopilot.Infrastructure/Mcp`。
-- BusinessQuery 与当前过渡期可信 Widget 适配：`src/services/AICopilot.AiGatewayService/Agents` 和受控的业务查询执行器。
+- BusinessQuery 与可信 Widget 适配：`src/services/AICopilot.AiGatewayService/BusinessQueries` 与 `src/services/AICopilot.AiGatewayService/Agents/MainChatBusinessQueryTool.cs`。
 - AgentSession 加密持久化：`src/infrastructure/AICopilot.EntityFrameworkCore`；启动目录验证：`src/hosts/AICopilot.HttpApi`。
 - 后端异常：`src/hosts/AICopilot.HttpApi/Infrastructure/UseCaseExceptionHandler.cs` 与 `src/shared/AICopilot.SharedKernel/Result`。
 - 前端 SSE、错误、runtime details 与 Widget：`src/vues/AICopilot.Web/src/protocol`、`src/vues/AICopilot.Web/src/stores`、`src/vues/AICopilot.Web/src/components/chat`。
@@ -159,9 +154,6 @@ dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj -
 | `capability_not_allowed` | 请求能力不允许 |
 | `control_action_blocked` | 控制或写操作被硬阻断 |
 | `token_budget_exceeded` | 模型调用预算已用尽 |
-| `onsite_presence_required` | 工具批准要求有效的现场在岗声明 |
-| `onsite_presence_expired` | 现场在岗声明已过期 |
-| `approval_reconfirmation_required` | 工具批准需要再次显式确认 |
 | `tool_not_registered` | Tool 未精确注册 |
 | `tool_disabled` | Tool 已禁用 |
 | `tool_blocked` | Tool 被安全策略阻断 |
@@ -181,38 +173,5 @@ dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj -
 | `cloud_ai_read_rate_limited` | Cloud AiRead 被限流 |
 | `cloud_ai_read_unavailable` | Cloud AiRead 不可用 |
 | `cloud_ai_read_missing_required_parameter` | Cloud AiRead 缺少必填参数 |
-
-以下 code 仅因对应内部类型延后到 B2 物理删除而仍存在于当前二进制；活动 UI、HTTP API 和主聊天不得产生或依赖它们，列在这里不构成活动契约：
-
-| Code | 非活动来源 |
-|---|---|
-| `agent_approval_state_conflict` | 不可达的旧 AgentTask 业务审批状态冲突 |
-| `agent_approval_rejected` | 不可达的旧 AgentTask 业务审批拒绝 |
-| `planner_tool_schema_unsupported` | 不可达的旧 Planner Tool schema |
-| `agent_plan_invalid` | 不可达的旧 Agent Plan 校验 |
-| `plan_payload_too_large` | 不可达的旧 canonical Plan v2 大小门禁 |
-| `evidence_payload_too_large` | 不可达的旧 inline Evidence 大小门禁 |
-| `agent_plan_tool_denied` | 不可达的旧 Plan Tool 授权 |
-| `agent_plan_schema_invalid` | 不可达的旧 Plan schema 校验 |
-| `tool_execution_not_found` | 不可达的旧 durable Tool 执行记录 |
-| `artifact_finalized` | 不可达的旧 Artifact 状态 |
-| `artifact_generation_failed` | 不可达的旧 Artifact 生成 |
-| `workspace_manifest_invalid` | 不可达的旧 ArtifactWorkspace manifest |
-| `agent_task_run_in_progress` | 不可达的旧 AgentTask attempt |
-| `agent_task_retry_not_allowed` | 不可达的旧 AgentTask 重试 |
-| `agent_task_run_lease_expired` | 不可达的旧 AgentTask lease |
-| `agent_task_cancellation_requested` | 不可达的旧 AgentTask 取消 |
-| `agent_task_run_queued` | 不可达的旧 AgentTask 队列 |
-| `agent_task_run_queue_not_found` | 不可达的旧 AgentTask 队列项 |
-| `agent_task_run_queue_lease_expired` | 不可达的旧 AgentTask 队列 lease |
-| `agent_task_run_fence_stale` | 不可达的旧 AgentTask fencing |
-| `agent_node_run_fence_stale` | 不可达的旧 node run fencing |
-| `agent_node_run_state_conflict` | 不可达的旧 node run 状态机 |
-| `agent_run_budget_exceeded` | 不可达的旧 AgentTask 封存预算 |
-| `agent_worker_unavailable` | 不可达的旧 AgentTask worker |
-| `agent_worker_workspace_mismatch` | 不可达的旧 worker/workspace 绑定 |
-| `agent_finalization_state_conflict` | 不可达的旧 Artifact 最终关单 |
-| `agent_run_queue_dead_letter_not_allowed` | 不可达的旧 AgentTask dead-letter 操作 |
-| `agent_run_queue_operation_denied` | 不可达的旧 AgentTask 队列操作 |
 
 Cloud typed GET 的路径、参数、结果 envelope 与 no-fallback 规则只在[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)维护，本文件不复制接口表。

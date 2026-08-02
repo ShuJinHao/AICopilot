@@ -28,8 +28,8 @@
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.AgentPlugin\AICopilot.AgentPlugin.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
-    <ProjectReference Include="..\..\testing\AICopilot.AgentWorkflowTestKit\AICopilot.AgentWorkflowTestKit.csproj" />
-    <Using Include="AICopilot.AgentWorkflowTestKit" />
+    <ProjectReference Include="..\..\testing\AICopilot.HarnessTestKit\AICopilot.HarnessTestKit.csproj" />
+    <Using Include="AICopilot.HarnessTestKit" />
   </ItemGroup>
   <Import Project="..\AICopilot.TestRunner.Shared.props" />
 </Project>

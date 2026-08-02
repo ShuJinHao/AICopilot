@@ -1,11 +1,11 @@
-using AICopilot.AgentWorkflowTestKit;
+using AICopilot.HarnessTestKit;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Infrastructure.Mcp;
 using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.InProcessTests;
 
-public sealed class McpToolRegistrySynchronizerTests : ToolRegistryGovernanceTestBase
+public sealed class McpToolRegistrySynchronizerTests
 {
     [Fact]
     public async Task McpToolRegistrySynchronizer_ShouldRejectInvalidSchemaBeforeRegistration_AndDisablePriorVersion()
@@ -72,7 +72,6 @@ public sealed class McpToolRegistrySynchronizerTests : ToolRegistryGovernanceTes
         tool.RequiresApproval.Should().BeTrue();
         tool.SchemaVersion.Should().Be(2);
         tool.CatalogVersion.Should().Be(2);
-        tool.ApprovalPolicy.Should().Be("RediscoveryReviewRequired");
         var quarantinedAt = tool.UpdatedAt;
 
         await synchronizer.UpsertDiscoveredToolsAsync(
@@ -98,8 +97,8 @@ public sealed class McpToolRegistrySynchronizerTests : ToolRegistryGovernanceTes
                     "mcp__runtime_mcp__read",
                     "read",
                     "Read MCP data.",
-                    """{"type":"object"}""",
-                    """{"type":"object"}""",
+                    """{"type":"object","properties":{},"additionalProperties":false}""",
+                    """{"type":"object","properties":{},"additionalProperties":false}""",
                     AiToolRiskLevel.Low)
             ],
             CancellationToken.None);
@@ -134,8 +133,8 @@ public sealed class McpToolRegistrySynchronizerTests : ToolRegistryGovernanceTes
                     "mcp__runtime_mcp__read",
                     "read",
                     "Read MCP data after rediscovery.",
-                    """{"type":"object","properties":{"input":{"type":"string"}}}""",
-                    """{"type":"object"}""",
+                    """{"type":"object","properties":{"input":{"type":"string"}},"additionalProperties":false}""",
+                    """{"type":"object","properties":{},"additionalProperties":false}""",
                     AiToolRiskLevel.RequiresApproval)
             ],
             CancellationToken.None);
@@ -149,7 +148,6 @@ public sealed class McpToolRegistrySynchronizerTests : ToolRegistryGovernanceTes
         tool.RiskLevel.Should().Be(AiToolRiskLevel.RequiresApproval);
         tool.SchemaVersion.Should().Be(2);
         tool.CatalogVersion.Should().Be(2);
-        tool.ApprovalPolicy.Should().Be("RediscoveryReviewRequired");
 
         await synchronizer.UpsertDiscoveredToolsAsync(
             "runtime-mcp",
@@ -158,8 +156,8 @@ public sealed class McpToolRegistrySynchronizerTests : ToolRegistryGovernanceTes
                     "mcp__runtime_mcp__read",
                     "read",
                     "Same governed contract after rediscovery.",
-                    """{"type":"object","properties":{"input":{"type":"string"}}}""",
-                    """{"type":"object"}""",
+                    """{"type":"object","properties":{"input":{"type":"string"}},"additionalProperties":false}""",
+                    """{"type":"object","properties":{},"additionalProperties":false}""",
                     AiToolRiskLevel.RequiresApproval)
             ],
             CancellationToken.None);
@@ -175,8 +173,8 @@ public sealed class McpToolRegistrySynchronizerTests : ToolRegistryGovernanceTes
                     "mcp__runtime_mcp__read",
                     "read",
                     "Target drift must be reviewed.",
-                    """{"type":"object","properties":{"input":{"type":"string"}}}""",
-                    """{"type":"object"}""",
+                    """{"type":"object","properties":{"input":{"type":"string"}},"additionalProperties":false}""",
+                    """{"type":"object","properties":{},"additionalProperties":false}""",
                     AiToolRiskLevel.Medium)
             ],
             CancellationToken.None);

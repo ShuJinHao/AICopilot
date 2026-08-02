@@ -128,8 +128,6 @@ export interface ChatHistoryMessage {
   renderChunks?: import('@/types/protocols').ChatChunk[] | null
   finalModelId?: string | null
   finalModelName?: string | null
-  routingModelId?: string | null
-  routingModelName?: string | null
   contextWindowTokens?: number | null
   maxOutputTokens?: number | null
 }
@@ -143,76 +141,7 @@ export interface ChatHistoryPage {
   hasMoreAfter: boolean
 }
 
-export interface SessionTimelineEvent {
-  sequence: number
-  eventType: string
-  createdAt: string
-  messageId?: number | null
-  agentTaskId?: string | null
-  agentTaskTitle?: string | null
-  agentTaskGoal?: string | null
-  agentTaskStatus?: string | null
-  agentStepId?: string | null
-  agentStepIndex?: number | null
-  agentStepTitle?: string | null
-  agentStepStatus?: string | null
-  agentStepToolCode?: string | null
-  approvalRequestId?: string | null
-  approvalType?: string | null
-  approvalStatus?: string | null
-  approvalTargetName?: string | null
-  approvalDecidedAt?: string | null
-  artifactWorkspaceId?: string | null
-  workspaceCode?: string | null
-  workspaceStatus?: string | null
-  artifactId?: string | null
-  artifactName?: string | null
-  artifactType?: string | null
-  artifactStatus?: string | null
-  artifactRelativePath?: string | null
-  artifactDownloadUrl?: string | null
-  agentStepOutputKind?: string | null
-  agentStepResultCount?: number | null
-  agentStepLowConfidence?: boolean | null
-  agentStepSources?: SessionTimelineStepSource[]
-}
-
-export interface SessionTimelineStepSource {
-  knowledgeBaseId?: string | null
-  documentId?: number | null
-  documentName?: string | null
-  chunkIndex?: number | null
-  score?: number | null
-  isLowConfidence?: boolean | null
-  lowConfidenceReason?: string | null
-  textPreview?: string | null
-}
-
-export interface SessionTimelinePage {
-  items: SessionTimelineEvent[]
-  beforeSequence?: number | null
-  afterSequence?: number | null
-  hasMore: boolean
-  hasMoreBefore: boolean
-  hasMoreAfter: boolean
-}
-
-export interface PlannerToolPropertySummary {
-  name: string
-  type: string
-  enum: string[]
-  required: boolean
-}
-
-export interface PlannerToolSchemaSummary {
-  type: string
-  required: string[]
-  properties: PlannerToolPropertySummary[]
-  itemsType?: string | null
-  isTruncated: boolean
-}
-
-export interface AgentPlannerToolSummary {
+export interface ToolRegistrationSummary {
   toolCode: string
   displayName: string
   description: string
@@ -225,25 +154,19 @@ export interface AgentPlannerToolSummary {
   timeoutSeconds: number
   auditLevel: string
   runtimeAvailable: boolean
-  inputSchema?: PlannerToolSchemaSummary | null
-  outputSchema?: PlannerToolSchemaSummary | null
   category: string
   businessDomains?: string[] | null
   dataBoundary: string
-  isVisibleToPlanner: boolean
   isExecutableByAgent: boolean
   schemaVersion: number
   catalogVersion: number
-  approvalPolicy: string
-  providerKind: string
-  isMock: boolean
 }
 
 export interface ToolRegistryCatalog {
   version: number
   availableToolCount: number
   riskSummary: Record<string, number>
-  tools: AgentPlannerToolSummary[]
+  tools: ToolRegistrationSummary[]
 }
 
 export interface StreamCallbacks {
@@ -274,17 +197,7 @@ export interface LanguageModelSummary {
 export type LanguageModelDetail = LanguageModelSummary
 
 export type LanguageModelApiKeyAction = 'keep' | 'replace' | 'clear'
-export type LanguageModelUsage = 'Chat' | 'Routing' | 'Planner' | 'Embedding'
-
-export interface AgentChartPreview {
-  labels: string[]
-  values: number[]
-  source?: string
-  sourceMode?: string
-  sourceLabel?: string
-  isSimulation?: boolean
-  queryHash?: string
-}
+export type LanguageModelUsage = 'Chat'
 
 export interface LanguageModelFormModel {
   id?: string
@@ -328,24 +241,6 @@ export interface LanguageModelTestResult {
   error?: string | null
   elapsedMilliseconds: number
   checkedAt: string
-}
-
-export interface RoutingModelSummary {
-  id: string
-  name: string
-  modelId: string
-  modelName: string
-  modelProvider: string
-  isActive: boolean
-}
-
-export type RoutingModelDetail = RoutingModelSummary
-
-export interface RoutingModelFormModel {
-  id?: string
-  name: string
-  modelId: string
-  isActive: boolean
 }
 
 export interface ConversationTemplateSummary {

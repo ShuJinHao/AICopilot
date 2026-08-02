@@ -33,6 +33,9 @@ public sealed class MigrationOwnershipArchitectureTests
             "aigateway.approval_policies",
             "aigateway.sessions",
             "aigateway.messages",
+            "aigateway.tool_registrations",
+            "aigateway.agent_session_states",
+            "aigateway.model_quota_reservations",
             "rag.embedding_models",
             "rag.knowledge_bases",
             "rag.documents",
@@ -85,14 +88,17 @@ public sealed class MigrationOwnershipArchitectureTests
         IsMappedTable(outbox, "outbox", "outbox_messages").Should().BeTrue();
         IsExcludedTable(markers, "persistence", "commit_markers").Should().BeTrue();
 
-        MigratedTableIds(aiGateway).Should().Contain(new[]
+        MigratedTableIds(aiGateway).Should().BeEquivalentTo(new[]
         {
             "aigateway.language_models",
             "aigateway.conversation_templates",
-            "aigateway.approval_policies",
             "aigateway.sessions",
-            "aigateway.messages"
+            "aigateway.messages",
+            "aigateway.tool_registrations",
+            "aigateway.agent_session_states",
+            "aigateway.model_quota_reservations"
         });
+        MigratedTableIds(aiGateway).Should().NotContain("aigateway.approval_policies");
         MigratedTableIds(rag).Should().Contain(new[]
         {
             "rag.embedding_models",
@@ -212,9 +218,11 @@ public sealed class MigrationOwnershipArchitectureTests
         ("identity", "external_identity_bindings"),
         ("aigateway", "language_models"),
         ("aigateway", "conversation_templates"),
-        ("aigateway", "approval_policies"),
         ("aigateway", "sessions"),
         ("aigateway", "messages"),
+        ("aigateway", "tool_registrations"),
+        ("aigateway", "agent_session_states"),
+        ("aigateway", "model_quota_reservations"),
         ("rag", "embedding_models"),
         ("rag", "knowledge_bases"),
         ("rag", "documents"),

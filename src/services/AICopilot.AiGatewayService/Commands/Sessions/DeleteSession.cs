@@ -17,8 +17,7 @@ public record DeleteSessionCommand(Guid Id) : ICommand<Result>;
 
 public class DeleteSessionCommandHandler(
     IRepository<Session> repo,
-    ICurrentUser currentUser,
-    IFinalAgentContextStore finalAgentContextStore)
+    ICurrentUser currentUser)
     : ICommandHandler<DeleteSessionCommand, Result>
 {
     public async Task<Result> Handle(DeleteSessionCommand request, CancellationToken cancellationToken)
@@ -37,7 +36,6 @@ public class DeleteSessionCommandHandler(
 
         repo.Delete(result);
         await repo.SaveChangesAsync(cancellationToken);
-        await finalAgentContextStore.RemoveAsync(request.Id, cancellationToken);
 
         return Result.Success();
     }

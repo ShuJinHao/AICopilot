@@ -8,117 +8,64 @@ namespace AICopilot.PersistenceTests;
 [Collection(PostgresPersistenceTestCollection.Name)]
 public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fixture)
 {
+    private static readonly string[] CurrentTables =
+    [
+        "agent_session_states",
+        "conversation_templates",
+        "language_models",
+        "messages",
+        "model_quota_reservations",
+        "sessions",
+        "tool_registrations"
+    ];
+
+    private static readonly string[] RetiredTables =
+    [
+        "agent_tasks",
+        "agent_task_runs",
+        "agent_task_run_attempts",
+        "agent_task_run_queue_items",
+        "agent_node_runs",
+        "agent_worker_heartbeats",
+        "approval_policies",
+        "approval_requests",
+        "artifact_workspaces",
+        "artifacts",
+        "chat_runtime_settings",
+        "message_events",
+        "routing_model_configurations",
+        "tool_execution_records",
+        "upload_records"
+    ];
+
     [Fact]
-    public async Task FreshMigration_ShouldCreateOnsiteAttestationAndRunQueueSchema()
+    public void Model_ShouldHaveSingleHarnessBaselineAndNoPendingChanges()
     {
-        await using var database = await PostgresScratchDatabase.CreateAsync(
-            fixture.ConnectionString,
-            "aicopilot_gateway_schema");
-        await MigrateAiGatewayAsync(database.ConnectionString);
+        using var dbContext = CreateDbContext(fixture.ConnectionString);
 
-        await using var connection = new NpgsqlConnection(database.ConnectionString);
-        await connection.OpenAsync();
-
-        var sessionColumns = await QueryColumnMetadataAsync(
-            connection,
-            "aigateway",
-            "sessions",
-            ["onsite_confirmed_at", "onsite_confirmation_expires_at", "onsite_confirmed_by"]);
-        sessionColumns["onsite_confirmed_at"].Should().Be("timestamp with time zone");
-        sessionColumns["onsite_confirmation_expires_at"].Should().Be(
-            "timestamp with time zone");
-        sessionColumns["onsite_confirmed_by"].Should().BeOneOf(
-            "text",
-            "character varying");
-
-        var approvalPolicyColumns = await QueryColumnMetadataAsync(
-            connection,
-            "aigateway",
-            "approval_policies",
-            ["requires_onsite_attestation"]);
-        approvalPolicyColumns["requires_onsite_attestation"].Should().Be("boolean");
-
-        var queueColumns = await QueryColumnMetadataAsync(
-            connection,
-            "aigateway",
-            "agent_task_run_queue_items",
-            [
-                "task_id",
-                "trigger_type",
-                "status",
-                "requested_by",
-                "run_attempt_id",
-                "lease_expires_at",
-                "available_at"
-            ]);
-        queueColumns["task_id"].Should().Be("uuid");
-        queueColumns["trigger_type"].Should().Be("character varying");
-        queueColumns["status"].Should().Be("character varying");
-        queueColumns["requested_by"].Should().Be("uuid");
-        queueColumns["run_attempt_id"].Should().Be("uuid");
-        queueColumns["lease_expires_at"].Should().Be("timestamp with time zone");
-        queueColumns["available_at"].Should().Be("timestamp with time zone");
-
-        var agentSessionColumns = await QueryColumnMetadataAsync(
-            connection,
-            "aigateway",
-            "agent_session_states",
-            [
-                "session_id",
-                "user_id",
-                "tenant_id",
-                "agent_schema_version",
-                "protected_state",
-                "status",
-                "active_turn_id",
-                "version",
-                "expires_at_utc",
-                "protected_approval_bindings"
-            ]);
-        agentSessionColumns["session_id"].Should().Be("uuid");
-        agentSessionColumns["user_id"].Should().Be("uuid");
-        agentSessionColumns["tenant_id"].Should().Be("character varying");
-        agentSessionColumns["agent_schema_version"].Should().Be("integer");
-        agentSessionColumns["protected_state"].Should().Be("text");
-        agentSessionColumns["status"].Should().Be("character varying");
-        agentSessionColumns["active_turn_id"].Should().Be("uuid");
-        agentSessionColumns["version"].Should().Be("bigint");
-        agentSessionColumns["expires_at_utc"].Should().Be("timestamp with time zone");
-        agentSessionColumns["protected_approval_bindings"].Should().Be("text");
+        dbContext.Database.GetMigrations()
+            .Should().ContainSingle()
+            .Which.Should().EndWith("_AiGatewayHarnessBaseline");
+        dbContext.Database.HasPendingModelChanges().Should().BeFalse();
     }
 
     [Fact]
-    public async Task FreshMigration_ShouldCreateDynamicRoutingSchemaAndSingleActiveIndex()
+    public async Task FreshHarnessBaseline_ShouldCreateOnlyCurrentAiGatewaySchema()
     {
         await using var database = await PostgresScratchDatabase.CreateAsync(
             fixture.ConnectionString,
-            "aicopilot_gateway_schema");
-        await MigrateAiGatewayAsync(database.ConnectionString);
+            "aicopilot_gateway_harness_schema");
+        await using (var dbContext = CreateDbContext(database.ConnectionString))
+        {
+            await dbContext.Database.MigrateAsync();
+        }
 
         await using var connection = new NpgsqlConnection(database.ConnectionString);
         await connection.OpenAsync();
 
-        var languageModelColumns = await QueryColumnMetadataAsync(
-            connection,
-            "aigateway",
-            "language_models",
-            [
-                "protocol_type",
-                "usage",
-                "is_enabled",
-                "max_output_tokens",
-                "connectivity_status",
-                "connectivity_checked_at",
-                "connectivity_error"
-            ]);
-        languageModelColumns["protocol_type"].Should().Be("character varying");
-        languageModelColumns["usage"].Should().Be("integer");
-        languageModelColumns["is_enabled"].Should().Be("boolean");
-        languageModelColumns["max_output_tokens"].Should().Be("integer");
-        languageModelColumns["connectivity_status"].Should().Be("integer");
-        languageModelColumns["connectivity_checked_at"].Should().Be(
-            "timestamp with time zone");
-        languageModelColumns["connectivity_error"].Should().Be("character varying");
+        var actualTables = await QueryTableNamesAsync(connection, "aigateway");
+        actualTables.Should().Contain(CurrentTables);
+        actualTables.Should().NotContain(RetiredTables);
 
         var messageColumns = await QueryColumnMetadataAsync(
             connection,
@@ -127,47 +74,101 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             [
                 "final_model_id",
                 "final_model_name",
-                "routing_model_id",
-                "routing_model_name",
                 "context_window_tokens",
-                "max_output_tokens"
+                "max_output_tokens",
+                "routing_model_id",
+                "routing_model_name"
             ]);
-        messageColumns["final_model_id"].Should().Be("uuid");
-        messageColumns["final_model_name"].Should().Be("character varying");
-        messageColumns["routing_model_id"].Should().Be("uuid");
-        messageColumns["routing_model_name"].Should().Be("character varying");
-        messageColumns["context_window_tokens"].Should().Be("integer");
-        messageColumns["max_output_tokens"].Should().Be("integer");
+        messageColumns.Should().ContainKeys(
+            "final_model_id",
+            "final_model_name",
+            "context_window_tokens",
+            "max_output_tokens");
+        messageColumns.Should().NotContainKeys("routing_model_id", "routing_model_name");
 
-        var routingModelColumns = await QueryColumnMetadataAsync(
+        var agentSessionColumns = await QueryColumnMetadataAsync(
             connection,
             "aigateway",
-            "routing_model_configurations",
-            ["id", "name", "model_id", "is_active"]);
-        routingModelColumns["id"].Should().Be("uuid");
-        routingModelColumns["name"].Should().Be("character varying");
-        routingModelColumns["model_id"].Should().Be("uuid");
-        routingModelColumns["is_active"].Should().Be("boolean");
+            "agent_session_states",
+            [
+                "session_id",
+                "protected_state",
+                "protected_approval_bindings",
+                "status",
+                "version",
+                "expires_at_utc"
+            ]);
+        agentSessionColumns.Should().Contain(new Dictionary<string, string>
+        {
+            ["session_id"] = "uuid",
+            ["protected_state"] = "text",
+            ["protected_approval_bindings"] = "text",
+            ["status"] = "character varying",
+            ["version"] = "bigint",
+            ["expires_at_utc"] = "timestamp with time zone"
+        });
 
-        var indexDefinitions = await QueryIndexDefinitionsAsync(
+        var toolColumns = await QueryColumnMetadataAsync(
             connection,
             "aigateway",
-            "routing_model_configurations");
-        indexDefinitions.Should().Contain(definition =>
-            definition.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase) &&
-            definition.Contains("is_active", StringComparison.OrdinalIgnoreCase) &&
-            definition.Contains("WHERE is_active", StringComparison.OrdinalIgnoreCase));
+            "tool_registrations",
+            [
+                "requires_approval",
+                "risk_level",
+                "required_permission",
+                "audit_level",
+                "data_boundary",
+                "is_executable_by_agent",
+                "schema_version",
+                "catalog_version",
+                "is_visible_to_planner",
+                "approval_policy"
+            ]);
+        toolColumns.Should().ContainKeys(
+            "requires_approval",
+            "risk_level",
+            "required_permission",
+            "audit_level",
+            "data_boundary",
+            "is_executable_by_agent",
+            "schema_version",
+            "catalog_version");
+        toolColumns.Should().NotContainKeys("is_visible_to_planner", "approval_policy");
     }
 
-    private static async Task MigrateAiGatewayAsync(string connectionString)
+    private static AiGatewayDbContext CreateDbContext(string connectionString)
     {
         var options = new DbContextOptionsBuilder<AiGatewayDbContext>()
             .UseNpgsqlWithMigrationHistory(
                 connectionString,
                 MigrationHistoryTables.AiGateway)
             .Options;
-        await using var dbContext = new AiGatewayDbContext(options);
-        await dbContext.Database.MigrateAsync();
+        return new AiGatewayDbContext(options);
+    }
+
+    private static async Task<string[]> QueryTableNamesAsync(
+        NpgsqlConnection connection,
+        string schemaName)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = @schemaName
+              AND table_type = 'BASE TABLE'
+            ORDER BY table_name;
+            """;
+        command.Parameters.AddWithValue("schemaName", schemaName);
+
+        var result = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            result.Add(reader.GetString(0));
+        }
+
+        return result.ToArray();
     }
 
     private static async Task<Dictionary<string, string>> QueryColumnMetadataAsync(
@@ -195,33 +196,6 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         while (await reader.ReadAsync())
         {
             result[reader.GetString(0)] = reader.GetString(1);
-        }
-
-        return result;
-    }
-
-    private static async Task<List<string>> QueryIndexDefinitionsAsync(
-        NpgsqlConnection connection,
-        string schemaName,
-        string tableName)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText =
-            """
-            SELECT indexdef
-            FROM pg_indexes
-            WHERE schemaname = @schemaName
-              AND tablename = @tableName
-            ORDER BY indexname;
-            """;
-        command.Parameters.AddWithValue("schemaName", schemaName);
-        command.Parameters.AddWithValue("tableName", tableName);
-
-        var result = new List<string>();
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            result.Add(reader.GetString(0));
         }
 
         return result;

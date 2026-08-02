@@ -7,12 +7,13 @@ namespace AICopilot.ToolPlugin.ConformanceTests;
 public sealed class SecurityToolPluginConformanceTests
 {
     [Fact]
-    public void BuiltInTools_ShouldNotExposeLegacyTrialPilotToolCodes()
+    public void BuiltInTools_ShouldExposeOnlyStrictCurrentHarnessContracts()
     {
-        BuiltInToolRegistrations.AgentRuntimeTools
-            .Select(tool => tool.ToolCode)
+        BuiltInToolRegistrations.HarnessTools
             .Should()
-            .NotIntersectWith(BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes);
+            .OnlyContain(tool => tool.IsEnabled && tool.IsExecutableByAgent &&
+                                 tool.SchemaVersion == BuiltInToolRegistrations.CurrentSchemaVersion &&
+                                 tool.CatalogVersion == BuiltInToolRegistrations.CurrentCatalogVersion);
     }
     [Theory]
     [InlineData("https://mcp.example.com/sse")]

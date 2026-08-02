@@ -21,23 +21,4 @@ public sealed class SessionDomainEventOutboxTests
         domainEvent.Type.Should().Be(MessageType.User);
         domainEvent.CreatedAtUtc.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(10));
     }
-
-    [Fact]
-    public void SetOnsiteAttestation_ShouldAppendOnsiteAttestationDomainEvent()
-    {
-        var session = new Session(Guid.NewGuid(), ConversationTemplateId.New());
-        var confirmedAt = DateTimeOffset.UtcNow;
-        var expiresAt = confirmedAt.AddMinutes(5);
-
-        session.SetOnsiteAttestation(" operator-a ", confirmedAt, expiresAt);
-
-        var domainEvent = session.DomainEvents
-            .OfType<OnsiteAttestationSetEvent>()
-            .Single();
-
-        domainEvent.SessionId.Should().Be(session.Id);
-        domainEvent.ConfirmedBy.Should().Be("operator-a");
-        domainEvent.ConfirmedAtUtc.Should().Be(confirmedAt);
-        domainEvent.ExpiresAtUtc.Should().Be(expiresAt);
-    }
 }

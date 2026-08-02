@@ -1,8 +1,5 @@
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
-using AICopilot.Core.AiGateway.Aggregates.RoutingModel;
-using AICopilot.Core.AiGateway.Aggregates.RuntimeSettings;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Security;
@@ -18,17 +15,8 @@ internal static class MigrationWorkerAiGatewaySeeder
     public const string PrivateMiniMaxModelName = "MiniMax-M3-AWQ-INT4";
     public const string PrivateMiniMaxDefaultBaseUrl = "http://model.internal.example:40034/v1";
     public const int PrivateMiniMaxContextWindowTokens = 65536;
-    public const string PrivateMiniMaxRoutingConfigurationName = "MiniMax private routing model";
-
     private static readonly LanguageModelUsage PrivateMiniMaxUsages =
-        LanguageModelUsage.Chat | LanguageModelUsage.Routing | LanguageModelUsage.Planner;
-
-    private static readonly string[] ForcedPrivateMiniMaxTemplateCodes =
-    [
-        "IntentRoutingAgent",
-        "agent_planner",
-        "agent_executor"
-    ];
+        LanguageModelUsage.Chat;
 
     public static async Task SeedDefaultsAsync(
         AiGatewayDbContext aiGatewayDbContext,
@@ -37,13 +25,6 @@ internal static class MigrationWorkerAiGatewaySeeder
     {
         var now = DateTimeOffset.UtcNow;
         var privateModelSeed = PrivateModelSeedOptions.Load(configuration);
-
-        if (!await aiGatewayDbContext.ChatRuntimeSettings.AnyAsync(
-                settings => settings.Id == ChatRuntimeSettings.GlobalId,
-                cancellationToken))
-        {
-            aiGatewayDbContext.ChatRuntimeSettings.Add(ChatRuntimeSettings.CreateDefault(now));
-        }
 
         var obsoleteExampleModel = await aiGatewayDbContext.LanguageModels.FirstOrDefaultAsync(
             model => model.Provider == "Example" && model.Name == "Disabled example model",
@@ -87,7 +68,7 @@ internal static class MigrationWorkerAiGatewaySeeder
                 continue;
             }
 
-            var modelId = ShouldBindTemplateToPrivateMiniMax(definition, template, obsoleteExampleModel)
+            var modelId = obsoleteExampleModel is not null && template.ModelId == obsoleteExampleModel.Id
                 ? privateMiniMaxModel.Id
                 : template.ModelId;
 
@@ -100,46 +81,7 @@ internal static class MigrationWorkerAiGatewaySeeder
             template.MarkBuiltIn(definition.Code, definition.Scope, definition.Version);
         }
 
-        var defaultPolicy = await aiGatewayDbContext.ApprovalPolicies.FirstOrDefaultAsync(
-            policy => policy.Name == "Default Agent Artifact Approval",
-            cancellationToken);
-        var highRiskTools = new[]
-        {
-            "generate_pdf",
-            "generate_pptx",
-            "generate_xlsx",
-            "finalize_artifacts"
-        };
-        if (defaultPolicy is null)
-        {
-            aiGatewayDbContext.ApprovalPolicies.Add(new ApprovalPolicy(
-                "Default Agent Artifact Approval",
-                "Default approval gate for generated files and final output.",
-                ApprovalTargetType.Plugin,
-                "AgentTaskRuntime",
-                highRiskTools,
-                isEnabled: true,
-                requiresOnsiteAttestation: false));
-        }
-        else
-        {
-            defaultPolicy.Update(
-                "Default Agent Artifact Approval",
-                "Default approval gate for generated files and final output.",
-                ApprovalTargetType.Plugin,
-                "AgentTaskRuntime",
-                highRiskTools,
-                isEnabled: true,
-                requiresOnsiteAttestation: false);
-        }
-
-        var obsoleteToolCodes = BuiltInToolRegistrations.ObsoleteAgentRuntimeToolCodes.ToArray();
-        var obsoleteTools = await aiGatewayDbContext.ToolRegistrations
-            .Where(tool => obsoleteToolCodes.Contains(tool.ToolCode))
-            .ToListAsync(cancellationToken);
-        aiGatewayDbContext.ToolRegistrations.RemoveRange(obsoleteTools);
-
-        foreach (var definition in BuiltInToolRegistrations.AgentRuntimeTools)
+        foreach (var definition in BuiltInToolRegistrations.HarnessTools)
         {
             var tool = await aiGatewayDbContext.ToolRegistrations.FirstOrDefaultAsync(
                 item => item.ToolCode == definition.ToolCode,
@@ -165,11 +107,9 @@ internal static class MigrationWorkerAiGatewaySeeder
                     definition.Category,
                     definition.BusinessDomains,
                     definition.DataBoundary,
-                    definition.IsVisibleToPlanner,
                     definition.IsExecutableByAgent,
                     definition.SchemaVersion,
-                    definition.CatalogVersion,
-                    definition.ApprovalPolicy));
+                    definition.CatalogVersion));
                 continue;
             }
 
@@ -182,7 +122,7 @@ internal static class MigrationWorkerAiGatewaySeeder
                 definition.InputSchemaJson,
                 definition.OutputSchemaJson,
                 tool.RiskLevel,
-                ResolveBuiltInRequiredPermission(tool.RequiredPermission, definition),
+                definition.RequiredPermission,
                 tool.RequiresApproval,
                 tool.IsEnabled,
                 tool.TimeoutSeconds,
@@ -191,36 +131,9 @@ internal static class MigrationWorkerAiGatewaySeeder
                 definition.Category,
                 definition.BusinessDomains,
                 definition.DataBoundary,
-                definition.IsVisibleToPlanner && tool.IsVisibleToPlanner,
                 definition.IsExecutableByAgent && tool.IsExecutableByAgent,
                 definition.SchemaVersion,
-                definition.CatalogVersion,
-                string.IsNullOrWhiteSpace(tool.ApprovalPolicy) ? definition.ApprovalPolicy : tool.ApprovalPolicy);
-        }
-
-        var routingConfigurations = await aiGatewayDbContext.RoutingModelConfigurations
-            .ToListAsync(cancellationToken);
-        var privateMiniMaxRoutingConfiguration = routingConfigurations.FirstOrDefault(configuration =>
-            configuration.ModelId == privateMiniMaxModel.Id ||
-            string.Equals(configuration.Name, PrivateMiniMaxRoutingConfigurationName, StringComparison.Ordinal));
-        foreach (var routingConfiguration in routingConfigurations.Where(item => item.IsActive))
-        {
-            routingConfiguration.Deactivate();
-        }
-
-        if (privateMiniMaxRoutingConfiguration is null)
-        {
-            aiGatewayDbContext.RoutingModelConfigurations.Add(new RoutingModelConfiguration(
-                PrivateMiniMaxRoutingConfigurationName,
-                privateMiniMaxModel.Id,
-                isActive: true));
-        }
-        else
-        {
-            privateMiniMaxRoutingConfiguration.Update(
-                PrivateMiniMaxRoutingConfigurationName,
-                privateMiniMaxModel.Id);
-            privateMiniMaxRoutingConfiguration.Activate();
+                definition.CatalogVersion);
         }
 
         if (obsoleteExampleModel is not null)
@@ -229,15 +142,6 @@ internal static class MigrationWorkerAiGatewaySeeder
         }
 
         await aiGatewayDbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    private static bool ShouldBindTemplateToPrivateMiniMax(
-        BuiltInConversationTemplateDefinition definition,
-        ConversationTemplate template,
-        LanguageModel? obsoleteExampleModel)
-    {
-        return ForcedPrivateMiniMaxTemplateCodes.Contains(definition.Code, StringComparer.OrdinalIgnoreCase) ||
-               (obsoleteExampleModel is not null && template.ModelId == obsoleteExampleModel.Id);
     }
 
     private static void EnsureSeedApiKey(LanguageModel model)
@@ -264,19 +168,6 @@ internal static class MigrationWorkerAiGatewaySeeder
     private static string? ProtectSeedApiKey(string? apiKey)
     {
         return SecretStringEncryptor.Encrypt(apiKey);
-    }
-
-    private static string? ResolveBuiltInRequiredPermission(
-        string? currentPermission,
-        ToolRegistrationSeed definition)
-    {
-        if (definition.ToolCode == "query_business_database_readonly" &&
-            string.Equals(currentPermission, "DataSource.Query", StringComparison.Ordinal))
-        {
-            return definition.RequiredPermission;
-        }
-
-        return currentPermission;
     }
 
     private sealed record PrivateModelSeedOptions(

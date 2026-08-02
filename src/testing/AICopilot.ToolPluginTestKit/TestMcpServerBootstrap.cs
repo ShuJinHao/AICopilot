@@ -17,13 +17,13 @@ namespace AICopilot.ToolPluginTestKit;
 
 internal sealed class TestMcpServerBootstrap(
     IReadRepository<McpServerInfo> mcpServerRepository,
-    IApprovalRequirementReadService approvalRequirementReadService,
+    IMcpToolRegistryReadService toolRegistryReadService,
     AgentPluginLoader agentPluginLoader,
     ILogger<McpServerBootstrap> logger,
     McpToolRegistrySynchronizer? toolRegistrySynchronizer = null)
     : McpServerBootstrap(
         mcpServerRepository,
-        approvalRequirementReadService,
+        toolRegistryReadService,
         agentPluginLoader,
         logger,
         toolRegistrySynchronizer), IAsyncDisposable

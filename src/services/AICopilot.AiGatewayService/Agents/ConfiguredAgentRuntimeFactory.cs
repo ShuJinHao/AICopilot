@@ -62,7 +62,7 @@ public class ConfiguredAgentRuntimeFactory(
 
         if (!model.IsEnabled)
         {
-            throw new AgentWorkflowException(
+            throw new AgentRuntimeException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"Language model '{model.Name}' is disabled.",
                 "当前模型已停用，请切换模型或联系管理员检查 AI 配置。");
@@ -70,7 +70,7 @@ public class ConfiguredAgentRuntimeFactory(
 
         if (string.IsNullOrWhiteSpace(model.ApiKey))
         {
-            throw new AgentWorkflowException(
+            throw new AgentRuntimeException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"Language model '{model.Name}' is missing an API key.",
                 "当前模型未配置 API Key，请切换模型或联系管理员补充密钥。");
@@ -78,7 +78,7 @@ public class ConfiguredAgentRuntimeFactory(
 
         if (!runtimeFactory.CanCreate(model.ProtocolType))
         {
-            throw new AgentWorkflowException(
+            throw new AgentRuntimeException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"No chat client provider is registered for protocol '{model.ProtocolType}'.",
                 "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
@@ -103,7 +103,7 @@ public class ConfiguredAgentRuntimeFactory(
         if (harnessRuntimeFactory is null ||
             !harnessRuntimeFactory.CanCreate(model.ProtocolType))
         {
-            throw new AgentWorkflowException(
+            throw new AgentRuntimeException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"No Harness chat client provider is registered for protocol '{model.ProtocolType}'.",
                 "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
@@ -129,7 +129,7 @@ public class ConfiguredAgentRuntimeFactory(
         catch (Exception exception) when (
             exception is InvalidOperationException or ArgumentException)
         {
-            throw new AgentWorkflowException(
+            throw new AgentRuntimeException(
                 AppProblemCodes.ChatConfigurationMissing,
                 $"The Harness runtime could not be constructed ({exception.GetType().Name}).",
                 "The configured model provider is unavailable. Please ask an administrator to review the AI settings.");
@@ -318,17 +318,17 @@ public class ConfiguredAgentRuntimeFactory(
         return CreateAgent(model, template, configureOptions, instructions);
     }
 
-    private static AgentWorkflowException CreateConfigurationMissingException()
+    private static AgentRuntimeException CreateConfigurationMissingException()
     {
-        return new AgentWorkflowException(
+        return new AgentRuntimeException(
             AppProblemCodes.ChatConfigurationMissing,
             "The conversation template or model configuration could not be found.",
             "This session is missing an available template or model configuration. Please ask an administrator to review the AI settings.");
     }
 
-    private static AgentWorkflowException CreateTemplateDisabledException()
+    private static AgentRuntimeException CreateTemplateDisabledException()
     {
-        return new AgentWorkflowException(
+        return new AgentRuntimeException(
             AppProblemCodes.ChatConfigurationMissing,
             "The conversation template is disabled.",
             "当前会话绑定的模板已停用，请切换模板或联系管理员检查 AI 配置。");

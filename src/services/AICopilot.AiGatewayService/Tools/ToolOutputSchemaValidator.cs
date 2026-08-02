@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.Tools;

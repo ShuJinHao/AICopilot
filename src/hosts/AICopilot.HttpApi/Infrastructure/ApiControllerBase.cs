@@ -69,15 +69,7 @@ public abstract class ApiControllerBase(ISender sender) : ControllerBase
     private ProblemDetails CreateProblemDetails(int statusCode, IEnumerable<object>? errors)
     {
         var errorList = errors?.ToArray();
-        var publicPlanFailure = AgentPlanPublicFailureDisclosurePolicy.ResolveResultErrors(errorList);
-        var problem = publicPlanFailure is null
-            ? errorList?.OfType<ApiProblemDescriptor>().FirstOrDefault()
-            : new ApiProblemDescriptor(
-                publicPlanFailure.Disclosure.Code,
-                publicPlanFailure.Disclosure.Detail,
-                publicPlanFailure.TaskId is Guid taskId
-                    ? new Dictionary<string, object?> { ["taskId"] = taskId }
-                    : null);
+        var problem = errorList?.OfType<ApiProblemDescriptor>().FirstOrDefault();
         return ApiProblemDetailsFactory.Create(
             statusCode,
             problem,

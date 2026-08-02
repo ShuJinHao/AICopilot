@@ -143,7 +143,7 @@ public sealed class UpdateAgentSessionModeCommandHandler(
         {
             return MapStateFailure(exception);
         }
-        catch (AgentWorkflowException exception)
+        catch (AgentRuntimeException exception)
         {
             return Result.Invalid(new ApiProblemDescriptor(
                 exception.Code,

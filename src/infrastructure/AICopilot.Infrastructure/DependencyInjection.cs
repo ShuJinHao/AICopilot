@@ -4,7 +4,6 @@ using AICopilot.Embedding;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.EventBus;
-using AICopilot.Infrastructure.Artifacts;
 using AICopilot.Infrastructure.AiGateway;
 using AICopilot.Infrastructure.Authentication;
 using AICopilot.Infrastructure.CloudIdentity;
@@ -36,11 +35,6 @@ public static class DependencyInjection
         builder.AddAiRuntime();
 
         AddLocalFileStorage(builder.Services);
-        builder.Services.AddSingleton<IArtifactWorkspaceFileStore, LocalArtifactWorkspaceFileStore>();
-        builder.Services.AddScoped<IArtifactWorkspaceFileSetStore, LocalArtifactWorkspaceFileSetStore>();
-        builder.Services.AddArtifactFileSetMaintenance();
-        builder.Services.AddSingleton<IAgentTableFileParser, AgentTableFileParser>();
-        builder.Services.AddSingleton<IAgentArtifactDocumentGenerator, AgentArtifactDocumentGenerator>();
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         builder.Services.AddHttpClient<ICloudIdentityStatusClient, CloudIdentityStatusClient>();
         builder.Services.AddHttpClient<ICloudAiReadClient, CloudAiReadClient>();
@@ -48,7 +42,6 @@ public static class DependencyInjection
         builder.Services.AddScoped<IChatClientProvider, AnthropicChatClientProvider>();
         builder.Services.AddTransient<AiProviderRetryHandler>();
         builder.Services.AddScoped<ILanguageModelConnectivityTester, LanguageModelConnectivityTester>();
-        builder.Services.AddSingleton<ITextTokenEstimator, SharpTokenTextTokenEstimator>();
         builder.AddDocumentParsers();
         builder.Services.AddSingleton<ISessionExecutionLock>(serviceProvider =>
         {
@@ -74,7 +67,6 @@ public static class DependencyInjection
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         }).AddHttpMessageHandler<AiProviderRetryHandler>();
-        builder.AddFinalAgentContextStore();
     }
 
     private static void AddMcpRuntime(this IHostApplicationBuilder builder)
@@ -138,47 +130,4 @@ public static class DependencyInjection
             sp.GetRequiredService<DocumentParserFactory>());
     }
 
-    private static void AddFinalAgentContextStore(this IHostApplicationBuilder builder)
-    {
-        var deploymentMode = builder.Configuration["AiGateway:Deployment:Mode"] ?? "SingleInstance";
-        var provider = builder.Configuration["AiGateway:FinalAgentContextStore:Provider"] ?? "Memory";
-        var isMultiInstance = string.Equals(deploymentMode, "MultiInstance", StringComparison.OrdinalIgnoreCase);
-
-        if (isMultiInstance && !string.Equals(provider, "Redis", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                "AiGateway:Deployment:Mode 配置为 MultiInstance 时，FinalAgentContextStore 必须配置为 Redis。");
-        }
-
-        if (string.Equals(provider, "Redis", StringComparison.OrdinalIgnoreCase))
-        {
-            var redisConnectionString = builder.Configuration.GetConnectionString("final-agent-context-redis");
-            if (string.IsNullOrWhiteSpace(redisConnectionString))
-            {
-                throw new InvalidOperationException("AiGateway:FinalAgentContextStore:Provider 配置为 Redis 时，必须提供 ConnectionStrings:final-agent-context-redis。");
-            }
-
-            builder.Services.AddStackExchangeRedisCache(options =>
-            {
-                options.Configuration = redisConnectionString;
-                options.InstanceName = "aicopilot:";
-            });
-            builder.Services.AddSingleton<IFinalAgentContextStore>(sp =>
-            {
-                sp.GetRequiredService<ILogger<RedisFinalAgentContextStore>>()
-                    .LogInformation("Using Redis final-agent context store for AiGateway deployment mode {DeploymentMode}.", deploymentMode);
-                return new RedisFinalAgentContextStore(sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>());
-            });
-        }
-        else
-        {
-            builder.Services.AddMemoryCache();
-            builder.Services.AddSingleton<IFinalAgentContextStore>(sp =>
-            {
-                sp.GetRequiredService<ILogger<MemoryCacheFinalAgentContextStore>>()
-                    .LogWarning("Using memory final-agent context store. This is valid only for SingleInstance AiGateway deployments.");
-                return new MemoryCacheFinalAgentContextStore(sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>());
-            });
-        }
-    }
 }

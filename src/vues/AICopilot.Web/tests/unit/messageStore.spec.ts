@@ -43,8 +43,6 @@ describe('messageStore', () => {
         createdAt: '2026-05-13T09:00:00Z',
         finalModelId: 'final-1',
         finalModelName: 'deepseek-v4-pro',
-        routingModelId: 'routing-1',
-        routingModelName: 'deepseek-v4-flash',
         contextWindowTokens: 1000000,
         maxOutputTokens: 4096
       }
@@ -53,8 +51,6 @@ describe('messageStore', () => {
     expect(messageStore.currentMessages).toHaveLength(1)
     expect(messageStore.currentMessages[0]?.finalModelId).toBe('final-1')
     expect(messageStore.currentMessages[0]?.finalModelName).toBe('deepseek-v4-pro')
-    expect(messageStore.currentMessages[0]?.routingModelId).toBe('routing-1')
-    expect(messageStore.currentMessages[0]?.routingModelName).toBe('deepseek-v4-flash')
     expect(messageStore.currentMessages[0]?.contextWindowTokens).toBe(1000000)
     expect(messageStore.currentMessages[0]?.maxOutputTokens).toBe(4096)
   })
@@ -68,13 +64,12 @@ describe('messageStore', () => {
       {
         sessionId: 'session-1',
         role: 'Assistant',
-        content: 'legacy reply',
+        content: 'reply without provenance',
         createdAt: '2026-05-13T09:00:00Z'
       }
     ])
 
     expect(messageStore.currentMessages[0]?.finalModelName).toBe('\u672a\u77e5')
-    expect(messageStore.currentMessages[0]?.routingModelName).toBeNull()
   })
 
   it('restores stable render chunks from chat history without replaying runtime details', () => {
@@ -92,11 +87,6 @@ describe('messageStore', () => {
         createdAt: '2026-05-13T09:00:00Z',
         renderChunks: [
           {
-            source: 'IntentRoutingExecutor',
-            type: ChunkType.Intent,
-            content: JSON.stringify([{ intent: 'Analysis.Device', confidence: 0.91 }])
-          },
-          {
             source: 'DataAnalysisExecutor',
             type: ChunkType.FunctionCall,
             content: JSON.stringify({ id: 'call-1', name: 'queryDeviceLogs', args: '{}' })
@@ -112,13 +102,12 @@ describe('messageStore', () => {
             content: JSON.stringify({ id: 'w1', type: 'StatsCard', title: '异常数', description: '', data: { value: 3 } })
           },
           {
-            source: 'FinalAgentRunExecutor',
+            source: 'HarnessAgent',
             type: ChunkType.ApprovalRequest,
             content: JSON.stringify({
               callId: 'approval-1',
               name: 'generate_pdf',
-              args: {},
-              requiresOnsiteAttestation: false
+              args: {}
             })
           }
         ]
@@ -128,7 +117,6 @@ describe('messageStore', () => {
     const restored = messageStore.currentMessages[0]!
     expect(restored.messageId).toBe(42)
     expect(restored.sequence).toBe(2)
-    expect(restored.chunks.some((chunk) => chunk.type === ChunkType.Intent)).toBe(false)
     expect(restored.chunks.some((chunk) => chunk.type === ChunkType.FunctionCall)).toBe(false)
     expect(restored.chunks.some((chunk) => chunk.type === ChunkType.FunctionResult)).toBe(false)
     expect(restored.chunks.some((chunk) => chunk.type === ChunkType.ApprovalRequest)).toBe(false)

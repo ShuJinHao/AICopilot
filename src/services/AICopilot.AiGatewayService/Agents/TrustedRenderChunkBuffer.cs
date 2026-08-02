@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using AICopilot.AiGatewayService.Models;
-using AICopilot.AiGatewayService.Workflows;
 using AICopilot.SharedKernel.Ai;
 
 namespace AICopilot.AiGatewayService.Agents;
@@ -11,12 +10,12 @@ public sealed class TrustedRenderChunkBuffer
     private readonly object gate = new();
     private readonly Queue<ChatChunk> chunks = new();
 
-    public async Task CaptureWidgetsAsync(
-        AgentWorkflowSink sink,
-        CancellationToken cancellationToken)
+    public void CaptureTrustedWidgets(IEnumerable<string> widgetPayloads)
     {
-        await foreach (var chunk in sink.ReadAllAsync(cancellationToken))
+        ArgumentNullException.ThrowIfNull(widgetPayloads);
+        foreach (var payload in widgetPayloads)
         {
+            var chunk = new ChatChunk("BusinessQuery", ChunkType.Widget, payload);
             if (!IsTrustedWidget(chunk))
             {
                 continue;

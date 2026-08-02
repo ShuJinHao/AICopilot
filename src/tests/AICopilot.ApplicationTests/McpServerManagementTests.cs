@@ -47,7 +47,7 @@ public sealed class McpServerManagementTests
 
         var queryHandler = new GetMcpServerQueryHandler(
             repository,
-            new TestApprovalRequirementReadService());
+            new TestMcpToolRegistryReadService());
         var dto = await queryHandler.Handle(new GetMcpServerQuery(server.Id), CancellationToken.None);
 
         dto.IsSuccess.Should().BeTrue();
@@ -258,23 +258,31 @@ public sealed class McpServerManagementTests
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([server]);
-        var approvalRequirementReadService = new TestApprovalRequirementReadService(
+        var toolRegistryReadService = new TestMcpToolRegistryReadService(
         [
-            new ApprovalToolRequirementDto(
-                AiToolTargetType.McpServer,
+            new McpToolRegistryReadModel(
+                AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "advisory-mcp", "QueryEcho"),
                 "advisory-mcp",
                 "QueryEcho",
+                RuntimeAvailable: true,
+                IsEnabled: true,
+                RiskLevel: nameof(AiToolRiskLevel.RequiresApproval),
                 RequiresApproval: true,
-                RequiresOnsiteAttestation: true),
-            new ApprovalToolRequirementDto(
-                AiToolTargetType.McpServer,
+                RequiredPermission: "AiGateway.Chat",
+                DateTimeOffset.UtcNow),
+            new McpToolRegistryReadModel(
+                AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "another-mcp", "QueryInspect"),
                 "another-mcp",
                 "QueryInspect",
+                RuntimeAvailable: true,
+                IsEnabled: true,
+                RiskLevel: nameof(AiToolRiskLevel.RequiresApproval),
                 RequiresApproval: true,
-                RequiresOnsiteAttestation: true)
+                RequiredPermission: "AiGateway.Chat",
+                DateTimeOffset.UtcNow)
         ]);
 
-        var handler = new GetMcpServerQueryHandler(serverRepository, approvalRequirementReadService);
+        var handler = new GetMcpServerQueryHandler(serverRepository, toolRegistryReadService);
 
         var result = await handler.Handle(new GetMcpServerQuery(server.Id), CancellationToken.None);
 
@@ -283,12 +291,10 @@ public sealed class McpServerManagementTests
         result.Value!.ToolPolicySummaries.Should().HaveCount(2);
         result.Value.ToolPolicySummaries.Should().Contain(item =>
             item.ToolName == "QueryEcho"
-            && item.RequiresApproval
-            && item.RequiresOnsiteAttestation);
+            && item.RequiresApproval);
         result.Value.ToolPolicySummaries.Should().Contain(item =>
             item.ToolName == "QueryInspect"
-            && !item.RequiresApproval
-            && !item.RequiresOnsiteAttestation);
+            && !item.RequiresApproval);
     }
 
     [Fact]
@@ -319,17 +325,21 @@ public sealed class McpServerManagementTests
             true);
 
         var serverRepository = new InMemoryReadRepository<McpServerInfo>([betaServer, alphaServer]);
-        var approvalRequirementReadService = new TestApprovalRequirementReadService(
+        var toolRegistryReadService = new TestMcpToolRegistryReadService(
         [
-            new ApprovalToolRequirementDto(
-                AiToolTargetType.McpServer,
+            new McpToolRegistryReadModel(
+                AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, "beta-mcp", "QueryInspect"),
                 "beta-mcp",
                 "QueryInspect",
+                RuntimeAvailable: true,
+                IsEnabled: true,
+                RiskLevel: nameof(AiToolRiskLevel.RequiresApproval),
                 RequiresApproval: true,
-                RequiresOnsiteAttestation: false)
+                RequiredPermission: "AiGateway.Chat",
+                DateTimeOffset.UtcNow)
         ]);
 
-        var handler = new GetListMcpServersQueryHandler(serverRepository, approvalRequirementReadService);
+        var handler = new GetListMcpServersQueryHandler(serverRepository, toolRegistryReadService);
 
         var result = await handler.Handle(new GetListMcpServersQuery(), CancellationToken.None);
 
@@ -338,12 +348,10 @@ public sealed class McpServerManagementTests
         result.Value!.Select(item => item.Name).Should().Equal("alpha-mcp", "beta-mcp");
         result.Value.Single(item => item.Name == "alpha-mcp").ToolPolicySummaries.Should().ContainSingle(item =>
             item.ToolName == "QueryEcho"
-            && !item.RequiresApproval
-            && !item.RequiresOnsiteAttestation);
+            && !item.RequiresApproval);
         result.Value.Single(item => item.Name == "beta-mcp").ToolPolicySummaries.Should().ContainSingle(item =>
             item.ToolName == "QueryInspect"
-            && item.RequiresApproval
-            && !item.RequiresOnsiteAttestation);
+            && item.RequiresApproval);
     }
 
     private sealed class MutableMcpServerRepository(params McpServerInfo[] servers) : IRepository<McpServerInfo>

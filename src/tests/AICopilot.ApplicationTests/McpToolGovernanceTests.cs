@@ -143,8 +143,8 @@ public sealed class McpToolGovernanceTests
         var builtInRegistration = CreateToolRegistration(
             "read_uploaded_file",
             ToolProviderType.BuiltIn,
-            ToolRegistrationTargetType.AgentRuntime,
-            "AgentTaskRuntime",
+            ToolRegistrationTargetType.Plugin,
+            "diagnostic-advisor",
             isEnabled: true);
         var service = new McpToolRegistryReadService(
             new InMemoryReadRepository<ToolRegistration>([mcpRegistration, builtInRegistration]),

@@ -101,8 +101,7 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
                     now,
                     isExecutableByAgent: false,
                     schemaVersion: checked(existing.SchemaVersion + 1),
-                    catalogVersion: checked(existing.CatalogVersion + 1),
-                    approvalPolicy: "RediscoveryReviewRequired");
+                    catalogVersion: checked(existing.CatalogVersion + 1));
                 toolRepository.Update(existing);
                 continue;
             }

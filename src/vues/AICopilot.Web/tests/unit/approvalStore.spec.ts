@@ -41,7 +41,6 @@ function createApproval(callId: string): FunctionApprovalRequest {
     targetName: 'cloud-read',
     toolName: 'queryDeviceLogs',
     args: {},
-    requiresOnsiteAttestation: false,
   }
 }
 
@@ -64,7 +63,7 @@ describe('approvalStore', () => {
       role: MessageRole.Assistant,
       chunks: [
         {
-          source: 'FinalAgentRunExecutor',
+          source: 'HarnessAgent',
           type: ChunkType.ApprovalRequest,
           content: JSON.stringify(approval),
           request: approval,
@@ -95,7 +94,7 @@ describe('approvalStore', () => {
       role: MessageRole.Assistant,
       chunks: [
         {
-          source: 'FinalAgentRunExecutor',
+          source: 'HarnessAgent',
           type: ChunkType.ApprovalRequest,
           content: JSON.stringify(approval),
           request: approval,

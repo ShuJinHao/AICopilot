@@ -3,9 +3,7 @@ import type {
   ConversationTemplateDetail,
   ConversationTemplateFormModel,
   LanguageModelDetail,
-  LanguageModelFormModel,
-  RoutingModelDetail,
-  RoutingModelFormModel
+  LanguageModelFormModel
 } from '@/types/app'
 
 export function createEmptyLanguageModelForm(): LanguageModelFormModel {
@@ -25,14 +23,6 @@ export function createEmptyLanguageModelForm(): LanguageModelFormModel {
     usages: ['Chat'],
     hasApiKey: false,
     apiKeyMasked: null
-  }
-}
-
-export function createEmptyRoutingModelForm(): RoutingModelFormModel {
-  return {
-    name: '',
-    modelId: '',
-    isActive: false
   }
 }
 
@@ -66,15 +56,6 @@ export function toLanguageModelForm(detail: LanguageModelDetail): LanguageModelF
     usages: [...detail.usages],
     hasApiKey: detail.hasApiKey,
     apiKeyMasked: detail.apiKeyMasked
-  }
-}
-
-export function toRoutingModelForm(detail: RoutingModelDetail): RoutingModelFormModel {
-  return {
-    id: detail.id,
-    name: detail.name,
-    modelId: detail.modelId,
-    isActive: detail.isActive
   }
 }
 

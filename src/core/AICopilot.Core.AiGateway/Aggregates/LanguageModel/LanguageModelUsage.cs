@@ -4,8 +4,5 @@ namespace AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 public enum LanguageModelUsage
 {
     None = 0,
-    Chat = 1,
-    Routing = 2,
-    Planner = 4,
-    Embedding = 8
+    Chat = 1
 }

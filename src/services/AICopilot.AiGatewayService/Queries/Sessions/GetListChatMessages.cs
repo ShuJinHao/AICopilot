@@ -40,12 +40,12 @@ public class GetListChatMessagesQueryHandler(
 
         var messages = session.Messages;
         var ordered = request.IsDesc
-            ? messages.OrderByDescending(message => message.CreatedAt)
-            : messages.OrderBy(message => message.CreatedAt);
+            ? messages.OrderByDescending(message => message.Sequence)
+            : messages.OrderBy(message => message.Sequence);
 
         var chatMessages = ordered
             .Take(request.Count)
-            .OrderBy(message => message.CreatedAt)
+            .OrderBy(message => message.Sequence)
             .Select(message => new AiChatMessage(MapRole(message.Type), message.Content))
             .ToList();
 

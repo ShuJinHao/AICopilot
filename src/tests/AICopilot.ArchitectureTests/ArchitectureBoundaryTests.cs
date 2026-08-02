@@ -1,8 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
-using AICopilot.AiGatewayService.Uploads;
-using AICopilot.Core.AiGateway.Aggregates.ApprovalPolicy;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
@@ -144,8 +142,6 @@ public sealed class ArchitectureBoundaryTests
         {
             ["ConnectionStrings:ai-copilot"] =
                 "Host=localhost;Database=architecture;Username=test;Password=test",
-            ["AiGateway:Deployment:Mode"] = "SingleInstance",
-            ["AiGateway:FinalAgentContextStore:Provider"] = "Memory"
         });
         try
         {
@@ -175,9 +171,6 @@ public sealed class ArchitectureBoundaryTests
     {
         typeof(IFileStorageService).GetMethod("SaveAsync").Should().BeNull();
         ConstructorParameterTypes(typeof(UploadDocumentCommandHandler))
-            .Should().Contain(typeof(IPersistenceFileStorageService))
-            .And.NotContain(typeof(IFileStorageService));
-        ConstructorParameterTypes(typeof(UploadRecordCoordinator))
             .Should().Contain(typeof(IPersistenceFileStorageService))
             .And.NotContain(typeof(IFileStorageService));
         ConstructorParameterTypes(typeof(LocalPersistenceFileStorageService))
@@ -245,7 +238,6 @@ public sealed class ArchitectureBoundaryTests
     {
         var aggregateRootTypes = new[]
         {
-            typeof(ApprovalPolicy),
             typeof(McpServerInfo),
             typeof(EmbeddingModel),
             typeof(KnowledgeBase)
@@ -267,7 +259,6 @@ public sealed class ArchitectureBoundaryTests
             [typeof(Session)] = typeof(SessionId),
             [typeof(LanguageModel)] = typeof(LanguageModelId),
             [typeof(ConversationTemplate)] = typeof(ConversationTemplateId),
-            [typeof(ApprovalPolicy)] = typeof(ApprovalPolicyId),
             [typeof(KnowledgeBase)] = typeof(KnowledgeBaseId),
             [typeof(Document)] = typeof(DocumentId),
             [typeof(EmbeddingModel)] = typeof(EmbeddingModelId),
@@ -288,7 +279,6 @@ public sealed class ArchitectureBoundaryTests
     {
         var entityTypes = new[]
         {
-            typeof(ApprovalPolicy),
             typeof(ConversationTemplate),
             typeof(LanguageModel),
             typeof(Session),

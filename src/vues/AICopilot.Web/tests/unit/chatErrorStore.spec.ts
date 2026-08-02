@@ -24,29 +24,29 @@ describe('chatErrorStore', () => {
   it('keeps known error codes visible without exposing raw detail', () => {
     expect(
       resolveChatErrorMessage({
-        code: 'agent_plan_tool_denied',
+        code: 'tool_blocked',
         detail: 'toolCode query_device_logs is outside the requested capability range.',
       }),
-    ).toBe('计划包含超出当前请求范围或权限范围的工具，请调整目标后重新生成。')
+    ).toBe('该工具被安全策略阻断。')
 
     expect(
       resolveChatErrorMessage({
-        code: 'agent_worker_unavailable',
+        code: 'agent_session_interrupted',
       }),
-    ).toBe('当前没有可用 DataWorker，请检查 Worker 状态。')
+    ).toBe('上一次执行已中断；系统不会自动重放，请新建会话后继续。')
 
     expect(
       resolveChatErrorMessage({
-        code: 'plan_payload_too_large',
-        detail: 'raw plan must never be rendered',
+        code: 'agent_session_version_conflict',
+        detail: 'raw state must never be rendered',
       }),
-    ).toBe('计划内容超过固定大小上限，请缩小目标范围或减少产物后重新生成。')
+    ).toBe('会话状态已变化，请刷新后重试。')
 
     expect(
       resolveChatErrorMessage({
-        code: 'evidence_payload_too_large',
+        code: 'approval_already_processed',
       }),
-    ).toBe('证据载荷超过固定大小上限，请缩小查询或分批生成。')
+    ).toBe('审批上下文已失效，请重新发起请求。')
 
     expect(
       resolveChatErrorMessage({
@@ -55,15 +55,6 @@ describe('chatErrorStore', () => {
       }),
     ).toBe('工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。')
 
-    expect(resolveChatErrorMessage({ code: 'agent_approval_state_conflict' })).toBe(
-      '审批状态与当前任务不一致，请刷新任务后重试。',
-    )
-    expect(resolveChatErrorMessage({ code: 'agent_finalization_state_conflict' })).toBe(
-      '产物终审状态不完整或不一致，请刷新任务并检查产物生成记录。',
-    )
-    expect(resolveChatErrorMessage({ code: 'agent_approval_rejected' })).toBe(
-      '本次产物终审已被拒绝，任务已结束。',
-    )
   })
 
   it('scopes active errors to the current session', () => {
@@ -94,9 +85,6 @@ describe('chatErrorStore', () => {
     expect(resolveChatErrorMessage({ code: 'model_provider_unavailable' })).toBe(
       '模型服务暂时不可用，请稍后重试或联系管理员检查模型网络。',
     )
-    expect(resolveChatErrorMessage({ code: 'planner_model_unavailable' })).toBe(
-      '计划生成模型暂时不可用，请稍后重试或联系管理员检查模型配置。',
-    )
     expect(resolveChatErrorMessage({ code: 'model_request_timeout' })).toBe(
       '模型响应超时，请稍后重试或缩小问题范围。',
     )
@@ -111,20 +99,20 @@ describe('chatErrorStore', () => {
         new ApiError('API Error: 400', 400, {
           title: 'Validation failed',
           errors: {
-            Goal: ['The Goal field is required.'],
-            ArtifactTargets: ['Artifact target is invalid.'],
+            Message: ['The Message field is required.'],
+            SessionId: ['The SessionId field is invalid.'],
           },
         }),
       ),
-    ).toBe('Goal: The Goal field is required.；ArtifactTargets: Artifact target is invalid.')
+    ).toBe('Message: The Message field is required.；SessionId: The SessionId field is invalid.')
 
     expect(
       toFriendlyMessage(
         new ApiError('API Error: 400', 400, {
-          detail: 'Planner model is not configured.',
+          detail: 'Chat model is not configured.',
         }),
       ),
-    ).toBe('Planner model is not configured.')
+    ).toBe('Chat model is not configured.')
 
     expect(
       toFriendlyMessage(

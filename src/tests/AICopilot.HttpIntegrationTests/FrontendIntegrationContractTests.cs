@@ -19,7 +19,6 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         using var document = await JsonDocument.ParseAsync(stream);
 
         AssertPath(document, "/api/aigateway/language-model/list", "get");
-        AssertPath(document, "/api/aigateway/runtime-settings", "get");
         AssertPath(document, "/api/aigateway/session", "post");
         AssertPath(document, "/api/aigateway/session/list", "get");
         AssertPath(document, "/api/aigateway/session/{sessionId}/agent-mode", "put");
@@ -68,6 +67,9 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertMissingPath(document, "/api/aigateway/artifact/{id}/preview");
         AssertMissingPath(document, "/api/aigateway/approval-policy");
         AssertMissingPath(document, "/api/aigateway/approval-policy/list");
+        AssertMissingPath(document, "/api/aigateway/routing-model");
+        AssertMissingPath(document, "/api/aigateway/routing-model/list");
+        AssertMissingPath(document, "/api/aigateway/runtime-settings");
         AssertMissingPath(document, "/api/aigateway/session/timeline");
         AssertMissingPath(document, "/api/aigateway/session/safety-attestation");
         AssertMissingPath(document, "/api/aigateway/agent/task/plan");
@@ -133,7 +135,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
             "/api/identity/cloud-oidc/confirm-existing",
             "post",
             "password");
-        AssertRequestSchemaProperties(
+        AssertExactRequestSchemaProperties(
             document,
             "/api/aigateway/chat",
             "post",
@@ -145,7 +147,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
             "put",
             "mode",
             "expectedVersion");
-        AssertRequestSchemaProperties(
+        AssertExactRequestSchemaProperties(
             document,
             "/api/aigateway/approval/decision",
             "post",
@@ -208,7 +210,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
     [InlineData("/api/aigateway/approval-policy")]
     [InlineData("/api/aigateway/session/timeline")]
     [InlineData("/api/aigateway/session/safety-attestation")]
-    public async Task LegacyAgentRuntimeRoutes_ShouldReturnNotFound(string route)
+    public async Task RetiredOrchestrationRoutes_ShouldReturnNotFound(string route)
     {
         fixture.HttpClient.DefaultRequestHeaders.Authorization = null;
 
@@ -281,6 +283,29 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
                 .Should()
                 .BeTrue($"OpenAPI request schema for {method.ToUpperInvariant()} {path} should expose {expectedProperty}");
         }
+    }
+
+    private static void AssertExactRequestSchemaProperties(
+        JsonDocument document,
+        string path,
+        string method,
+        params string[] expectedProperties)
+    {
+        var operation = GetOperation(document, path, method);
+        var requestBody = operation.GetProperty("requestBody");
+        var schema = ResolveSchema(
+            document,
+            requestBody.GetProperty("content").GetProperty("application/json").GetProperty("schema"));
+        var actualProperties = schema
+            .GetProperty("properties")
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .ToArray();
+
+        actualProperties.Should().BeEquivalentTo(
+            expectedProperties,
+            options => options.WithoutStrictOrdering(),
+            $"OpenAPI request schema for {method.ToUpperInvariant()} {path} must not retain retired client fields");
     }
 
     private static void AssertProblemDetailsResponses(JsonDocument document, string path, string method)

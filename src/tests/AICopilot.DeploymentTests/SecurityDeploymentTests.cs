@@ -57,7 +57,8 @@ public sealed class SecurityDeploymentTests
         compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-false}");
         compose.Should().Contain("CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}");
         compose.Should().Contain("FileStorage__RootPath: /var/lib/aicopilot/storage");
-        compose.Should().Contain("ArtifactWorkspace__RootPath: /var/lib/aicopilot/artifact-workspaces");
+        compose.Should().NotContain("ArtifactWorkspace__RootPath");
+        compose.Should().NotContain("FinalAgentContextStore");
         compose.Should().NotContain("AICOPILOT_FILE_STORAGE_ROOT_PATH");
         compose.Should().NotContain("AICOPILOT_ARTIFACT_WORKSPACE_ROOT_PATH");
         compose.Should().Contain("enterprise-ai-aicopilot-data:/var/lib/aicopilot");
@@ -127,8 +128,6 @@ public sealed class SecurityDeploymentTests
             "github.event_name == 'workflow_dispatch' && (inputs.mode == 'quality' || inputs.mode == 'full')");
         ciWorkflow.Should().Contain(
             "github.event_name == 'workflow_dispatch' && inputs.mode == 'cross-project'");
-        ciWorkflow.Should().Contain(
-            "github.event_name == 'workflow_dispatch' && inputs.mode == 'full'");
         ciWorkflow.Should().NotContain("schedule:");
         ciWorkflow.Should().NotContain("  governance_gates:");
         ciWorkflow.Should().NotContain("  mutation_gate:");

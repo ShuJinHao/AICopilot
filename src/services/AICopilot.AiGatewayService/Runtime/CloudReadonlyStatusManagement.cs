@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace AICopilot.AiGatewayService.Runtime;
 
-[AuthorizeRequirement("AiGateway.GetRuntimeSettings")]
+[AuthorizeRequirement("AiGateway.GetCloudReadonlyStatus")]
 public sealed record GetCloudReadonlyStatusQuery : IQuery<Result<CloudReadonlyStatusDto>>;
 
 public sealed class GetCloudReadonlyStatusQueryHandler(

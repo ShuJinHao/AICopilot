@@ -17,9 +17,6 @@ namespace AICopilot.AiGatewayService.Commands.Sessions;
 public record CreatedSessionDto(
     Guid Id,
     string Title,
-    DateTimeOffset? OnsiteConfirmedAt,
-    string? OnsiteConfirmedBy,
-    DateTimeOffset? OnsiteConfirmationExpiresAt,
     string AgentMode,
     long AgentSessionVersion,
     string AgentSessionStatus);
@@ -68,11 +65,11 @@ public class CreateSessionCommandHandler(
                 return Result.NotFound();
             }
 
-            if (!template.IsEnabled)
+            if (!template.IsEnabled || !IsMainChatTemplate(template))
             {
                 return Result.Failure(new ApiProblemDescriptor(
                     AppProblemCodes.ChatConfigurationMissing,
-                    "The selected conversation template is disabled."));
+                    "The selected conversation template is disabled or is reserved for an internal agent."));
             }
         }
 
@@ -110,11 +107,11 @@ public class CreateSessionCommandHandler(
         return Result.Success(new CreatedSessionDto(
             session.Id,
             session.Title,
-            session.OnsiteConfirmedAt,
-            session.OnsiteConfirmedBy,
-            session.OnsiteConfirmationExpiresAt,
             "plan",
             1,
             AgentSessionRuntimeStatus.Ready.ToString()));
     }
+
+    private static bool IsMainChatTemplate(ConversationTemplate template) =>
+        template.Scope is ConversationTemplateScope.General or ConversationTemplateScope.ChatAnswer;
 }

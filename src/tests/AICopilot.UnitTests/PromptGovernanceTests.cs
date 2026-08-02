@@ -58,8 +58,9 @@ public sealed class PromptGovernanceTests
     public void BuiltInConversationTemplates_ShouldUseAAssistantIdentity_AndAvoidLegacyNames()
     {
         BuiltInConversationTemplates.All
+            .Select(definition => definition.Code)
             .Should()
-            .Contain(definition => definition.Code == "identity_base");
+            .BeEquivalentTo(["chat_answer", "business_readonly_text_to_sql"]);
 
         foreach (var definition in BuiltInConversationTemplates.All)
         {
@@ -74,13 +75,13 @@ public sealed class PromptGovernanceTests
     public void BuiltInConversationTemplates_ShouldCreateGovernedTemplates()
     {
         var modelId = LanguageModelId.New();
-        var definition = BuiltInConversationTemplates.Find("agent_planner");
+        var definition = BuiltInConversationTemplates.Find("chat_answer");
 
         definition.Should().NotBeNull();
         var template = BuiltInConversationTemplates.CreateTemplate(definition!, modelId);
 
-        template.Code.Should().Be("agent_planner");
-        template.Scope.Should().Be(ConversationTemplateScope.AgentPlanner);
+        template.Code.Should().Be("chat_answer");
+        template.Scope.Should().Be(ConversationTemplateScope.ChatAnswer);
         template.BuiltInVersion.Should().Be(BuiltInConversationTemplates.CurrentVersion);
         template.IsBuiltIn.Should().BeTrue();
         template.ModelId.Should().Be(modelId);
@@ -95,7 +96,7 @@ public sealed class PromptGovernanceTests
     [Fact]
     public void BuiltInConversationTemplates_ShouldUseCurrentPromptVersion()
     {
-        BuiltInConversationTemplates.CurrentVersion.Should().Be(9);
+        BuiltInConversationTemplates.CurrentVersion.Should().Be(10);
         BuiltInConversationTemplates.All
             .Should()
             .OnlyContain(definition => definition.Version == BuiltInConversationTemplates.CurrentVersion);
@@ -119,23 +120,8 @@ public sealed class PromptGovernanceTests
     }
 
     [Fact]
-    public void BuiltInConversationTemplates_ShouldDefineCurrentAgentSlotPrompts()
+    public void BuiltInConversationTemplates_ShouldDefineHarnessAndInternalTextToSqlPrompts()
     {
-        BuiltInConversationTemplates.Find("IntentRoutingAgent")!.SystemPrompt
-            .Should().Contain("{{$IntentList}}")
-            .And.Contain("多个结构化意图")
-            .And.Contain("JSON");
-
-        BuiltInConversationTemplates.Find("agent_planner")!.SystemPrompt
-            .Should().Contain("plannerToolCatalog")
-            .And.Contain("不能调用工具")
-            .And.Contain("运行详情");
-
-        BuiltInConversationTemplates.Find("agent_executor")!.SystemPrompt
-            .Should().Contain("最终执行 Agent")
-            .And.Contain("运行详情")
-            .And.Contain("可以读取、查询和分析已授权只读数据");
-
         BuiltInConversationTemplates.Find("business_readonly_text_to_sql")!.SystemPrompt
             .Should().Contain("结构化 JSON 草案")
             .And.Contain("不执行查询")
@@ -148,8 +134,9 @@ public sealed class PromptGovernanceTests
             .And.Contain("共享 AST guard");
 
         BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt
-            .Should().Contain("运行详情")
-            .And.Contain("Cloud 业务数据边界是只读分析");
+            .Should().Contain("Plan 与 Execute")
+            .And.Contain("运行详情")
+            .And.Contain("Cloud 业务数据永久只读");
     }
 
     [Fact]

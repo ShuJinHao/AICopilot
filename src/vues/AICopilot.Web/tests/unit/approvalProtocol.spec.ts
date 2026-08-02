@@ -10,7 +10,6 @@ function createApproval(overrides: Partial<FunctionApprovalRequest> = {}): Funct
     targetName: 'cloud-read',
     toolName: 'queryDeviceLogs',
     args: {},
-    requiresOnsiteAttestation: false,
     ...overrides
   }
 }

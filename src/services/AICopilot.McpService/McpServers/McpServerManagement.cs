@@ -14,7 +14,6 @@ public record McpToolPolicySummaryDto
 {
     public required string ToolName { get; init; }
     public bool RequiresApproval { get; init; }
-    public bool RequiresOnsiteAttestation { get; init; }
 }
 
 public record McpAllowedToolDto
@@ -312,7 +311,7 @@ public record GetMcpServerQuery(Guid Id) : IQuery<Result<McpServerDto>>;
 
 public class GetMcpServerQueryHandler(
     IReadRepository<McpServerInfo> serverRepository,
-    IApprovalRequirementReadService approvalRequirementReadService)
+    IMcpToolRegistryReadService toolRegistryReadService)
     : IQueryHandler<GetMcpServerQuery, Result<McpServerDto>>
 {
     public async Task<Result<McpServerDto>> Handle(GetMcpServerQuery request, CancellationToken cancellationToken)
@@ -325,32 +324,19 @@ public class GetMcpServerQueryHandler(
             return Result.NotFound();
         }
 
-        var policies = await LoadPoliciesAsync([server.Name], cancellationToken);
-        return Result.Success(McpServerDtoMapper.Map(server, policies));
-    }
-
-    private async Task<Dictionary<string, IReadOnlyCollection<ApprovalToolRequirementDto>>> LoadPoliciesAsync(
-        IReadOnlyCollection<string> serverNames,
-        CancellationToken cancellationToken)
-    {
-        if (serverNames.Count == 0)
-        {
-            return [];
-        }
-
-        var requirements = await approvalRequirementReadService.GetToolRequirementsAsync(
-            AiToolTargetType.McpServer,
-            serverNames,
-            cancellationToken);
-
-        return requirements
-            .GroupBy(requirement => requirement.TargetName, StringComparer.OrdinalIgnoreCase)
+        var registrations = await toolRegistryReadService.GetMcpToolRegistrationsAsync(cancellationToken);
+        var registrationsByServer = registrations
+            .Where(registration => string.Equals(
+                registration.ServerName,
+                server.Name,
+                StringComparison.OrdinalIgnoreCase))
+            .GroupBy(registration => registration.ServerName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
-                group => (IReadOnlyCollection<ApprovalToolRequirementDto>)group.ToArray(),
+                group => (IReadOnlyCollection<McpToolRegistryReadModel>)group.ToArray(),
                 StringComparer.OrdinalIgnoreCase);
+        return Result.Success(McpServerDtoMapper.Map(server, registrationsByServer));
     }
-
 }
 
 [AuthorizeRequirement("Mcp.GetListServers")]
@@ -358,7 +344,7 @@ public record GetListMcpServersQuery : IQuery<Result<IList<McpServerDto>>>;
 
 public class GetListMcpServersQueryHandler(
     IReadRepository<McpServerInfo> serverRepository,
-    IApprovalRequirementReadService approvalRequirementReadService)
+    IMcpToolRegistryReadService toolRegistryReadService)
     : IQueryHandler<GetListMcpServersQuery, Result<IList<McpServerDto>>>
 {
     public async Task<Result<IList<McpServerDto>>> Handle(
@@ -366,22 +352,16 @@ public class GetListMcpServersQueryHandler(
         CancellationToken cancellationToken)
     {
         var servers = await serverRepository.ListAsync(new McpServerInfosOrderedSpec(), cancellationToken);
-        var serverNames = servers.Select(server => server.Name).ToArray();
-
-        var requirements = await approvalRequirementReadService.GetToolRequirementsAsync(
-            AiToolTargetType.McpServer,
-            serverNames,
-            cancellationToken);
-
-        var policiesByTargetName = requirements
-            .GroupBy(requirement => requirement.TargetName, StringComparer.OrdinalIgnoreCase)
+        var registrations = await toolRegistryReadService.GetMcpToolRegistrationsAsync(cancellationToken);
+        var registrationsByServer = registrations
+            .GroupBy(registration => registration.ServerName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
-                group => (IReadOnlyCollection<ApprovalToolRequirementDto>)group.ToArray(),
+                group => (IReadOnlyCollection<McpToolRegistryReadModel>)group.ToArray(),
                 StringComparer.OrdinalIgnoreCase);
 
         IList<McpServerDto> result = servers
-            .Select(server => McpServerDtoMapper.Map(server, policiesByTargetName))
+            .Select(server => McpServerDtoMapper.Map(server, registrationsByServer))
             .ToList();
         return Result.Success(result);
     }
@@ -391,9 +371,9 @@ internal static class McpServerDtoMapper
 {
     public static McpServerDto Map(
         McpServerInfo server,
-        IReadOnlyDictionary<string, IReadOnlyCollection<ApprovalToolRequirementDto>> policiesByTargetName)
+        IReadOnlyDictionary<string, IReadOnlyCollection<McpToolRegistryReadModel>> registrationsByServer)
     {
-        policiesByTargetName.TryGetValue(server.Name, out var policies);
+        registrationsByServer.TryGetValue(server.Name, out var registrations);
 
         return new McpServerDto
         {
@@ -409,33 +389,35 @@ internal static class McpServerDtoMapper
             ExternalSystemType = server.ExternalSystemType,
             CapabilityKind = server.CapabilityKind,
             RiskLevel = server.RiskLevel,
-            ToolPolicySummaries = BuildToolPolicySummaries(server.AllowedTools, policies),
+            ToolPolicySummaries = BuildToolPolicySummaries(server.AllowedTools, registrations),
             IsEnabled = server.IsEnabled
         };
     }
 
     private static IReadOnlyCollection<McpToolPolicySummaryDto> BuildToolPolicySummaries(
         IReadOnlyCollection<McpAllowedTool> allowedTools,
-        IReadOnlyCollection<ApprovalToolRequirementDto>? policies)
+        IReadOnlyCollection<McpToolRegistryReadModel>? registrations)
     {
         if (allowedTools.Count == 0)
         {
             return [];
         }
 
-        var effectivePolicies = policies ?? [];
+        var effectiveRegistrations = registrations ?? [];
         return allowedTools
             .Select(tool =>
             {
-                var matchedPolicies = effectivePolicies
-                    .Where(policy => string.Equals(policy.ToolName, tool.ToolName, StringComparison.OrdinalIgnoreCase))
+                var matchedRegistrations = effectiveRegistrations
+                    .Where(registration => string.Equals(
+                        registration.ToolName,
+                        tool.ToolName,
+                        StringComparison.OrdinalIgnoreCase))
                     .ToArray();
 
                 return new McpToolPolicySummaryDto
                 {
                     ToolName = tool.ToolName,
-                    RequiresApproval = matchedPolicies.Any(policy => policy.RequiresApproval),
-                    RequiresOnsiteAttestation = matchedPolicies.Any(policy => policy.RequiresOnsiteAttestation)
+                    RequiresApproval = matchedRegistrations.Any(registration => registration.RequiresApproval)
                 };
             })
             .ToArray();

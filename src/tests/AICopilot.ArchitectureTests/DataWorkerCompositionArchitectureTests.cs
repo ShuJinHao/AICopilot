@@ -22,7 +22,6 @@ public sealed class DataWorkerCompositionArchitectureTests
             ["ConnectionStrings:ai-copilot"] =
                 "Host=localhost;Database=architecture;Username=test;Password=test",
             ["AiGateway:Deployment:Mode"] = "SingleInstance",
-            ["AiGateway:FinalAgentContextStore:Provider"] = "Memory",
             ["PersistenceMaintenance:IntervalSeconds"] = "17",
             ["PersistenceMaintenance:ReconciliationDelayMinutes"] = "11",
             ["PersistenceMaintenance:MarkerRetentionDays"] = "31",

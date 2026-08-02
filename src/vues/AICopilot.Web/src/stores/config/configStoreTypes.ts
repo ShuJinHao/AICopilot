@@ -2,7 +2,6 @@ import type { ConfigDialogMode } from '@/types/app'
 
 export type ConfigEditableDomain =
   | 'languageModel'
-  | 'routingModel'
   | 'conversationTemplate'
 
 export type ConfigLoadingDomain =

@@ -49,13 +49,6 @@ public class MessageConfiguration : IEntityTypeConfiguration<Message>
             .HasMaxLength(100)
             .HasColumnName("final_model_name");
 
-        builder.Property(m => m.RoutingModelId)
-            .HasColumnName("routing_model_id");
-
-        builder.Property(m => m.RoutingModelName)
-            .HasMaxLength(100)
-            .HasColumnName("routing_model_name");
-
         builder.Property(m => m.ContextWindowTokens)
             .HasColumnName("context_window_tokens");
 

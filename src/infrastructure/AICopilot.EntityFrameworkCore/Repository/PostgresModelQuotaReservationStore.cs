@@ -1,4 +1,4 @@
-using AICopilot.Core.AiGateway.Runtime.AgentExecution;
+using AICopilot.Core.AiGateway.Runtime.ModelQuota;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.Services.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace AICopilot.EntityFrameworkCore.Repository;
 
 internal sealed class PostgresModelQuotaReservationStore(
-    AgentExecutionTransactionRunner transactionRunner)
+    AiGatewayTransactionRunner transactionRunner)
     : IModelQuotaReservationStore
 {
     public Task<ModelQuotaReservationOutcome> TryReserveAsync(
@@ -18,7 +18,7 @@ internal sealed class PostgresModelQuotaReservationStore(
             "Agent.ModelQuotaReserve",
             async (context, token) =>
             {
-                var now = request.RequestedAtUtc.ToUniversalTime();
+                var now = ToPostgresTimestampPrecision(request.RequestedAtUtc);
                 var windowStart = StartOfMinute(now);
                 var windowEnd = windowStart.AddMinutes(1);
                 var lockScopes = new List<string>
@@ -303,6 +303,14 @@ internal sealed class PostgresModelQuotaReservationStore(
         return DateTimeOffset.FromUnixTimeSeconds(seconds - seconds % 60);
     }
 
+    private static DateTimeOffset ToPostgresTimestampPrecision(DateTimeOffset value)
+    {
+        var utc = value.ToUniversalTime();
+        return new DateTimeOffset(
+            utc.Ticks - utc.Ticks % TimeSpan.TicksPerMicrosecond,
+            TimeSpan.Zero);
+    }
+
     private static ModelQuotaReservationOutcome Denied(
         ModelQuotaReservationResult result,
         DateTimeOffset retryAtUtc,
@@ -325,7 +333,7 @@ internal sealed class PostgresModelQuotaReservationStore(
         }
     }
 
-    private static AgentExecutionTransactionAttempt<T> Attempt<T>(T value) => new(value);
+    private static AiGatewayTransactionAttempt<T> Attempt<T>(T value) => new(value);
 
     private sealed record ReservationScopes(
         ModelQuotaReservation[] Endpoint,

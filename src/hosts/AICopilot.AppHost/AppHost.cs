@@ -77,15 +77,6 @@ if (appHostOptions.PersistentContainers)
         .WithLifetime(ContainerLifetime.Persistent);
 }
 
-var finalAgentContextRedis = builder.AddRedis("final-agent-context-redis");
-
-if (appHostOptions.PersistentContainers)
-{
-    finalAgentContextRedis = finalAgentContextRedis
-        .WithDataVolume(appHostOptions.RedisVolumeName)
-        .WithLifetime(ContainerLifetime.Persistent);
-}
-
 var migration = builder.AddProject<AICopilot_MigrationWorkApp>("aicopilot-migration")
     .WithReference(aiCopilotDatabase)
     .WithReference(cloudDeviceSemanticSimDatabase)
@@ -102,20 +93,16 @@ var httpapi = builder.AddProject<AICopilot_HttpApi>("aicopilot-httpapi")
     .WaitFor(postgresdb)
     .WaitFor(rabbitmq)
     .WaitFor(qdrant)
-    .WaitFor(finalAgentContextRedis)
     .WithReference(aiCopilotDatabase)
     .WithReference(rabbitmq)
     .WithReference(migration)
     .WithReference(qdrant)
-    .WithReference(finalAgentContextRedis)
     .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
     .WithEnvironment("JwtSettings__SecretKey", jwtSecretKey)
     .WithEnvironment("BootstrapAdmin__UserName", bootstrapAdminUserName)
     .WithEnvironment("BootstrapAdmin__Password", bootstrapAdminPassword)
     .WithEnvironment("CloudOidc__BootstrapAdminUserName", bootstrapAdminUserName)
-    .WithEnvironment("ArtifactWorkspace__RootPath", appHostOptions.ArtifactWorkspaceRootPath)
     .WithEnvironment("AgentSessionState__DataProtectionKeyPath", appHostOptions.AgentSessionStateDataProtectionKeyPath)
-    .WithEnvironment("AiGateway__FinalAgentContextStore__Provider", "Redis")
     .WithEnvironment("CloudReadonly__Mode", cloudReadonlyMode)
     .WithEnvironment("CloudReadonly__Simulation__Enabled", cloudReadonlySimulationEnabled)
     .WithEnvironment("CloudReadonly__Simulation__AlwaysMarkAsSimulation", cloudReadonlySimulationAlwaysMarked)
@@ -142,7 +129,6 @@ if (appHostOptions.EnableDataWorker)
         .WithReference(rabbitmq)
         .WithReference(qdrant)
         .WithEnvironment("AICopilotSecurity__ApiKeyEncryptionKey", apiKeyEncryptionKey)
-        .WithEnvironment("ArtifactWorkspace__RootPath", appHostOptions.ArtifactWorkspaceRootPath)
         .WithEnvironment("CloudReadonly__Mode", cloudReadonlyMode)
         .WithEnvironment("CloudReadonly__Simulation__Enabled", cloudReadonlySimulationEnabled)
         .WithEnvironment("CloudReadonly__Simulation__AlwaysMarkAsSimulation", cloudReadonlySimulationAlwaysMarked)
@@ -173,19 +159,11 @@ internal sealed record AppHostOptions(
     int? PgWebHostPort,
     string PostgresVolumeName,
     string QdrantVolumeName,
-    string RedisVolumeName,
-    string ArtifactWorkspaceRootPath,
     string AgentSessionStateDataProtectionKeyPath)
 {
     public static AppHostOptions FromConfiguration(IConfiguration configuration)
     {
         var persistentContainers = configuration.GetValue("AppHost:PersistentContainers", true);
-        var artifactWorkspaceRootPath = Path.GetFullPath(
-            configuration["ArtifactWorkspace:RootPath"]
-            ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AICopilot",
-                "artifact-workspaces"));
         var agentSessionStateDataProtectionKeyPath = Path.GetFullPath(
             configuration["AgentSessionState:DataProtectionKeyPath"]
             ?? Path.Combine(
@@ -204,8 +182,6 @@ internal sealed record AppHostOptions(
             configuration.GetValue<int?>("AppHost:PgWebHostPort") ?? (persistentContainers ? 5050 : null),
             configuration["AppHost:PostgresVolumeName"] ?? "postgres-aicopilot",
             configuration["AppHost:QdrantVolumeName"] ?? "qdrant-datas",
-            configuration["AppHost:RedisVolumeName"] ?? "redis-aicopilot",
-            artifactWorkspaceRootPath,
             agentSessionStateDataProtectionKeyPath);
     }
 }

@@ -1,5 +1,5 @@
 using System.Text.Json;
-using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.AiGatewayService.BusinessQueries;
 using AICopilot.Services.Contracts.AiGateway.Dtos;
 using AICopilot.Visualization;
 using AICopilot.Visualization.Widgets;

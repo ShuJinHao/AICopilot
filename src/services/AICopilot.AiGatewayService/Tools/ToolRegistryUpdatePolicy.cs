@@ -53,11 +53,6 @@ internal static class ToolRegistryUpdatePolicy
             fields.Add("dataBoundary");
         }
 
-        if (request.IsVisibleToPlanner.HasValue && request.IsVisibleToPlanner.Value != tool.IsVisibleToPlanner)
-        {
-            fields.Add("isVisibleToPlanner");
-        }
-
         if (request.IsExecutableByAgent.HasValue && request.IsExecutableByAgent.Value != tool.IsExecutableByAgent)
         {
             fields.Add("isExecutableByAgent");
@@ -73,7 +68,6 @@ internal static class ToolRegistryUpdatePolicy
             fields.Add("catalogVersion");
         }
 
-        AddIfChanged(request.ApprovalPolicy, tool.ApprovalPolicy, "approvalPolicy");
         return fields;
 
         void AddIfChanged(string? next, string? current, string field)

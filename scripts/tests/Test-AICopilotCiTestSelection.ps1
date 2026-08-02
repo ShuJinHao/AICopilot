@@ -16,6 +16,16 @@ function Assert-ValidCategories([object]$Selection) {
     if ($invalid.Count -gt 0) {
         throw "Selector emitted non-canonical categories: $($invalid -join ', ')"
     }
+    foreach ($project in @($Selection.selectedDotNetProjects | Where-Object {
+                -not [string]::IsNullOrWhiteSpace([string]$_.testFilter)
+            })) {
+        $terms = @(([string]$project.testFilter).Split(
+                '|',
+                [StringSplitOptions]::RemoveEmptyEntries))
+        if (@($terms | Sort-Object -Unique).Count -ne $terms.Count) {
+            throw "Selector emitted duplicate test-filter terms: $($project.projectName)"
+        }
+    }
 }
 
 function Write-FixtureFile {
@@ -156,6 +166,80 @@ function New-DynamicRunnerFixture {
     & git -C $Root -c user.name=selector-fixture -c user.email=selector@example.invalid `
         commit -q -m baseline
     if ($LASTEXITCODE -ne 0) { throw 'Failed to commit AICopilot selector fixture baseline.' }
+    return ((& git -C $Root rev-parse HEAD) -join '').Trim()
+}
+
+function New-TestInfrastructureRetirementFixture {
+    param([Parameter(Mandatory)][string]$Root)
+
+    Write-FixtureFile -Root $Root `
+        -Path 'src/testing/AICopilot.TestSupport.Legacy/AICopilot.TestSupport.Legacy.csproj' `
+        -Content @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsTestProject>false</IsTestProject>
+    <AICopilotTestRole>Support</AICopilotTestRole>
+    <AICopilotTestConsumers>AICopilot.Business.Consumer;AICopilot.Quality.Retired</AICopilotTestConsumers>
+  </PropertyGroup>
+</Project>
+'@
+    Write-FixtureFile -Root $Root `
+        -Path 'src/testing/AICopilot.TestSupport.Legacy/LegacyHelper.cs' `
+        -Content 'internal sealed class LegacyHelper { }'
+    Write-FixtureFile -Root $Root `
+        -Path 'src/tests/AICopilot.Business.Consumer/AICopilot.Business.Consumer.csproj' `
+        -Content @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+    <AICopilotTestKind>Unit</AICopilotTestKind>
+    <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
+    <AICopilotTestOwner>ConsumerBusiness</AICopilotTestOwner>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../testing/AICopilot.TestSupport.Legacy/AICopilot.TestSupport.Legacy.csproj" />
+  </ItemGroup>
+</Project>
+'@
+    Write-FixtureFile -Root $Root `
+        -Path 'src/tests/AICopilot.Quality.Retired/AICopilot.Quality.Retired.csproj' `
+        -Content @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+    <AICopilotTestKind>EndToEnd</AICopilotTestKind>
+    <AICopilotCiCategory>Quality</AICopilotCiCategory>
+    <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../testing/AICopilot.TestSupport.Legacy/AICopilot.TestSupport.Legacy.csproj" />
+  </ItemGroup>
+</Project>
+'@
+    Write-FixtureFile -Root $Root `
+        -Path 'src/tests/AICopilot.Quality.Retired/RetiredQualityTests.cs' `
+        -Content 'internal sealed class RetiredQualityTests { }'
+    Write-FixtureFile -Root $Root `
+        -Path 'src/vues/AICopilot.Web/playwright.retired.config.ts' `
+        -Content 'export default {}'
+    Write-FixtureFile -Root $Root -Path 'AICopilot.slnx' -Content @'
+<Solution>
+  <Project Path="src/testing/AICopilot.TestSupport.Legacy/AICopilot.TestSupport.Legacy.csproj" />
+  <Project Path="src/tests/AICopilot.Business.Consumer/AICopilot.Business.Consumer.csproj" />
+  <Project Path="src/tests/AICopilot.Quality.Retired/AICopilot.Quality.Retired.csproj" />
+</Solution>
+'@
+
+    & git -C $Root init -q
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to initialize test-infrastructure retirement fixture.' }
+    & git -C $Root add .
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to stage test-infrastructure retirement fixture.' }
+    & git -C $Root -c user.name=selector-fixture -c user.email=selector@example.invalid `
+        commit -q -m baseline
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to commit test-infrastructure retirement fixture.' }
     return ((& git -C $Root rev-parse HEAD) -join '').Trim()
 }
 
@@ -368,11 +452,11 @@ try {
         throw 'Aspire TestKit change did not execute its filtered Security dependent without expanding to Quality or Full.'
     }
 
-    $agentOutput = Join-Path $temporaryRoot 'agent-security.json'
+    $agentOutput = Join-Path $temporaryRoot 'harness-security.json'
     & $selector `
         -RepositoryRoot $root `
         -ChangedFiles @(
-            'src/services/AICopilot.AiGatewayService/AgentTasks/AgentTaskService.cs') `
+            'src/services/AICopilot.AiGatewayService/Agents/ChatStreamHandler.cs') `
         -OutputPath $agentOutput `
         -GitHubOutputPath ''
     $agent = Get-Content $agentOutput -Raw | ConvertFrom-Json
@@ -384,8 +468,8 @@ try {
         @($agentHttp[0].categories) -notcontains 'Security' -or
         @($agent.selectedDotNetProjects.projectName) -contains 'AICopilot.PersistenceTests' -or
         @($agent.matchedSecurityImpactRules).Count -ne 1 -or
-        @($agent.matchedSecurityImpactRules) -notcontains 'agent-http') {
-        throw 'Agent path/owner mapping did not isolate the expected heavy Security filter.'
+        @($agent.matchedSecurityImpactRules) -notcontains 'harness-http') {
+        throw 'Harness path/owner mapping did not isolate the expected Security filter.'
     }
 
     foreach ($securityCase in @(
@@ -637,6 +721,90 @@ try {
         throw "Deleted Business runner did not select only its surviving owner scope: $($retirementBusinessNames -join ', ')"
     }
 
+    $testInfrastructureRoot = Join-Path $temporaryRoot 'retired-test-infrastructure'
+    $testInfrastructureBase = New-TestInfrastructureRetirementFixture `
+        -Root $testInfrastructureRoot
+    Remove-Item `
+        (Join-Path $testInfrastructureRoot 'src/testing/AICopilot.TestSupport.Legacy') `
+        -Recurse `
+        -Force
+    Remove-Item `
+        (Join-Path $testInfrastructureRoot 'src/tests/AICopilot.Quality.Retired') `
+        -Recurse `
+        -Force
+    Remove-Item `
+        (Join-Path $testInfrastructureRoot 'src/vues/AICopilot.Web/playwright.retired.config.ts') `
+        -Force
+    Write-FixtureFile -Root $testInfrastructureRoot `
+        -Path 'src/testing/AICopilot.TestSupport.Current/AICopilot.TestSupport.Current.csproj' `
+        -Content @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsTestProject>false</IsTestProject>
+    <AICopilotTestRole>Support</AICopilotTestRole>
+    <AICopilotTestConsumers>AICopilot.Business.Consumer;AICopilot.Quality.Retired</AICopilotTestConsumers>
+  </PropertyGroup>
+</Project>
+'@
+    Write-FixtureFile -Root $testInfrastructureRoot `
+        -Path 'src/testing/AICopilot.TestSupport.Current/CurrentHelper.cs' `
+        -Content 'internal sealed class CurrentHelper { }'
+    Write-FixtureFile -Root $testInfrastructureRoot `
+        -Path 'src/tests/AICopilot.Business.Consumer/AICopilot.Business.Consumer.csproj' `
+        -Content @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+    <AICopilotTestKind>Unit</AICopilotTestKind>
+    <AICopilotTestRuntime>Pure</AICopilotTestRuntime>
+    <AICopilotTestOwner>ConsumerBusiness</AICopilotTestOwner>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../testing/AICopilot.TestSupport.Current/AICopilot.TestSupport.Current.csproj" />
+  </ItemGroup>
+</Project>
+'@
+    Write-FixtureFile -Root $testInfrastructureRoot -Path 'AICopilot.slnx' -Content @'
+<Solution>
+  <Project Path="src/testing/AICopilot.TestSupport.Current/AICopilot.TestSupport.Current.csproj" />
+  <Project Path="src/tests/AICopilot.Business.Consumer/AICopilot.Business.Consumer.csproj" />
+</Solution>
+'@
+    $testInfrastructureChangedFiles = @(
+        'AICopilot.slnx',
+        'src/testing/AICopilot.TestSupport.Legacy/AICopilot.TestSupport.Legacy.csproj',
+        'src/testing/AICopilot.TestSupport.Legacy/LegacyHelper.cs',
+        'src/testing/AICopilot.TestSupport.Current/AICopilot.TestSupport.Current.csproj',
+        'src/testing/AICopilot.TestSupport.Current/CurrentHelper.cs',
+        'src/tests/AICopilot.Business.Consumer/AICopilot.Business.Consumer.csproj',
+        'src/tests/AICopilot.Quality.Retired/AICopilot.Quality.Retired.csproj',
+        'src/tests/AICopilot.Quality.Retired/RetiredQualityTests.cs',
+        'src/vues/AICopilot.Web/playwright.retired.config.ts')
+    $testInfrastructureOutput = Join-Path $temporaryRoot 'retired-test-infrastructure.json'
+    & $selector `
+        -RepositoryRoot $testInfrastructureRoot `
+        -BaseRef $testInfrastructureBase `
+        -ChangedFiles $testInfrastructureChangedFiles `
+        -OutputPath $testInfrastructureOutput `
+        -GitHubOutputPath ''
+    $testInfrastructure = Get-Content $testInfrastructureOutput -Raw | ConvertFrom-Json
+    if (@($testInfrastructure.unclassifiedFiles).Count -ne 0 -or
+        @($testInfrastructure.requiredExplicitModes) -notcontains 'Quality' -or
+        @($testInfrastructure.requiredExplicitModes) -contains 'Full' -or
+        @($testInfrastructure.retiredTestSupportProjects) -notcontains
+            'src/testing/AICopilot.TestSupport.Legacy/AICopilot.TestSupport.Legacy.csproj' -or
+        @($testInfrastructure.retiredDeferredTestProjects) -notcontains
+            'src/tests/AICopilot.Quality.Retired/AICopilot.Quality.Retired.csproj' -or
+        @($testInfrastructure.selectedDotNetProjects.projectName) -notcontains
+            'AICopilot.Business.Consumer' -or
+        -not [bool]$testInfrastructure.web.affected -or
+        @($testInfrastructure.web.changedFiles) -notcontains
+            'src/vues/AICopilot.Web/playwright.retired.config.ts') {
+        throw 'Retired test support, deferred Quality, solution delta, or deleted web harness was not safely attributed.'
+    }
+
     $unownedRetirementRoot = Join-Path $temporaryRoot 'unowned-retired-runner'
     $unownedRetirementBase = New-DynamicRunnerFixture `
         -Root $unownedRetirementRoot `
@@ -647,6 +815,7 @@ try {
     Set-FixtureSolution -Root $unownedRetirementRoot -BusinessProjectPaths @()
     $unownedRetirementOutput = Join-Path $temporaryRoot 'unowned-retired-runner.json'
     $unownedRetirementFailed = $false
+    $unownedRetirementError = ''
     try {
         & $selector `
             -RepositoryRoot $unownedRetirementRoot `
@@ -658,15 +827,16 @@ try {
             -OutputPath $unownedRetirementOutput `
             -GitHubOutputPath ''
     } catch {
+        $unownedRetirementError = "$($_.Exception.Message) stack=$($_.ScriptStackTrace)"
         $unownedRetirementFailed = $_.Exception.Message -match 'cannot safely attribute'
     }
     if (-not $unownedRetirementFailed) {
-        throw 'Deleted Business runner without baseline owner evidence did not fail closed.'
+        throw "Deleted Business runner without baseline owner evidence did not fail closed: error=$unownedRetirementError"
     }
     $unownedRetirement = Get-Content $unownedRetirementOutput -Raw | ConvertFrom-Json
-    if (@($unownedRetirement.unclassifiedFiles) -notcontains 'AICopilot.slnx' -or
-        @($unownedRetirement.requiredExplicitModes) -notcontains 'Full') {
-        throw 'Unowned deleted Business runner did not preserve fail-closed evidence.'
+    if (@($unownedRetirement.unclassifiedFiles) -notcontains
+            'src/tests/AICopilot.Business.Legacy/AICopilot.Business.Legacy.csproj') {
+        throw "Unowned deleted Business runner did not preserve fail-closed evidence: unclassified=$(@($unownedRetirement.unclassifiedFiles) -join ', ') modes=$(@($unownedRetirement.requiredExplicitModes) -join ', ')"
     }
 
     $crossOutput = Join-Path $temporaryRoot 'cross.json'
@@ -759,4 +929,4 @@ if ($runnerText -notmatch "ForEach-Object\s*\{\s*\[int\]\`$_\['discovered'\]\s*\
     throw 'AICopilot CI discovery aggregation does not safely read ordered result dictionaries.'
 }
 
-Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 webManifest=1 activeContract=7 securityMapping=4 securityTest=1 securityProjectFile=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 webAuditGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'
+Write-Host 'AICOPILOT_CI_SELECTION_BEHAVIOR_OK positive=1 docs=1 webManifest=1 activeContract=7 securityMapping=4 securityTest=1 securityProjectFile=1 testKitDependency=1 unicodePath=1 productionGraph=1 quality=1 deployment=1 deferred=1 dynamic=1 dynamicDeployment=1 retiredBusiness=1 retiredInfrastructure=1 unownedRetired=1 cross=1 negative=1 workflowGate=1 webAuditGate=1 sdkContract=1 graphBuild=1 discoveryAggregation=1'

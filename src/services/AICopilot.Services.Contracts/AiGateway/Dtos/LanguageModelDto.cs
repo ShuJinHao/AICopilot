@@ -30,16 +30,6 @@ public record SelectableChatModelDto
     public int MaxOutputTokens { get; init; }
 }
 
-public record RoutingModelConfigurationDto
-{
-    public Guid Id { get; init; }
-    public required string Name { get; init; }
-    public Guid ModelId { get; init; }
-    public required string ModelName { get; init; }
-    public required string ModelProvider { get; init; }
-    public bool IsActive { get; init; }
-}
-
 public record LanguageModelTestResultDto
 {
     public bool Success { get; init; }

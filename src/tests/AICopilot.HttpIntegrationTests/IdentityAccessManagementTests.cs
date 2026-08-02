@@ -197,17 +197,6 @@ public sealed class IdentityAccessManagementTests
                 "AiGateway.GetListSessions",
                 "AiGateway.RenameSession",
                 "AiGateway.DeleteSession",
-                "AiGateway.GetAgentTask",
-                "AiGateway.PlanAgentTask",
-                "AiGateway.ApproveAgentTaskPlan",
-                "AiGateway.RunAgentTask",
-                "AiGateway.CancelAgentTask",
-                "AiGateway.Upload",
-                "AiGateway.GetUpload",
-                "AiGateway.GetWorkspace",
-                "AiGateway.DownloadArtifact",
-                "AiGateway.EditArtifact",
-                "AiGateway.SubmitFinalReview",
                 "AiGateway.Chat",
                 "AiGateway.ToolRegistry.Read",
                 "Rag.GetKnowledgeBase",
@@ -216,9 +205,6 @@ public sealed class IdentityAccessManagementTests
                 "Rag.UploadDocument",
                 "Rag.DeleteDocument",
                 "Rag.SearchKnowledgeBase");
-            profile.Permissions.Should().NotContain("AiGateway.ApproveAgentToolCall");
-            profile.Permissions.Should().NotContain("AiGateway.ApproveFinalOutput");
-            profile.Permissions.Should().NotContain("AiGateway.FinalizeWorkspace");
             profile.Permissions.Should().NotContain("Rag.CreateKnowledgeBase");
             profile.Permissions.Should().NotContain("Rag.UpdateKnowledgeBase");
             profile.Permissions.Should().NotContain("Rag.DeleteKnowledgeBase");

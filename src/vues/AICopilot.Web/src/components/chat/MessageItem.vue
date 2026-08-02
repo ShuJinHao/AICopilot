@@ -34,14 +34,14 @@ function asApproval(chunk: ChatChunk) {
   return chunk as ApprovalChunk
 }
 
-async function approve(payload: { callId: string; onsiteConfirmed: boolean }, chunk: ApprovalChunk) {
+async function approve(payload: { callId: string }, chunk: ApprovalChunk) {
   if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
-  await store.submitApproval(payload.callId, 'approved', payload.onsiteConfirmed, chunk)
+  await store.submitApproval(payload.callId, 'approved', chunk)
 }
 
 async function reject(payload: { callId: string }, chunk: ApprovalChunk) {
   if (!store.resolvedSessionId || store.isSessionTransitionBlocked) return
-  await store.submitApproval(payload.callId, 'rejected', false, chunk)
+  await store.submitApproval(payload.callId, 'rejected', chunk)
 }
 </script>
 

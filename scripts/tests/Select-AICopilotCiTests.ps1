@@ -138,6 +138,8 @@ function Get-BaselineProjectDescriptor {
         RelativeDirectory = (Split-Path $ProjectPath -Parent).Replace('\', '/')
         Xml = $projectXml
         IsTest = $isTest
+        TestRole = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestRole'
+        TestConsumers = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestConsumers'
         TestKind = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestKind'
         Runtime = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestRuntime'
         Owner = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestOwner'
@@ -212,20 +214,32 @@ function Add-SelectedProject {
     )
 
     if (-not $Selected.ContainsKey($Project.Path)) {
+        $filters = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        if (-not [string]::IsNullOrWhiteSpace($TestFilter)) {
+            foreach ($term in @($TestFilter.Split(
+                        '|',
+                        [StringSplitOptions]::RemoveEmptyEntries))) {
+                [void]$filters.Add($term.Trim())
+            }
+        }
         $Selected[$Project.Path] = [ordered]@{
             path = $Project.Path
             projectName = $Project.Name
             runtime = $Project.Runtime
             categories = [Collections.Generic.List[string]]::new()
-            testFilter = $TestFilter
+            testFilters = $filters
+            unfiltered = [string]::IsNullOrWhiteSpace($TestFilter)
             reasons = [Collections.Generic.List[string]]::new()
         }
     } elseif ([string]::IsNullOrWhiteSpace($TestFilter)) {
-        $Selected[$Project.Path].testFilter = ''
-    } elseif (-not [string]::IsNullOrWhiteSpace([string]$Selected[$Project.Path].testFilter) -and
-        [string]$Selected[$Project.Path].testFilter -cne $TestFilter) {
-        $Selected[$Project.Path].testFilter =
-            "($($Selected[$Project.Path].testFilter))|($TestFilter)"
+        $Selected[$Project.Path].unfiltered = $true
+        $Selected[$Project.Path].testFilters.Clear()
+    } elseif (-not [bool]$Selected[$Project.Path].unfiltered) {
+        foreach ($term in @($TestFilter.Split(
+                    '|',
+                    [StringSplitOptions]::RemoveEmptyEntries))) {
+            [void]$Selected[$Project.Path].testFilters.Add($term.Trim())
+        }
     }
     if (-not $Selected[$Project.Path].categories.Contains($Category)) {
         $Selected[$Project.Path].categories.Add($Category)
@@ -338,6 +352,124 @@ function Add-BaselineBusinessImpact {
     return $true
 }
 
+function Get-TestConsumerNames {
+    param([string]$Value)
+
+    return @(([string]$Value).Split(
+            ';',
+            [StringSplitOptions]::RemoveEmptyEntries) |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Sort-Object -Unique)
+}
+
+function Get-TestSupportReplacement {
+    param(
+        [Parameter(Mandatory)][object]$BaselineProject,
+        [Parameter(Mandatory)][object[]]$CurrentProjects
+    )
+
+    if ($BaselineProject.IsTest -or $BaselineProject.TestRole -cne 'Support') {
+        return
+    }
+    $baselineConsumers = @(Get-TestConsumerNames $BaselineProject.TestConsumers)
+    if ($baselineConsumers.Count -eq 0) {
+        return
+    }
+
+    $ranked = @($CurrentProjects |
+        Where-Object { -not $_.IsTest -and $_.TestRole -ceq 'Support' } |
+        ForEach-Object {
+            $project = $_
+            $currentConsumers = @(Get-TestConsumerNames $project.TestConsumers)
+            [pscustomobject]@{
+                Project = $project
+                SharedConsumers = @($baselineConsumers |
+                    Where-Object { $_ -in $currentConsumers }).Count
+            }
+        } |
+        Where-Object SharedConsumers -gt 0 |
+        Sort-Object @{ Expression = { $_.SharedConsumers }; Descending = $true },
+            @{ Expression = { $_.Project.Path }; Descending = $false })
+    if ($ranked.Count -eq 0) {
+        return
+    }
+    $best = @($ranked | Where-Object SharedConsumers -eq $ranked[0].SharedConsumers)
+    if ($best.Count -ne 1) {
+        return
+    }
+    return $best[0].Project
+}
+
+function Add-BaselineTestSupportImpact {
+    param(
+        [Parameter(Mandatory)][hashtable]$Selected,
+        [Parameter(Mandatory)][object]$BaselineProject,
+        [Parameter(Mandatory)][object[]]$CurrentProjects,
+        [Parameter(Mandatory)][object[]]$CurrentTestProjects,
+        [Parameter(Mandatory)][hashtable]$CurrentProjectClosures,
+        [Parameter(Mandatory)][string]$Mode,
+        [Parameter(Mandatory)][string]$Reason,
+        [Parameter(Mandatory)][AllowEmptyCollection()][Collections.Generic.List[string]]$DeferredFiles,
+        [Parameter(Mandatory)][AllowEmptyCollection()][Collections.Generic.HashSet[string]]$RequiredExplicitModes,
+        [Parameter(Mandatory)][AllowEmptyCollection()][Collections.Generic.HashSet[string]]$RetiredTestSupportProjects
+    )
+
+    $replacement = @(Get-TestSupportReplacement `
+            -BaselineProject $BaselineProject `
+            -CurrentProjects $CurrentProjects)
+    if ($replacement.Count -ne 1) {
+        return $false
+    }
+    $dependents = @($CurrentTestProjects | Where-Object {
+            $CurrentProjectClosures[$_.Path] -contains $replacement[0].Path
+        })
+    if ($dependents.Count -eq 0) {
+        return $false
+    }
+
+    [void]$RetiredTestSupportProjects.Add($BaselineProject.Path)
+    foreach ($dependent in $dependents) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$dependent.SecurityFilter)) {
+            Add-SelectedProject -Selected $Selected -Project $dependent `
+                -Category Security `
+                -TestFilter $dependent.SecurityFilter `
+                -Reason "affected-retired-test-support:$($BaselineProject.Path)"
+            continue
+        }
+        switch ([string]$dependent.Category) {
+            'Architecture' {
+                Add-SelectedProject -Selected $Selected -Project $dependent `
+                    -Category Architecture `
+                    -Reason "affected-retired-test-support:$($BaselineProject.Path)"
+            }
+            'Business' {
+                if ($Mode -eq 'Deployment') {
+                    $DeferredFiles.Add("Business:$Reason")
+                } else {
+                    Add-SelectedProject -Selected $Selected -Project $dependent `
+                        -Category Business `
+                        -Reason "affected-retired-test-support:$($BaselineProject.Path)"
+                }
+            }
+            'DeploymentContract' {
+                Add-SelectedProject -Selected $Selected -Project $dependent `
+                    -Category DeploymentContract `
+                    -Reason "affected-retired-test-support:$($BaselineProject.Path)"
+            }
+            'Quality' {
+                $DeferredFiles.Add("Quality:$Reason")
+                [void]$RequiredExplicitModes.Add('Quality')
+            }
+            'CrossProject' {
+                $DeferredFiles.Add("CrossProject:$Reason")
+                [void]$RequiredExplicitModes.Add('CrossProject')
+            }
+        }
+    }
+    return $true
+}
+
 $root = (Resolve-Path $RepositoryRoot).Path.TrimEnd(
     [IO.Path]::DirectorySeparatorChar,
     [IO.Path]::AltDirectorySeparatorChar)
@@ -377,6 +509,8 @@ foreach ($projectFile in @(Get-ChildItem (Join-Path $root 'src') -Filter '*.cspr
         RelativeDirectory = (Split-Path $path -Parent).Replace('\', '/')
         Xml = $projectXml
         IsTest = (Get-DirectProjectProperty -Project $projectXml -Name 'IsTestProject') -ceq 'true'
+        TestRole = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestRole'
+        TestConsumers = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestConsumers'
         TestKind = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestKind'
         Runtime = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestRuntime'
         Owner = Get-DirectProjectProperty -Project $projectXml -Name 'AICopilotTestOwner'
@@ -453,6 +587,8 @@ $unclassified = [Collections.Generic.List[string]]::new()
 $deferredFiles = [Collections.Generic.List[string]]::new()
 $retiredBusinessFiles = [Collections.Generic.List[string]]::new()
 $retiredBusinessProjects = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$retiredDeferredTestProjects = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$retiredTestSupportProjects = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $requiredExplicitMode = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $matchedSecurityRules = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $selected = @{}
@@ -482,12 +618,12 @@ $securityImpactRules = @(
             '^src/hosts/AICopilot\.HttpApi/(?:Controllers/IdentityController\.cs|HttpApiAuthenticationConfiguration\.cs|Infrastructure/(?:CloudOidc|CurrentUser|ApiProblemDetailsFactory)|Models/IdentityModels\.cs)')
     },
     [pscustomobject]@{
-        Id = 'agent-http'
+        Id = 'harness-http'
         ProjectName = 'AICopilot.HttpIntegrationTests'
-        Filter = 'FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentApprovalPermissionHardeningTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentRunQueuePermissionTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.AgentSafetyApprovalHttpTests'
+        Filter = 'FullyQualifiedName~AICopilot.HttpIntegrationTests.OpenApiContractTests|FullyQualifiedName~AICopilot.HttpIntegrationTests.HarnessApprovalHttpTests'
         Patterns = @(
-            '^src/services/AICopilot\.AiGatewayService/(?:AgentTasks|ApprovalPolicies|Approvals|Safety|Workspaces)/',
-            '^src/hosts/AICopilot\.HttpApi/Controllers/AiGateway(?:AgentTask|WorkspaceArtifact|Tool)?Controller\.cs')
+            '^src/services/AICopilot\.AiGatewayService/(?:Agents|BusinessQueries|Safety|Tools)/',
+            '^src/hosts/AICopilot\.HttpApi/Controllers/AiGateway(?:Session|Tool)?Controller\.cs')
     },
     [pscustomobject]@{
         Id = 'mcp-http'
@@ -607,8 +743,19 @@ if ($Mode -eq 'Quality') {
             }
             $webRelative = $file.Substring($webRoot.Length)
             if ($webRelative -match '^(?:vite\.config\.|vitest\.config\.|tsconfig|playwright\.|e2e/)') {
-                $unclassified.Add($file)
-                [void]$requiredExplicitMode.Add('Full')
+                $deletedQualityHarness = $webRelative -match '^(?:playwright\.|e2e/)' -and
+                    $baselineReady -and
+                    -not (Test-Path (Join-Path $root $file) -PathType Leaf) -and
+                    $null -ne (Get-GitFileAtRef -Root $root -Ref $BaseRef -Path $file)
+                if ($deletedQualityHarness) {
+                    $webAffected = $true
+                    $webChanged.Add($file)
+                    $deferredFiles.Add("Quality:$file")
+                    [void]$requiredExplicitMode.Add('Quality')
+                } else {
+                    $unclassified.Add($file)
+                    [void]$requiredExplicitMode.Add('Full')
+                }
             } else {
                 $webAffected = $true
                 $webChanged.Add($file)
@@ -668,6 +815,11 @@ if ($Mode -eq 'Quality') {
                     @($baselineProjectPaths | Where-Object { -not $currentSet.Contains($_) })
                     @($currentSolutionPaths | Where-Object { -not $baselineSet.Contains($_) })
                 ) | Sort-Object -Unique)
+            $solutionProjectChangesCovered = $solutionDelta.Count -gt 0 -and
+                @($solutionDelta | Where-Object { $_ -notin $changed }).Count -eq 0
+            if ($solutionProjectChangesCovered) {
+                continue
+            }
             $businessOnly = $solutionDelta.Count -gt 0
             foreach ($projectPath in $solutionDelta) {
                 $project = if ($projectsByPath.ContainsKey($projectPath)) {
@@ -927,6 +1079,28 @@ if ($Mode -eq 'Quality') {
                         continue
                     }
                 }
+                if ($null -ne $baselineProject -and $baselineProject.IsTest -and
+                    $baselineProject.Category -in @('Quality', 'CrossProject')) {
+                    $category = [string]$baselineProject.Category
+                    $deferredFiles.Add("${category}:$file")
+                    [void]$requiredExplicitMode.Add($category)
+                    [void]$retiredDeferredTestProjects.Add($baselineProject.Path)
+                    continue
+                }
+                if ($null -ne $baselineProject -and
+                    (Add-BaselineTestSupportImpact `
+                            -Selected $selected `
+                            -BaselineProject $baselineProject `
+                            -CurrentProjects @($allProjects) `
+                            -CurrentTestProjects $testProjects `
+                            -CurrentProjectClosures $projectClosures `
+                            -Mode $Mode `
+                            -Reason $file `
+                            -DeferredFiles $deferredFiles `
+                            -RequiredExplicitModes $requiredExplicitMode `
+                            -RetiredTestSupportProjects $retiredTestSupportProjects)) {
+                    continue
+                }
             }
         }
 
@@ -944,7 +1118,11 @@ $selectedProjects = @($selected.Values | Sort-Object path | ForEach-Object {
             projectName = [string]$_.projectName
             runtime = [string]$_.runtime
             categories = @($_.categories | Sort-Object)
-            testFilter = [string]$_.testFilter
+            testFilter = if ([bool]$_.unfiltered) {
+                ''
+            } else {
+                [string](@($_.testFilters | Sort-Object) -join '|')
+            }
             reasons = @($_.reasons | Sort-Object)
         }
     })
@@ -985,6 +1163,8 @@ $document = [ordered]@{
     deferredExplicitFiles = @($deferredFiles | Sort-Object -Unique)
     retiredBusinessFiles = @($retiredBusinessFiles | Sort-Object -Unique)
     retiredBusinessProjects = @($retiredBusinessProjects | Sort-Object)
+    retiredDeferredTestProjects = @($retiredDeferredTestProjects | Sort-Object)
+    retiredTestSupportProjects = @($retiredTestSupportProjects | Sort-Object)
     unclassifiedFiles = @($unclassified | Sort-Object -Unique)
     requiredExplicitModes = @($requiredExplicitMode | Sort-Object)
 }

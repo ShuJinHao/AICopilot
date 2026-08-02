@@ -7,7 +7,7 @@
     <IsTestProject>false</IsTestProject>
     <AICopilotTestRole>Support</AICopilotTestRole>
     <AICopilotTestOwner>AI Platform Integration</AICopilotTestOwner>
-    <AICopilotTestConsumers>AICopilot.HttpIntegrationTests;AICopilot.EndToEndTests;AICopilot.SimulationDockerTests</AICopilotTestConsumers>
+    <AICopilotTestConsumers>AICopilot.HttpIntegrationTests;AICopilot.EndToEndTests</AICopilotTestConsumers>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

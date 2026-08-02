@@ -3,18 +3,15 @@ import { defineStore } from 'pinia'
 import { chatService } from '@/services/chatService'
 import { ChunkType, MessageRole } from '@/types/protocols'
 import type { ApprovalChunk, ChatMessage } from '@/types/models'
-import { processChunk, getErrorCode } from '@/protocol/chunkReducer'
+import { getErrorCode, processChunk } from '@/protocol/chunkReducer'
 import { getApprovalFailureStatus } from '@/protocol/approvalProtocol'
-import { useApprovalStore } from './approvalStore'
 import { useAgentCatalogStore } from './agentCatalogStore'
-import { useAgentTaskStore } from './agentTaskStore'
-import { useArtifactWorkspaceStore } from './artifactWorkspaceStore'
-import { resolveChatErrorMessage, useChatErrorStore, toFriendlyMessage } from './chatErrorStore'
+import { useApprovalStore } from './approvalStore'
+import { toFriendlyMessage, useChatErrorStore } from './chatErrorStore'
 import { getChatRunMessageKey, useChatRunStatusStore } from './chatRunStatusStore'
 import { useMessageStore } from './messageStore'
 import { useSessionStore } from './sessionStore'
 import { useStreamStore } from './streamStore'
-import type { AgentApprovalRequest, AgentTask, ArtifactRecord } from '@/types/protocols'
 
 interface HistoryCursorState {
   beforeSequence: number | null
@@ -23,26 +20,19 @@ interface HistoryCursorState {
   hasMoreAfter: boolean
 }
 
-interface SessionActivationOptions {
-  forceReload?: boolean
-  preserveComposerSelections?: boolean
-}
-
-interface ReferencedAgentTaskContext {
-  taskId: string
-  evidenceSetDigest: string
-}
-
 export const useChatStore = defineStore('chat', () => {
   const sessionStore = useSessionStore()
   const messageStore = useMessageStore()
   const streamStore = useStreamStore()
   const approvalStore = useApprovalStore()
   const catalogStore = useAgentCatalogStore()
-  const agentTaskStore = useAgentTaskStore()
-  const artifactWorkspaceStore = useArtifactWorkspaceStore()
   const errorStore = useChatErrorStore()
   const runStatusStore = useChatRunStatusStore()
+
+  const historyCursors = ref<Record<string, HistoryCursorState>>({})
+  const isLoadingOlderHistory = ref(false)
+  const sessionOperationCount = ref(0)
+  const initializationError = ref('')
 
   const sessions = computed(() => sessionStore.sessions)
   const currentSessionId = computed(() => sessionStore.currentSessionId)
@@ -60,7 +50,7 @@ export const useChatStore = defineStore('chat', () => {
       currentSession.value?.agentSessionResetRequired ||
       agentSessionStatus.value === 'ResetRequired'
     ) {
-      return '此旧会话没有可恢复的 AgentSession 状态，请新建会话后继续。'
+      return '此会话没有可恢复的 AgentSession 状态，请新建会话后继续。'
     }
     if (agentSessionStatus.value === 'Interrupted') {
       return '上一次执行已中断；系统不会自动重放模型或工具调用，请新建会话后继续。'
@@ -81,152 +71,51 @@ export const useChatStore = defineStore('chat', () => {
   const hasPendingApproval = computed(() => approvalStore.hasPendingApproval)
   const isApprovalAuthorityUnknown = computed(() => approvalStore.isApprovalAuthorityUnknown)
   const isLoadingHistory = computed(() => sessionStore.isLoadingHistory)
-  const initializationErrors = ref<Record<string, string>>({})
-  const isInitializationHydrating = ref(false)
-  const errorMessage = computed(
-    () =>
-      errorStore.errorMessage ||
-      Object.values(initializationErrors.value).filter(Boolean).join('；'),
-  )
-  const agentTasks = computed({
-    get: () => agentTaskStore.agentTasks,
-    set: (value) => {
-      agentTaskStore.agentTasks = value
-    },
-  })
-  const agentApprovals = computed({
-    get: () => agentTaskStore.agentApprovals,
-    set: (value) => {
-      agentTaskStore.agentApprovals = value
-    },
-  })
-  const agentAuditSummary = computed({
-    get: () => agentTaskStore.agentAuditSummary,
-    set: (value) => {
-      agentTaskStore.agentAuditSummary = value
-    },
-  })
-  const timelineEvents = computed({
-    get: () => agentTaskStore.timelineEvents,
-    set: (value) => {
-      agentTaskStore.timelineEvents = value
-    },
-  })
-  const agentRuntimeSnapshot = computed(() => agentTaskStore.runtimeSnapshot)
-  const availableKnowledgeBases = computed(() => catalogStore.availableKnowledgeBases)
-  const selectedKnowledgeBaseId = computed(() => catalogStore.selectedKnowledgeBaseId)
-  const uploadedFiles = computed({
-    get: () => artifactWorkspaceStore.uploadedFiles,
-    set: (value) => {
-      artifactWorkspaceStore.uploadedFiles = value
-    },
-  })
-  const currentWorkspace = computed({
-    get: () => artifactWorkspaceStore.currentWorkspace,
-    set: (value) => {
-      artifactWorkspaceStore.currentWorkspace = value
-    },
-  })
-  const currentArtifactPreview = computed({
-    get: () => artifactWorkspaceStore.currentArtifactPreview,
-    set: (value) => {
-      artifactWorkspaceStore.currentArtifactPreview = value
-    },
-  })
-  const chartPreview = computed({
-    get: () => artifactWorkspaceStore.chartPreview,
-    set: (value) => {
-      artifactWorkspaceStore.chartPreview = value
-    },
-  })
-  const isAgentBusy = computed({
-    get: () => agentTaskStore.isAgentBusy,
-    set: (value: boolean) => {
-      agentTaskStore.isAgentBusy = value
-    },
-  })
-  const currentRunStatus = computed(() => runStatusStore.currentRunStatus)
-  const historyCursors = ref<Record<string, HistoryCursorState>>({})
-  const referencedAgentTasks = ref<Record<string, ReferencedAgentTaskContext>>({})
-  const isLoadingOlderHistory = ref(false)
-  const sessionOperationCount = ref(0)
-  const preserveComposerContextDuringActivation = ref(false)
   const isSessionOperationInFlight = computed(
     () => sessionOperationCount.value > 0 || isLoadingOlderHistory.value,
   )
   const isSessionTransitionBlocked = computed(
     () =>
       sessionStore.isSessionActivating ||
-      agentTaskStore.isAgentBusy ||
       streamStore.isStreaming ||
       isSessionOperationInFlight.value,
   )
   const canEditComposerContext = computed(
-    () =>
-      !isAgentSessionUnavailable.value &&
-      !agentTaskStore.isAgentBusy &&
-      (!sessionStore.isSessionActivating || preserveComposerContextDuringActivation.value),
+    () => !isAgentSessionUnavailable.value && !sessionStore.isSessionActivating,
   )
   const canChangeAgentMode = computed(() =>
     Boolean(
       resolvedSessionId.value &&
-      currentSession.value?.agentSessionVersion &&
+      typeof currentSession.value?.agentSessionVersion === 'number' &&
       agentSessionStatus.value === 'Ready' &&
       !currentSession.value?.hasPendingApproval &&
       !approvalStore.isWaitingForApproval &&
       !isSessionTransitionBlocked.value,
     ),
   )
-  const latestAgentTask = computed(() => agentTaskStore.latestAgentTask)
-  const selectedKnowledgeBase = computed(() => catalogStore.selectedKnowledgeBase)
-  const selectedKnowledgeBaseIdsForPlan = computed(
-    () => catalogStore.selectedKnowledgeBaseIdsForPlan,
-  )
-  const pendingAgentApprovals = computed(() => agentTaskStore.pendingAgentApprovals)
-  const isAgentApprovalAuthorityUnknown = computed(
-    () => agentTaskStore.isAgentApprovalAuthorityUnknown,
-  )
+  const errorMessage = computed(() => errorStore.errorMessage || initializationError.value)
   const hasMoreHistoryBefore = computed(() => {
     const sessionId = sessionStore.currentSessionId
     return Boolean(sessionId && historyCursors.value[sessionId]?.hasMoreBefore)
   })
-  const referencedAgentTask = computed(() => {
-    const sessionId = composerSessionId.value
-    return sessionId ? (referencedAgentTasks.value[sessionId] ?? null) : null
-  })
-  const referencedAgentTaskId = computed(() => referencedAgentTask.value?.taskId ?? null)
+  const availableKnowledgeBases = computed(() => catalogStore.availableKnowledgeBases)
+  const selectedKnowledgeBaseId = computed(() => catalogStore.selectedKnowledgeBaseId)
+  const selectedKnowledgeBase = computed(() => catalogStore.selectedKnowledgeBase)
+  const currentRunStatus = computed(() => runStatusStore.currentRunStatus)
 
-  function referenceAgentTaskForFollowUp(taskId: string, evidenceSetDigest: string) {
-    const sessionId = resolvedSessionId.value
-    const task = agentTaskStore.agentTasks.find((item) => item.id === taskId)
-    const snapshot = agentTaskStore.runtimeSnapshot
-    if (
-      !sessionId ||
-      !task ||
-      task.status !== 'Completed' ||
-      snapshot?.taskId !== taskId ||
-      snapshot.evidenceSetDigest !== evidenceSetDigest ||
-      !evidenceSetDigest
-    ) {
-      return false
-    }
-
-    referencedAgentTasks.value = {
-      ...referencedAgentTasks.value,
-      [sessionId]: { taskId, evidenceSetDigest },
-    }
-    return true
+  function bindErrorSession() {
+    errorStore.bindCurrentSession(sessionStore.currentSessionId)
   }
 
-  function clearReferencedAgentTask(sessionId = composerSessionId.value) {
-    if (!sessionId || !referencedAgentTasks.value[sessionId]) return
-    const remaining = { ...referencedAgentTasks.value }
-    delete remaining[sessionId]
-    referencedAgentTasks.value = remaining
+  function clearCurrentSessionError() {
+    initializationError.value = ''
+    bindErrorSession()
+    errorStore.clearSessionError(sessionStore.currentSessionId)
   }
 
-  function clearAllReferencedAgentTasks() {
-    referencedAgentTasks.value = {}
+  function setSessionError(sessionId: string, message: string) {
+    errorStore.setSessionError(sessionId, message)
+    bindErrorSession()
   }
 
   function applyAgentSessionEvent(event: {
@@ -264,132 +153,18 @@ export const useChatStore = defineStore('chat', () => {
     )
   }
 
-  function bindErrorSession() {
-    errorStore.bindCurrentSession(sessionStore.currentSessionId)
+  function ownsLoadedSession(sessionId: string) {
+    return sessionStore.sessions.some((session) => session.id === sessionId)
   }
 
-  function clearInitializationErrors(...sources: string[]) {
-    if (sources.length === 0) {
-      initializationErrors.value = {}
-      return
-    }
-
-    const remaining = { ...initializationErrors.value }
-    for (const source of sources) {
-      delete remaining[source]
-    }
-    initializationErrors.value = remaining
-  }
-
-  function clearCurrentSessionError() {
-    errorStore.bindCurrentSession(sessionStore.currentSessionId)
-    errorStore.clearSessionError(sessionStore.currentSessionId)
-  }
-
-  function setCurrentSessionError(message: string) {
-    const sessionId = sessionStore.currentSessionId
-    if (sessionId) {
-      errorStore.bindCurrentSession(sessionId)
-      errorStore.setSessionError(sessionId, message)
-      return
-    }
-
-    initializationErrors.value = {
-      ...initializationErrors.value,
-      runtime: message,
-    }
-  }
-
-  function createSessionErrorReporter(
-    sessionId = sessionStore.currentSessionId,
-    initializationSource = 'runtime',
-  ) {
-    const targetSessionId = sessionId
-
-    return (message: string) => {
-      if (isInitializationHydrating.value || !targetSessionId) {
-        initializationErrors.value = {
-          ...initializationErrors.value,
-          [initializationSource]: message,
-        }
-      }
-
-      if (targetSessionId) {
-        errorStore.setSessionError(targetSessionId, message)
-        errorStore.bindCurrentSession(sessionStore.currentSessionId)
-      }
-    }
-  }
-
-  function resetSessionRuntimeState() {
-    agentTaskStore.reset()
-    artifactWorkspaceStore.reset()
-  }
-
-  function captureAgentProjectionSnapshot() {
-    return {
-      agentTasks: [...agentTaskStore.agentTasks],
-      agentApprovals: [...agentTaskStore.agentApprovals],
-      agentAuditSummary: [...agentTaskStore.agentAuditSummary],
-      approvalAuthorityUnknownTaskIds: new Set(agentTaskStore.approvalAuthorityUnknownTaskIds),
-      currentWorkspace: artifactWorkspaceStore.currentWorkspace,
-      currentArtifactPreview: artifactWorkspaceStore.currentArtifactPreview,
-      chartPreview: artifactWorkspaceStore.chartPreview,
-    }
-  }
-
-  function restoreAgentProjectionSnapshot(
-    snapshot: ReturnType<typeof captureAgentProjectionSnapshot>,
-  ) {
-    agentTaskStore.agentTasks = snapshot.agentTasks
-    agentTaskStore.agentApprovals = snapshot.agentApprovals
-    agentTaskStore.agentAuditSummary = snapshot.agentAuditSummary
-    agentTaskStore.approvalAuthorityUnknownTaskIds = new Set(
-      snapshot.approvalAuthorityUnknownTaskIds,
+  function ownsCurrentApproval(callId: string, chunk: ApprovalChunk, sessionId: string) {
+    return (
+      callId === chunk.request.callId &&
+      chunk.status === 'pending' &&
+      messageStore
+        .getApprovalChunks(sessionId)
+        .some((candidate) => candidate === chunk && candidate.request.callId === callId)
     )
-    artifactWorkspaceStore.currentWorkspace = snapshot.currentWorkspace
-    artifactWorkspaceStore.currentArtifactPreview = snapshot.currentArtifactPreview
-    artifactWorkspaceStore.chartPreview = snapshot.chartPreview
-  }
-
-  function captureSessionRuntimeSnapshot() {
-    return {
-      agentProjection: captureAgentProjectionSnapshot(),
-      timelineEvents: [...agentTaskStore.timelineEvents],
-      runtimeSnapshot: agentTaskStore.runtimeSnapshot,
-      uploadedFiles: [...artifactWorkspaceStore.uploadedFiles],
-      availableKnowledgeBases: [...catalogStore.availableKnowledgeBases],
-      selectedKnowledgeBaseId: catalogStore.selectedKnowledgeBaseId,
-    }
-  }
-
-  function restoreSessionRuntimeSnapshot(
-    snapshot: ReturnType<typeof captureSessionRuntimeSnapshot>,
-  ) {
-    restoreAgentProjectionSnapshot(snapshot.agentProjection)
-    agentTaskStore.timelineEvents = snapshot.timelineEvents
-    agentTaskStore.runtimeSnapshot = snapshot.runtimeSnapshot
-    artifactWorkspaceStore.uploadedFiles = snapshot.uploadedFiles
-    catalogStore.availableKnowledgeBases = snapshot.availableKnowledgeBases
-    catalogStore.selectedKnowledgeBaseId = snapshot.selectedKnowledgeBaseId
-  }
-
-  let pendingInitializationRuntimeSnapshot: ReturnType<
-    typeof captureSessionRuntimeSnapshot
-  > | null = null
-
-  function resetCurrentSessionState() {
-    resetSessionRuntimeState()
-    catalogStore.resetSelections()
-  }
-
-  function resetForSessionActivation(preserveComposerSelections: boolean) {
-    if (preserveComposerSelections) {
-      resetSessionRuntimeState()
-      return
-    }
-
-    resetCurrentSessionState()
   }
 
   async function runSessionOperation<T>(operation: () => Promise<T>): Promise<T> {
@@ -403,109 +178,6 @@ export const useChatStore = defineStore('chat', () => {
 
   function getRunStatusForMessage(message: ChatMessage) {
     return runStatusStore.getStatus(message.sessionId, getChatRunMessageKey(message))
-  }
-
-  async function loadKnowledgeBases() {
-    const loaded = await catalogStore.loadKnowledgeBases(
-      createSessionErrorReporter(sessionStore.currentSessionId, 'catalog-knowledge'),
-    )
-    if (loaded) {
-      clearInitializationErrors('catalog-knowledge')
-    }
-  }
-
-  function selectKnowledgeBase(knowledgeBaseId: string | null) {
-    if (!canEditComposerContext.value) {
-      return
-    }
-
-    catalogStore.selectKnowledgeBase(knowledgeBaseId)
-  }
-
-  function addPlanConversationMessages(sessionId: string, goal: string) {
-    messageStore.addMessage(sessionId, {
-      sessionId,
-      role: MessageRole.User,
-      chunks: [
-        {
-          source: 'User',
-          type: ChunkType.Text,
-          content: goal,
-        },
-      ],
-      isStreaming: false,
-      timestamp: Date.now(),
-    })
-
-    return messageStore.addMessage(sessionId, {
-      sessionId,
-      role: MessageRole.Assistant,
-      finalModelId: null,
-      finalModelName: '未知',
-      routingModelId: null,
-      routingModelName: null,
-      contextWindowTokens: null,
-      maxOutputTokens: null,
-      chunks: [],
-      isStreaming: true,
-      timestamp: Date.now(),
-    })
-  }
-
-  function appendPlanStreamError(message: ChatMessage, content: string) {
-    message.chunks.push({
-      source: 'PlanAgentTaskStream',
-      type: ChunkType.Text,
-      content,
-    })
-  }
-
-  async function loadHistory(sessionId: string, force = false) {
-    if (!force && messageStore.messagesMap[sessionId]?.length) {
-      if (canReadPendingApprovals(sessionId)) {
-        await approvalStore.refreshPendingApprovals(sessionId)
-      } else {
-        approvalStore.reconcilePendingApprovalCards(sessionId, [])
-      }
-      return
-    }
-
-    sessionStore.isLoadingHistory = true
-    try {
-      const history = await chatService.getHistory(sessionId)
-      messageStore.setHistory(sessionId, history.items)
-      updateHistoryCursor(sessionId, history)
-      if (canReadPendingApprovals(sessionId)) {
-        await approvalStore.refreshPendingApprovals(sessionId)
-      } else {
-        approvalStore.reconcilePendingApprovalCards(sessionId, [])
-      }
-    } finally {
-      sessionStore.isLoadingHistory = false
-    }
-  }
-
-  async function loadOlderHistory(sessionId = resolvedSessionId.value) {
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return false
-    }
-
-    const cursor = historyCursors.value[sessionId]
-    if (!cursor?.hasMoreBefore || !cursor.beforeSequence) {
-      return false
-    }
-
-    isLoadingOlderHistory.value = true
-    try {
-      const history = await chatService.getHistory(sessionId, {
-        beforeSequence: cursor.beforeSequence,
-      })
-      messageStore.prependHistory(sessionId, history.items)
-      updateHistoryCursor(sessionId, history)
-      return history.items.length > 0
-    } finally {
-      isLoadingOlderHistory.value = false
-    }
   }
 
   function updateHistoryCursor(
@@ -525,738 +197,174 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function upsertAgentTask(task: AgentTask) {
-    agentTaskStore.upsertAgentTask(task)
-  }
-
-  function rejectForeignSessionTarget() {
-    setCurrentSessionError('操作目标不属于当前会话，已阻止请求。')
-  }
-
-  function rejectUnknownSessionTarget() {
-    setCurrentSessionError('会话不在当前已加载列表中，已阻止操作。')
-  }
-
-  function ownsLoadedSession(sessionId: string) {
-    return sessionStore.sessions.some((session) => session.id === sessionId)
-  }
-
-  function ownsCurrentTask(taskId: string, sessionId: string) {
-    return agentTasks.value.some((task) => task.id === taskId && task.sessionId === sessionId)
-  }
-
-  function resolveOwnedTaskSession(taskId: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
+  async function refreshApprovalProjection(sessionId: string) {
+    if (canReadPendingApprovals(sessionId)) {
+      await approvalStore.refreshPendingApprovals(sessionId)
+    } else {
+      approvalStore.reconcilePendingApprovalCards(sessionId, [])
     }
-    if (!ownsCurrentTask(taskId, sessionId) || agentTaskStore.isApprovalAuthorityUnknown(taskId)) {
-      rejectForeignSessionTarget()
-      return null
+  }
+
+  async function loadHistory(sessionId: string, force = false) {
+    if (!force && messageStore.messagesMap[sessionId]?.length) {
+      await refreshApprovalProjection(sessionId)
+      return
     }
 
-    return sessionId
-  }
-
-  function ownsCurrentApproval(approval: AgentApprovalRequest, sessionId: string) {
-    const canonicalApproval = agentApprovals.value.find(
-      (candidate) => candidate.id === approval.id && candidate.taskId === approval.taskId,
-    )
-    return (
-      ownsCurrentTask(approval.taskId, sessionId) &&
-      approval.status === 'Pending' &&
-      canonicalApproval?.status === 'Pending' &&
-      !agentTaskStore.isApprovalAuthorityUnknown(approval.taskId)
-    )
-  }
-
-  function ownsCurrentFunctionApproval(callId: string, chunk: ApprovalChunk, sessionId: string) {
-    return (
-      callId === chunk.request.callId &&
-      chunk.status === 'pending' &&
-      messageStore
-        .getApprovalChunks(sessionId)
-        .some((candidate) => candidate === chunk && candidate.request.callId === callId)
-    )
-  }
-
-  function ownsCurrentWorkspace(code: string, sessionId: string) {
-    const workspace = currentWorkspace.value
-    if (!workspace || workspace.workspaceCode !== code) {
-      return false
-    }
-
-    return agentTasks.value.some(
-      (task) =>
-        task.id === workspace.taskId &&
-        task.sessionId === sessionId &&
-        task.workspaceCode === code &&
-        !agentTaskStore.isApprovalAuthorityUnknown(task.id),
-    )
-  }
-
-  function ownsCurrentArtifact(artifactId: string, sessionId: string) {
-    const workspace = currentWorkspace.value
-    if (!workspace || !workspace.artifacts.some((artifact) => artifact.id === artifactId)) {
-      return false
-    }
-
-    return agentTasks.value.some(
-      (task) =>
-        task.id === workspace.taskId &&
-        task.sessionId === sessionId &&
-        task.workspaceCode === workspace.workspaceCode,
-    )
-  }
-
-  async function loadAgentTasks(sessionId: string) {
-    const projectionSnapshot = captureAgentProjectionSnapshot()
-    const reportError = createSessionErrorReporter(sessionId)
+    sessionStore.isLoadingHistory = true
     try {
-      const latestTask = await agentTaskStore.loadAgentTasks(sessionId, reportError)
-      if (latestTask?.workspaceCode) {
-        await refreshWorkspace(latestTask, sessionId)
-      } else {
-        artifactWorkspaceStore.currentWorkspace = null
-        artifactWorkspaceStore.currentArtifactPreview = null
-        artifactWorkspaceStore.chartPreview = null
-      }
-      await loadAgentApprovals(latestTask?.id ?? null, sessionId)
-      await loadAgentAuditSummary(latestTask?.id ?? null, sessionId)
-      await agentTaskStore.loadRuntimeSnapshot(
-        latestTask?.id ?? null,
-        createSessionErrorReporter(sessionId),
-      )
-    } catch (error) {
-      const newlyUnknownApprovalTasks = new Set(agentTaskStore.approvalAuthorityUnknownTaskIds)
-      restoreAgentProjectionSnapshot(projectionSnapshot)
-      for (const taskId of newlyUnknownApprovalTasks) {
-        agentTaskStore.markApprovalAuthorityUnknown(taskId)
-      }
-      throw error
+      const history = await chatService.getHistory(sessionId)
+      messageStore.setHistory(sessionId, history.items)
+      updateHistoryCursor(sessionId, history)
+      await refreshApprovalProjection(sessionId)
+    } finally {
+      sessionStore.isLoadingHistory = false
     }
   }
 
-  async function loadTimeline(sessionId: string) {
-    if (
-      !ownsLoadedSession(sessionId) ||
-      sessionStore.currentSessionId !== sessionId ||
-      (!sessionStore.isSessionActivating && resolvedSessionId.value !== sessionId)
-    ) {
-      rejectForeignSessionTarget()
-      return false
-    }
+  async function loadOlderHistory(sessionId = resolvedSessionId.value) {
+    if (!sessionId || isSessionTransitionBlocked.value) return false
 
-    await agentTaskStore.loadTimeline(sessionId, createSessionErrorReporter(sessionId))
-    return true
-  }
+    const cursor = historyCursors.value[sessionId]
+    if (!cursor?.hasMoreBefore || !cursor.beforeSequence) return false
 
-  async function loadAgentApprovals(
-    taskId: string | null = null,
-    sessionId = sessionStore.currentSessionId,
-  ) {
-    await agentTaskStore.loadAgentApprovals(taskId, createSessionErrorReporter(sessionId))
-  }
-
-  async function loadAgentAuditSummary(
-    taskId: string | null = null,
-    sessionId = sessionStore.currentSessionId,
-  ) {
-    if (
-      !sessionId ||
-      !ownsLoadedSession(sessionId) ||
-      sessionStore.currentSessionId !== sessionId ||
-      (taskId !== null && !ownsCurrentTask(taskId, sessionId))
-    ) {
-      rejectForeignSessionTarget()
-      return false
-    }
-
-    await agentTaskStore.loadAgentAuditSummary(taskId, createSessionErrorReporter(sessionId))
-    return true
-  }
-
-  async function refreshAgentTaskSnapshotForSession(sessionId: string) {
-    await loadAgentTasks(sessionId)
-    await loadTimeline(sessionId)
-  }
-
-  async function tryRefreshAgentTaskSnapshotForSession(sessionId: string) {
+    isLoadingOlderHistory.value = true
     try {
-      await refreshAgentTaskSnapshotForSession(sessionId)
-      return true
+      const history = await chatService.getHistory(sessionId, {
+        beforeSequence: cursor.beforeSequence,
+      })
+      messageStore.prependHistory(sessionId, history.items)
+      updateHistoryCursor(sessionId, history)
+      return history.items.length > 0
     } catch (error) {
-      console.error('Failed to refresh the current agent task snapshot.', error)
+      setSessionError(sessionId, toFriendlyMessage(error))
       return false
+    } finally {
+      isLoadingOlderHistory.value = false
     }
   }
 
-  async function refreshAgentTaskSnapshot(_taskId: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return
-    }
-
-    await runSessionOperation(async () => await tryRefreshAgentTaskSnapshotForSession(sessionId))
-  }
-
-  function findPendingPlanApproval(taskId: string) {
-    return agentTaskStore.findPendingPlanApproval(taskId)
-  }
-
-  async function refreshWorkspace(task: AgentTask, sessionId = sessionStore.currentSessionId) {
-    await artifactWorkspaceStore.refreshWorkspace(task, createSessionErrorReporter(sessionId))
-  }
-
-  async function loadArtifactPreview(artifactId: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-    if (!ownsCurrentArtifact(artifactId, sessionId)) {
-      rejectForeignSessionTarget()
-      return null
-    }
-
-    return await runSessionOperation(
-      async () =>
-        await artifactWorkspaceStore.loadArtifactPreview(artifactId, createSessionErrorReporter()),
-    )
-  }
-
-  async function refreshChartPreview() {
-    await artifactWorkspaceStore.refreshChartPreview(createSessionErrorReporter())
-  }
-
-  async function downloadArtifact(artifact: ArtifactRecord) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return
-    }
-
-    if (!artifact.downloadUrl) {
-      setCurrentSessionError('后端未返回产物下载地址，前端不会自行拼接下载路径。')
-      return
-    }
-
-    if (!ownsCurrentArtifact(artifact.id, sessionId)) {
-      rejectForeignSessionTarget()
-      return
-    }
-
-    const canonicalArtifact = currentWorkspace.value?.artifacts.find(
-      (candidate) => candidate.id === artifact.id,
-    )
-    if (!canonicalArtifact?.downloadUrl) {
-      setCurrentSessionError('后端未返回产物下载地址，前端不会自行拼接下载路径。')
-      return
-    }
-
-    await runSessionOperation(async () => {
-      try {
-        await artifactWorkspaceStore.downloadArtifact(canonicalArtifact)
-      } catch (error) {
-        createSessionErrorReporter(sessionId)(`下载产物失败：${toFriendlyMessage(error)}`)
-      }
+  async function loadKnowledgeBases() {
+    await catalogStore.loadKnowledgeBases((message) => {
+      const sessionId = sessionStore.currentSessionId
+      if (sessionId) setSessionError(sessionId, message)
+      else initializationError.value = message
     })
   }
 
-  async function uploadSessionFile(file: File) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-
-    clearCurrentSessionError()
-    return await runSessionOperation(async () => {
-      try {
-        return await artifactWorkspaceStore.uploadSessionFile(sessionId, file)
-      } catch (error) {
-        createSessionErrorReporter(sessionId)(`上传附件失败：${toFriendlyMessage(error)}`)
-        return null
-      }
-    })
-  }
-
-  async function planAgentTask(goal: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value || approvalStore.isWaitingForApproval) {
-      return null
-    }
-
-    const assistantMessage = addPlanConversationMessages(sessionId, goal)
-    const runMessageKey = getChatRunMessageKey(assistantMessage)
-    isAgentBusy.value = true
-    clearCurrentSessionError()
-    runStatusStore.startRun(sessionId, runMessageKey)
-    streamStore.start()
-    let plannedTask: AgentTask | null = null
-    let streamErrorMessage: string | null = null
-    try {
-      await chatService.planAgentTaskStream(
-        {
-          sessionId,
-          goal,
-          taskType: 'ReportGeneration',
-          uploadIds: uploadedFiles.value.map((item) => item.id),
-          knowledgeBaseIds: selectedKnowledgeBaseIdsForPlan.value,
-          pluginSelectionMode: 'BuiltInOnly',
-          selectedPluginIds: [],
-          capabilitySelectionMode: 'InferredFromGoal',
-          requestedCapabilityCodes: [],
-        },
-        {
-          onChunkReceived(chunk) {
-            runStatusStore.advanceFromChunk(sessionId, runMessageKey, chunk)
-            if (chunk.type === ChunkType.Error) {
-              try {
-                streamErrorMessage = resolveChatErrorMessage(JSON.parse(chunk.content))
-              } catch (error) {
-                console.error('Failed to parse chat stream error chunk.', error)
-                streamErrorMessage = '请求失败，请稍后重试。'
-              }
-            }
-
-            processChunk(assistantMessage, chunk, {
-              setSessionError: errorStore.setSessionError,
-              onApprovalChunk: approvalStore.sync,
-              onAgentTaskChunk: (_sessionId, task) => {
-                plannedTask = task
-                upsertAgentTask(task)
-              },
-            })
-          },
-          onComplete() {
-            streamStore.stop()
-            assistantMessage.isStreaming = false
-            runStatusStore.completeRun(sessionId, runMessageKey)
-            approvalStore.sync(sessionId)
-          },
-          onError(error) {
-            streamStore.stop()
-            assistantMessage.isStreaming = false
-            streamErrorMessage = toFriendlyMessage(error)
-            runStatusStore.failRun(sessionId, runMessageKey, streamErrorMessage)
-            setCurrentSessionError(streamErrorMessage)
-            appendPlanStreamError(assistantMessage, streamErrorMessage)
-            approvalStore.sync(sessionId)
-          },
-        },
-      )
-
-      const completedTask = plannedTask as AgentTask | null
-      if (!completedTask) {
-        if (streamErrorMessage) {
-          setCurrentSessionError(streamErrorMessage)
-        }
-        return null
-      }
-
-      await loadAgentTasks(sessionId)
-      await loadTimeline(sessionId)
-      return (
-        agentTasks.value.find((task) => task.id === completedTask.id) ??
-        latestAgentTask.value ??
-        completedTask
-      )
-    } catch (error) {
-      const message = toFriendlyMessage(error)
-      runStatusStore.failRun(sessionId, runMessageKey, message)
-      setCurrentSessionError(message)
-      appendPlanStreamError(assistantMessage, message)
-      return null
-    } finally {
-      streamStore.stop()
-      assistantMessage.isStreaming = false
-      isAgentBusy.value = false
-    }
-  }
-
-  async function submitFinalReview(code: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-    if (!ownsCurrentWorkspace(code, sessionId)) {
-      rejectForeignSessionTarget()
-      return null
-    }
-
-    isAgentBusy.value = true
-    clearCurrentSessionError()
-    try {
-      artifactWorkspaceStore.currentWorkspace = await chatService.submitFinalReview(code)
-      await refreshChartPreview()
-      await loadAgentTasks(sessionId)
-      await loadTimeline(sessionId)
-      await loadAgentApprovals(latestAgentTask.value?.id ?? null)
-      await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
-      return currentWorkspace.value
-    } catch (error) {
-      await recoverAgentMutationFailure(sessionId, error)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
-  }
-
-  async function executeAgentTaskAction(
-    taskId: string,
-    execute: (id: string) => ReturnType<typeof chatService.runAgentTask>,
-  ) {
-    const sessionId = resolveOwnedTaskSession(taskId)
-    if (!sessionId) {
-      return null
-    }
-
-    isAgentBusy.value = true
-    clearCurrentSessionError()
-    try {
-      const updated = await execute(taskId)
-      return await applyAgentTaskActionResult(updated, sessionId, true)
-    } catch (error) {
-      await recoverAgentMutationFailure(sessionId, error)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
-  }
-
-  async function runAgentTask(taskId: string) {
-    return executeAgentTaskAction(taskId, chatService.runAgentTask)
-  }
-
-  async function retryAgentTask(taskId: string) {
-    return executeAgentTaskAction(taskId, chatService.retryAgentTask)
-  }
-
-  async function cancelAgentTask(taskId: string) {
-    return executeAgentTaskAction(taskId, chatService.cancelAgentTask)
-  }
-
-  async function approveAndRunAgentTask(taskId: string) {
-    const sessionId = resolveOwnedTaskSession(taskId)
-    if (!sessionId) {
-      return null
-    }
-
-    isAgentBusy.value = true
-    clearCurrentSessionError()
-    let planApproved = false
-    let approvalMutationStarted = false
-    try {
-      const pendingPlanApproval = findPendingPlanApproval(taskId)
-      if (pendingPlanApproval) {
-        approvalMutationStarted = true
-        agentTaskStore.markApprovalAuthorityUnknown(taskId)
-        await chatService.decideAgentApproval(
-          pendingPlanApproval.id,
-          'approve',
-          'Approved from primary plan CTA',
-        )
-      } else {
-        const approved = await chatService.approveAgentTaskPlan(taskId)
-        upsertAgentTask(approved)
-      }
-
-      planApproved = true
-      const updated = await chatService.runAgentTask(taskId)
-      return await applyAgentTaskActionResult(updated, sessionId, true)
-    } catch (error) {
-      const failureMessage = toFriendlyMessage(error)
-      if (approvalMutationStarted) {
-        agentTaskStore.markApprovalAuthorityUnknown(taskId)
-      }
-      await tryRefreshAgentTaskSnapshotForSession(sessionId)
-      setCurrentSessionError(failureMessage)
-      return planApproved ? (agentTasks.value.find((task) => task.id === taskId) ?? null) : null
-    } finally {
-      isAgentBusy.value = false
-    }
-  }
-
-  async function rejectAgentTaskPlan(taskId: string) {
-    const sessionId = resolveOwnedTaskSession(taskId)
-    if (!sessionId) {
-      return null
-    }
-
-    isAgentBusy.value = true
-    clearCurrentSessionError()
-    try {
-      const updated = await chatService.rejectAgentTaskPlan(taskId)
-      return await applyAgentTaskActionResult(updated, sessionId, false)
-    } catch (error) {
-      await recoverAgentMutationFailure(sessionId, error)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
-  }
-
-  async function applyAgentTaskActionResult(
-    updated: AgentTask,
-    sessionId: string,
-    refreshArtifact: boolean,
-  ) {
-    upsertAgentTask(updated)
-    await loadAgentApprovals(updated.id)
-    await loadAgentAuditSummary(updated.id)
-    if (refreshArtifact) {
-      await refreshWorkspace(updated)
-    }
-    await loadTimeline(sessionId)
-    return updated
-  }
-
-  async function recoverAgentMutationFailure(sessionId: string, error: unknown) {
-    const failureMessage = toFriendlyMessage(error)
-    await tryRefreshAgentTaskSnapshotForSession(sessionId)
-    setCurrentSessionError(failureMessage)
-  }
-
-  async function decideAgentApproval(
-    approval: AgentApprovalRequest,
-    decision: 'approve' | 'reject',
-    comment?: string | null,
-  ) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-    if (!ownsCurrentApproval(approval, sessionId)) {
-      rejectForeignSessionTarget()
-      return null
-    }
-
-    isAgentBusy.value = true
-    clearCurrentSessionError()
-    try {
-      agentTaskStore.markApprovalAuthorityUnknown(approval.taskId)
-      const decided = await chatService.decideAgentApproval(approval.id, decision, comment)
-      await loadAgentApprovals(approval.taskId)
-      await loadAgentTasks(sessionId)
-      await loadTimeline(sessionId)
-      await loadAgentAuditSummary(approval.taskId)
-
-      return decided
-    } catch (error) {
-      const failureMessage = toFriendlyMessage(error)
-      agentTaskStore.markApprovalAuthorityUnknown(approval.taskId)
-      await tryRefreshAgentTaskSnapshotForSession(sessionId)
-      setCurrentSessionError(failureMessage)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
-  }
-
-  async function finalizeWorkspace(code: string) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return null
-    }
-    if (!ownsCurrentWorkspace(code, sessionId)) {
-      rejectForeignSessionTarget()
-      return null
-    }
-
-    isAgentBusy.value = true
-    clearCurrentSessionError()
-    try {
-      artifactWorkspaceStore.currentWorkspace = await chatService.finalizeWorkspace(code)
-      await refreshChartPreview()
-      await loadAgentTasks(sessionId)
-      await loadTimeline(sessionId)
-      await loadAgentApprovals(latestAgentTask.value?.id ?? null)
-      await loadAgentAuditSummary(latestAgentTask.value?.id ?? null)
-      return currentWorkspace.value
-    } catch (error) {
-      const failureMessage = toFriendlyMessage(error)
-      await tryRefreshAgentTaskSnapshotForSession(sessionId)
-      setCurrentSessionError(failureMessage)
-      return null
-    } finally {
-      isAgentBusy.value = false
-    }
+  function selectKnowledgeBase(knowledgeBaseId: string | null) {
+    if (canEditComposerContext.value) catalogStore.selectKnowledgeBase(knowledgeBaseId)
   }
 
   function prepareInitialization() {
-    if (sessionStore.isSessionActivating) {
-      return
-    }
-
-    pendingInitializationRuntimeSnapshot = captureSessionRuntimeSnapshot()
-    initializationErrors.value = {}
-    isInitializationHydrating.value = true
-    preserveComposerContextDuringActivation.value = true
+    if (sessionStore.isSessionActivating) return
+    initializationError.value = ''
     sessionStore.beginSessionActivation()
     streamStore.stop()
-    resetSessionRuntimeState()
     errorStore.clearSessionError()
   }
 
-  async function initialize() {
+  async function activateSession(id: string, forceReload = false) {
     const previousCurrentSessionId = sessionStore.currentSessionId
     const previousActiveSessionId = sessionStore.activeSessionId
-    const runtimeSnapshot = pendingInitializationRuntimeSnapshot ?? captureSessionRuntimeSnapshot()
-    if (!sessionStore.isSessionActivating) {
-      prepareInitialization()
-    }
-    pendingInitializationRuntimeSnapshot = null
-    try {
-      const [sessionLoadResult] = await Promise.allSettled([
-        sessionStore.loadSessions(),
-        loadKnowledgeBases(),
-      ])
-      if (sessionLoadResult.status === 'rejected') {
-        throw sessionLoadResult.reason
-      }
-      if (sessionStore.sessions.length === 0) {
-        await createSession({ preserveComposerSelections: previousActiveSessionId === null })
-        return
-      }
-
-      const restoredSessionId = sessionStore.currentSessionId
-      const initialSession =
-        sessionStore.sessions.find((session) => session.id === restoredSessionId) ??
-        sessionStore.sessions[0] ??
-        null
-
-      if (!initialSession) {
-        sessionStore.persistCurrentSession(null)
-        bindErrorSession()
-        sessionStore.completeSessionActivation(null)
-        return
-      }
-
-      const isSameSessionRehydration =
-        previousActiveSessionId === null || initialSession.id === previousActiveSessionId
-      await activateSession(initialSession.id, {
-        preserveComposerSelections: isSameSessionRehydration,
-      })
-      if (isSameSessionRehydration && initialSession.id === previousActiveSessionId) {
-        artifactWorkspaceStore.uploadedFiles = runtimeSnapshot.uploadedFiles
-      }
-    } catch (error) {
-      sessionStore.persistCurrentSession(previousCurrentSessionId)
-      sessionStore.failSessionActivation(previousActiveSessionId)
-      restoreSessionRuntimeSnapshot(runtimeSnapshot)
-      approvalStore.sync(previousActiveSessionId)
-      bindErrorSession()
-      if (previousCurrentSessionId) {
-        errorStore.setSessionError(previousCurrentSessionId, toFriendlyMessage(error))
-      } else {
-        initializationErrors.value = {
-          ...initializationErrors.value,
-          'session-list': toFriendlyMessage(error),
-        }
-      }
-      throw error
-    } finally {
-      isInitializationHydrating.value = false
-      if (!sessionStore.isSessionActivating) {
-        preserveComposerContextDuringActivation.value = false
-      }
-    }
-  }
-
-  async function createSession(options: SessionActivationOptions = {}) {
-    const previousCurrentSessionId = sessionStore.currentSessionId
-    const previousActiveSessionId = sessionStore.activeSessionId
-    const runtimeSnapshot = captureSessionRuntimeSnapshot()
-    preserveComposerContextDuringActivation.value = options.preserveComposerSelections ?? false
-    errorStore.clearSessionError()
-    sessionStore.beginSessionActivation(null)
-    resetForSessionActivation(options.preserveComposerSelections ?? false)
-    try {
-      const newSession = await sessionStore.createSession()
-      messageStore.messagesMap[newSession.id] = []
-      streamStore.stop()
-      approvalStore.sync(newSession.id)
-      bindErrorSession()
-      clearInitializationErrors('session-list', 'session-create')
-      sessionStore.completeSessionActivation(newSession.id)
-      return newSession
-    } catch (error) {
-      sessionStore.persistCurrentSession(previousCurrentSessionId)
-      sessionStore.failSessionActivation(previousActiveSessionId)
-      restoreSessionRuntimeSnapshot(runtimeSnapshot)
-      approvalStore.sync(previousActiveSessionId)
-      bindErrorSession()
-      if (previousCurrentSessionId) {
-        errorStore.setSessionError(previousCurrentSessionId, toFriendlyMessage(error))
-      } else {
-        initializationErrors.value = {
-          ...initializationErrors.value,
-          'session-create': toFriendlyMessage(error),
-        }
-      }
-      throw error
-    } finally {
-      preserveComposerContextDuringActivation.value = false
-    }
-  }
-
-  async function createNewSession() {
-    if (isSessionTransitionBlocked.value) {
-      return null
-    }
-    clearAllReferencedAgentTasks()
-    try {
-      return await createSession()
-    } catch (error) {
-      console.error('Failed to create a new session.', error)
-      return null
-    }
-  }
-
-  async function activateSession(id: string, options: SessionActivationOptions = {}) {
-    const previousCurrentSessionId = sessionStore.currentSessionId
-    const previousActiveSessionId = sessionStore.activeSessionId
-    const runtimeSnapshot = captureSessionRuntimeSnapshot()
-    const preserveComposerSelections =
-      options.preserveComposerSelections ?? composerSessionId.value === id
-    if (previousActiveSessionId !== id) {
-      clearAllReferencedAgentTasks()
-    }
-    preserveComposerContextDuringActivation.value = preserveComposerSelections
     sessionStore.beginSessionActivation(id)
     streamStore.stop()
-    if (previousActiveSessionId !== id) {
-      resetForSessionActivation(preserveComposerSelections)
-    }
     try {
       sessionStore.persistCurrentSession(id)
       bindErrorSession()
       errorStore.clearSessionError(id)
       await sessionStore.refreshSession(id)
       approvalStore.sync(id)
-      await loadHistory(id, options.forceReload ?? false)
+      await loadHistory(id, forceReload)
       sessionStore.completeSessionActivation(id)
     } catch (error) {
       sessionStore.persistCurrentSession(previousCurrentSessionId)
       sessionStore.failSessionActivation(previousActiveSessionId)
-      restoreSessionRuntimeSnapshot(runtimeSnapshot)
       approvalStore.sync(previousActiveSessionId)
       bindErrorSession()
-      errorStore.setSessionError(previousCurrentSessionId ?? id, toFriendlyMessage(error))
+      setSessionError(previousCurrentSessionId ?? id, toFriendlyMessage(error))
       throw error
-    } finally {
-      preserveComposerContextDuringActivation.value = false
+    }
+  }
+
+  async function createSession() {
+    const previousCurrentSessionId = sessionStore.currentSessionId
+    const previousActiveSessionId = sessionStore.activeSessionId
+    sessionStore.beginSessionActivation(null)
+    try {
+      const session = await sessionStore.createSession()
+      messageStore.messagesMap[session.id] = []
+      approvalStore.sync(session.id)
+      bindErrorSession()
+      sessionStore.completeSessionActivation(session.id)
+      return session
+    } catch (error) {
+      sessionStore.persistCurrentSession(previousCurrentSessionId)
+      sessionStore.failSessionActivation(previousActiveSessionId)
+      approvalStore.sync(previousActiveSessionId)
+      bindErrorSession()
+      throw error
+    }
+  }
+
+  async function initialize() {
+    const previousCurrentSessionId = sessionStore.currentSessionId
+    const previousActiveSessionId = sessionStore.activeSessionId
+    if (!sessionStore.isSessionActivating) prepareInitialization()
+
+    try {
+      await sessionStore.loadSessions()
+      void loadKnowledgeBases()
+      if (sessionStore.sessions.length === 0) {
+        await createSession()
+        return
+      }
+
+      const initialSession =
+        sessionStore.sessions.find((session) => session.id === previousCurrentSessionId) ??
+        sessionStore.sessions[0]
+      if (!initialSession) {
+        sessionStore.persistCurrentSession(null)
+        sessionStore.completeSessionActivation(null)
+        bindErrorSession()
+        return
+      }
+
+      await activateSession(initialSession.id)
+    } catch (error) {
+      sessionStore.persistCurrentSession(previousCurrentSessionId)
+      sessionStore.failSessionActivation(previousActiveSessionId)
+      approvalStore.sync(previousActiveSessionId)
+      bindErrorSession()
+      const message = toFriendlyMessage(error)
+      if (previousCurrentSessionId) setSessionError(previousCurrentSessionId, message)
+      else initializationError.value = message
+      throw error
+    }
+  }
+
+  async function createNewSession() {
+    if (isSessionTransitionBlocked.value) return null
+    clearCurrentSessionError()
+    try {
+      return await createSession()
+    } catch (error) {
+      initializationError.value = toFriendlyMessage(error)
+      console.error('Failed to create a new session.', error)
+      return null
     }
   }
 
   async function selectSession(id: string, forceReload = false) {
-    if (isSessionTransitionBlocked.value) {
-      return false
-    }
+    if (isSessionTransitionBlocked.value) return false
     if (!ownsLoadedSession(id)) {
-      rejectUnknownSessionTarget()
+      const currentId = sessionStore.currentSessionId
+      if (currentId) setSessionError(currentId, '会话不在当前已加载列表中，已阻止操作。')
       return false
     }
+
     try {
-      await activateSession(id, { forceReload })
+      await activateSession(id, forceReload)
       return true
     } catch (error) {
       console.error('Failed to select the requested session.', error)
@@ -1265,145 +373,41 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function deleteSession(id: string) {
-    if (isSessionTransitionBlocked.value) {
-      return false
-    }
-    if (!ownsLoadedSession(id)) {
-      rejectUnknownSessionTarget()
-      return false
-    }
-    clearReferencedAgentTask(id)
-    const previousCurrentSessionId = sessionStore.currentSessionId
-    const previousActiveSessionId = sessionStore.activeSessionId
+    if (isSessionTransitionBlocked.value || !ownsLoadedSession(id)) return false
+
     const wasCurrent = sessionStore.currentSessionId === id
-    preserveComposerContextDuringActivation.value = false
+    const previousActiveSessionId = sessionStore.activeSessionId
     sessionStore.beginSessionActivation(previousActiveSessionId)
     try {
       await sessionStore.deleteSession(id)
-    } catch (error) {
-      const failureMessage = toFriendlyMessage(error)
-      try {
-        await sessionStore.loadSessions()
-      } catch (reconciliationError) {
-        console.error(
-          'Failed to reconcile a session deletion with unknown outcome.',
-          reconciliationError,
-        )
-        const trustedCurrentSessionId =
-          previousCurrentSessionId && ownsLoadedSession(previousCurrentSessionId)
-            ? previousCurrentSessionId
-            : null
-        sessionStore.persistCurrentSession(trustedCurrentSessionId)
-        sessionStore.failSessionActivation(null)
-        bindErrorSession()
-        if (trustedCurrentSessionId) {
-          errorStore.setSessionError(
-            trustedCurrentSessionId,
-            `${failureMessage}；删除结果无法确认，已暂停会话操作，请刷新后重试。`,
-          )
-        } else {
-          initializationErrors.value = {
-            ...initializationErrors.value,
-            'session-delete': `${failureMessage}；删除结果无法确认，已暂停会话操作，请刷新后重试。`,
-          }
-        }
-        preserveComposerContextDuringActivation.value = false
-        return false
-      }
+      delete messageStore.messagesMap[id]
+      delete historyCursors.value[id]
+      runStatusStore.clearSession(id)
 
-      if (ownsLoadedSession(id)) {
-        const trustedCurrentSessionId =
-          previousCurrentSessionId && ownsLoadedSession(previousCurrentSessionId)
-            ? previousCurrentSessionId
-            : (sessionStore.sessions[0]?.id ?? null)
-        const trustedActiveSessionId =
-          previousActiveSessionId && ownsLoadedSession(previousActiveSessionId)
-            ? previousActiveSessionId
-            : null
-        sessionStore.persistCurrentSession(trustedCurrentSessionId)
-        sessionStore.failSessionActivation(trustedActiveSessionId)
-        bindErrorSession()
-        if (trustedCurrentSessionId) {
-          errorStore.setSessionError(trustedCurrentSessionId, failureMessage)
-        }
-        preserveComposerContextDuringActivation.value = false
-        return false
-      }
-
-      const reconciledCurrentSessionId =
-        previousCurrentSessionId &&
-        previousCurrentSessionId !== id &&
-        ownsLoadedSession(previousCurrentSessionId)
-          ? previousCurrentSessionId
-          : (sessionStore.sessions[0]?.id ?? null)
-      sessionStore.persistCurrentSession(reconciledCurrentSessionId)
-    }
-    delete messageStore.messagesMap[id]
-    delete historyCursors.value[id]
-    runStatusStore.clearSession(id)
-    if (wasCurrent) {
-      resetCurrentSessionState()
-      try {
-        if (sessionStore.currentSessionId) {
-          await activateSession(sessionStore.currentSessionId, { forceReload: true })
-        } else {
-          await createSession()
-        }
-      } catch (error) {
-        console.error('Failed to reactivate a session after deletion.', error)
-        return false
+      if (wasCurrent) {
+        const nextSessionId = sessionStore.currentSessionId
+        if (nextSessionId) await activateSession(nextSessionId, true)
+        else await createSession()
+      } else {
+        sessionStore.completeSessionActivation(previousActiveSessionId)
       }
       return true
+    } catch (error) {
+      sessionStore.failSessionActivation(previousActiveSessionId)
+      bindErrorSession()
+      const sessionId = sessionStore.currentSessionId
+      if (sessionId) setSessionError(sessionId, toFriendlyMessage(error))
+      return false
     }
-
-    sessionStore.completeSessionActivation(previousActiveSessionId)
-    preserveComposerContextDuringActivation.value = false
-    return true
-  }
-
-  async function confirmOnsitePresence(expiresInMinutes = 30) {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return
-    }
-
-    errorStore.clearSessionError(sessionId)
-    return await runSessionOperation(async () => {
-      const updatedSession = await chatService.updateSessionSafetyAttestation(
-        sessionId,
-        true,
-        expiresInMinutes,
-      )
-      sessionStore.upsertSession(updatedSession)
-      await approvalStore.refreshPendingApprovals(updatedSession.id)
-      return updatedSession
-    })
-  }
-
-  async function clearOnsitePresence() {
-    const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return
-    }
-
-    errorStore.clearSessionError(sessionId)
-    return await runSessionOperation(async () => {
-      const updatedSession = await chatService.updateSessionSafetyAttestation(sessionId, false)
-      sessionStore.upsertSession(updatedSession)
-      await approvalStore.refreshPendingApprovals(updatedSession.id)
-      return updatedSession
-    })
   }
 
   async function changeAgentMode(mode: 'plan' | 'execute') {
     const sessionId = resolvedSessionId.value
     const expectedVersion = currentSession.value?.agentSessionVersion
-    if (!sessionId || !expectedVersion || !canChangeAgentMode.value) {
+    if (!sessionId || typeof expectedVersion !== 'number' || !canChangeAgentMode.value) {
       return false
     }
-    if (agentMode.value === mode) {
-      return true
-    }
+    if (agentMode.value === mode) return true
 
     try {
       return await runSessionOperation(async () => {
@@ -1418,7 +422,7 @@ export const useChatStore = defineStore('chat', () => {
         return true
       })
     } catch (error) {
-      errorStore.setSessionError(sessionId, toFriendlyMessage(error))
+      setSessionError(sessionId, toFriendlyMessage(error))
       try {
         await sessionStore.refreshSession(sessionId)
       } catch (refreshError) {
@@ -1428,104 +432,86 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function createAssistantMessage(sessionId: string) {
+    return messageStore.addMessage(sessionId, {
+      sessionId,
+      role: MessageRole.Assistant,
+      finalModelId: null,
+      finalModelName: '未知',
+      contextWindowTokens: null,
+      maxOutputTokens: null,
+      chunks: [],
+      isStreaming: true,
+      timestamp: Date.now(),
+    })
+  }
+
   async function sendMessage(input: string) {
     const sessionId = resolvedSessionId.value
     if (
       !sessionId ||
+      !input.trim() ||
       isAgentSessionUnavailable.value ||
       isSessionTransitionBlocked.value ||
       approvalStore.isWaitingForApproval
     ) {
-      return
+      return false
     }
 
     return await runSessionOperation(async () => {
       clearCurrentSessionError()
-      const referencedTaskId = referencedAgentTask.value?.taskId ?? null
-      clearReferencedAgentTask(sessionId)
-
       const userMessage = messageStore.addMessage(sessionId, {
         sessionId,
         role: MessageRole.User,
-        chunks: [
-          {
-            source: 'User',
-            type: ChunkType.Text,
-            content: input,
-          },
-        ],
+        chunks: [{ source: 'User', type: ChunkType.Text, content: input }],
         isStreaming: false,
         timestamp: Date.now(),
       })
-
-      const assistantMessage = messageStore.addMessage(sessionId, {
-        sessionId,
-        role: MessageRole.Assistant,
-        finalModelId: null,
-        finalModelName: '未知',
-        routingModelId: null,
-        routingModelName: null,
-        contextWindowTokens: null,
-        maxOutputTokens: null,
-        chunks: [],
-        isStreaming: true,
-        timestamp: Date.now(),
-      })
-      const runMessageKey = getChatRunMessageKey(assistantMessage)
-
-      runStatusStore.startRun(sessionId, runMessageKey)
+      const assistantMessage = createAssistantMessage(sessionId)
+      const messageKey = getChatRunMessageKey(assistantMessage)
+      runStatusStore.startRun(sessionId, messageKey)
       streamStore.start()
       let streamErrorCode: string | null = null
-      let refreshPendingApprovals = false
+      let shouldRefreshPendingApprovals = false
 
       try {
-        await chatService.sendMessageStream(
-          sessionId,
-          input,
-          {
-            onChunkReceived(chunk) {
-              runStatusStore.advanceFromChunk(sessionId, runMessageKey, chunk)
-              if (chunk.type === ChunkType.Error) {
-                streamErrorCode = getErrorCode(chunk)
-              }
-
-              processChunk(assistantMessage, chunk, {
-                setSessionError: errorStore.setSessionError,
-                onApprovalChunk: approvalStore.sync,
-                onAgentSessionState: applyAgentSessionEvent,
-              })
-            },
-            onComplete() {
-              streamStore.stop()
-              assistantMessage.isStreaming = false
-              if (streamErrorCode === 'approval_pending') {
-                runStatusStore.clearRunStatus(sessionId, runMessageKey)
-                messageStore.removeMessages(sessionId, userMessage, assistantMessage)
-                refreshPendingApprovals = true
-              } else {
-                runStatusStore.completeRun(sessionId, runMessageKey)
-              }
-
-              approvalStore.sync(sessionId)
-            },
-            onError(error) {
-              streamStore.stop()
-              assistantMessage.isStreaming = false
-              const message = toFriendlyMessage(error)
-              runStatusStore.failRun(sessionId, runMessageKey, message)
-              errorStore.setSessionError(sessionId, message)
-              approvalStore.sync(sessionId)
-            },
+        await chatService.sendMessageStream(sessionId, input, {
+          onChunkReceived(chunk) {
+            runStatusStore.advanceFromChunk(sessionId, messageKey, chunk)
+            if (chunk.type === ChunkType.Error) streamErrorCode = getErrorCode(chunk)
+            processChunk(assistantMessage, chunk, {
+              setSessionError,
+              onApprovalChunk: approvalStore.sync,
+              onAgentSessionState: applyAgentSessionEvent,
+            })
           },
-          referencedTaskId,
-        )
-        if (refreshPendingApprovals) {
-          await approvalStore.refreshPendingApprovals(sessionId)
-        }
+          onComplete() {
+            streamStore.stop()
+            assistantMessage.isStreaming = false
+            if (streamErrorCode === 'approval_pending') {
+              runStatusStore.clearRunStatus(sessionId, messageKey)
+              messageStore.removeMessages(sessionId, userMessage, assistantMessage)
+              shouldRefreshPendingApprovals = true
+            } else {
+              runStatusStore.completeRun(sessionId, messageKey)
+            }
+            approvalStore.sync(sessionId)
+          },
+          onError(error) {
+            streamStore.stop()
+            assistantMessage.isStreaming = false
+            const message = toFriendlyMessage(error)
+            runStatusStore.failRun(sessionId, messageKey, message)
+            setSessionError(sessionId, message)
+            approvalStore.sync(sessionId)
+          },
+        })
+
+        if (shouldRefreshPendingApprovals) await approvalStore.refreshPendingApprovals(sessionId)
       } catch (error) {
         const message = toFriendlyMessage(error)
-        runStatusStore.failRun(sessionId, runMessageKey, message)
-        errorStore.setSessionError(sessionId, message)
+        runStatusStore.failRun(sessionId, messageKey, message)
+        setSessionError(sessionId, message)
       } finally {
         streamStore.stop()
         assistantMessage.isStreaming = false
@@ -1536,21 +522,19 @@ export const useChatStore = defineStore('chat', () => {
         }
         approvalStore.sync(sessionId)
       }
+      return true
     })
   }
 
   async function submitApproval(
     callId: string,
     decision: 'approved' | 'rejected',
-    onsiteConfirmed: boolean,
     chunk: ApprovalChunk,
   ) {
     const sessionId = resolvedSessionId.value
-    if (!sessionId || isSessionTransitionBlocked.value) {
-      return false
-    }
-    if (!ownsCurrentFunctionApproval(callId, chunk, sessionId)) {
-      rejectForeignSessionTarget()
+    if (!sessionId || isSessionTransitionBlocked.value) return false
+    if (!ownsCurrentApproval(callId, chunk, sessionId)) {
+      setSessionError(sessionId, '审批目标不属于当前会话，已阻止请求。')
       return false
     }
 
@@ -1559,78 +543,44 @@ export const useChatStore = defineStore('chat', () => {
       let approvalErrorCode: string | null = null
       clearCurrentSessionError()
       streamStore.start()
-
-      let targetMessage = messageStore.getLastAssistantMessage(sessionId)
-      if (!targetMessage) {
-        targetMessage = messageStore.addMessage(sessionId, {
-          sessionId,
-          role: MessageRole.Assistant,
-          finalModelId: null,
-          finalModelName: '未知',
-          routingModelId: null,
-          routingModelName: null,
-          contextWindowTokens: null,
-          maxOutputTokens: null,
-          chunks: [],
-          isStreaming: true,
-          timestamp: Date.now(),
-        })
-      } else {
-        targetMessage.isStreaming = true
-      }
+      const targetMessage = messageStore.getLastAssistantMessage(sessionId) ?? createAssistantMessage(sessionId)
+      targetMessage.isStreaming = true
 
       try {
-        await chatService.sendApprovalDecisionStream(
-          sessionId,
-          callId,
-          decision,
-          onsiteConfirmed,
-          chunk.request,
-          {
-            onChunkReceived(incomingChunk) {
-              if (incomingChunk.type === ChunkType.Error) {
-                approvalFailed = true
-                approvalErrorCode = getErrorCode(incomingChunk)
-              }
-
-              processChunk(targetMessage!, incomingChunk, {
-                setSessionError: errorStore.setSessionError,
-                onApprovalChunk: approvalStore.sync,
-                onAgentSessionState: applyAgentSessionEvent,
-              })
-            },
-            onComplete() {
-              streamStore.stop()
-              if (targetMessage) {
-                targetMessage.isStreaming = false
-              }
-
-              chunk.status = approvalFailed ? getApprovalFailureStatus(approvalErrorCode) : decision
-              approvalStore.sync(sessionId)
-            },
-            onError(error) {
+        await chatService.sendApprovalDecisionStream(sessionId, callId, decision, {
+          onChunkReceived(incomingChunk) {
+            if (incomingChunk.type === ChunkType.Error) {
               approvalFailed = true
-              streamStore.stop()
-              if (targetMessage) {
-                targetMessage.isStreaming = false
-              }
-
-              chunk.status = 'pending'
-              errorStore.setSessionError(sessionId, toFriendlyMessage(error))
-              approvalStore.sync(sessionId)
-            },
+              approvalErrorCode = getErrorCode(incomingChunk)
+            }
+            processChunk(targetMessage, incomingChunk, {
+              setSessionError,
+              onApprovalChunk: approvalStore.sync,
+              onAgentSessionState: applyAgentSessionEvent,
+            })
           },
-        )
+          onComplete() {
+            streamStore.stop()
+            targetMessage.isStreaming = false
+            chunk.status = approvalFailed ? getApprovalFailureStatus(approvalErrorCode) : decision
+            approvalStore.sync(sessionId)
+          },
+          onError(error) {
+            approvalFailed = true
+            streamStore.stop()
+            targetMessage.isStreaming = false
+            chunk.status = 'pending'
+            setSessionError(sessionId, toFriendlyMessage(error))
+            approvalStore.sync(sessionId)
+          },
+        })
       } catch (error) {
         approvalFailed = true
         chunk.status = 'pending'
-        errorStore.setSessionError(sessionId, toFriendlyMessage(error))
+        setSessionError(sessionId, toFriendlyMessage(error))
       } finally {
         streamStore.stop()
-        if (targetMessage) {
-          targetMessage.isStreaming = false
-        }
-
+        targetMessage.isStreaming = false
         try {
           await sessionStore.refreshSession(sessionId)
         } catch (error) {
@@ -1638,13 +588,12 @@ export const useChatStore = defineStore('chat', () => {
         }
 
         if (approvalFailed) {
-          if (canReadPendingApprovals(sessionId)) {
-            await approvalStore.refreshPendingApprovals(sessionId)
-          } else {
-            approvalStore.reconcilePendingApprovalCards(sessionId, [])
+          try {
+            await refreshApprovalProjection(sessionId)
+          } catch (error) {
+            console.error('Failed to reconcile pending approvals.', error)
           }
         }
-
         approvalStore.sync(sessionId)
       }
 
@@ -1658,17 +607,12 @@ export const useChatStore = defineStore('chat', () => {
     streamStore.reset()
     approvalStore.reset()
     errorStore.reset()
-    initializationErrors.value = {}
-    isInitializationHydrating.value = false
     runStatusStore.reset()
     catalogStore.reset()
-    resetCurrentSessionState()
     historyCursors.value = {}
-    referencedAgentTasks.value = {}
     isLoadingOlderHistory.value = false
     sessionOperationCount.value = 0
-    pendingInitializationRuntimeSnapshot = null
-    preserveComposerContextDuringActivation.value = false
+    initializationError.value = ''
   }
 
   return {
@@ -1694,57 +638,23 @@ export const useChatStore = defineStore('chat', () => {
     isLoadingHistory,
     isLoadingOlderHistory,
     hasMoreHistoryBefore,
-    agentTasks,
-    latestAgentTask,
-    agentApprovals,
-    pendingAgentApprovals,
-    isAgentApprovalAuthorityUnknown,
-    agentAuditSummary,
-    timelineEvents,
-    agentRuntimeSnapshot,
     availableKnowledgeBases,
     selectedKnowledgeBaseId,
     selectedKnowledgeBase,
-    uploadedFiles,
-    currentWorkspace,
-    currentArtifactPreview,
-    chartPreview,
-    isAgentBusy,
     currentRunStatus,
-    referencedAgentTask,
-    referencedAgentTaskId,
     errorMessage,
     getRunStatusForMessage,
     prepareInitialization,
     initialize,
     loadKnowledgeBases,
     selectKnowledgeBase,
-    loadTimeline,
     loadOlderHistory,
     createNewSession,
     selectSession,
     deleteSession,
     clearCurrentSessionError,
-    confirmOnsitePresence,
-    clearOnsitePresence,
     changeAgentMode,
-    uploadSessionFile,
-    planAgentTask,
-    runAgentTask,
-    retryAgentTask,
-    cancelAgentTask,
-    approveAndRunAgentTask,
-    rejectAgentTaskPlan,
-    decideAgentApproval,
-    refreshAgentTaskSnapshot,
-    loadAgentAuditSummary,
-    loadArtifactPreview,
-    submitFinalReview,
-    finalizeWorkspace,
-    downloadArtifact,
     sendMessage,
-    referenceAgentTaskForFollowUp,
-    clearReferencedAgentTask,
     submitApproval,
     reset,
   }

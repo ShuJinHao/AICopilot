@@ -100,13 +100,13 @@ describe('apiClient endpoint trust', () => {
     expect(getProblemDetails({
       title: 'Bad Request',
       status: 400,
-      code: 'agent_plan_tool_denied',
+      code: 'tool_blocked',
       detail: 'The requested capability does not authorize this tool.',
       errors: ['legacy field should be ignored']
     })).toEqual({
       title: 'Bad Request',
       status: 400,
-      code: 'agent_plan_tool_denied',
+      code: 'tool_blocked',
       detail: 'The requested capability does not authorize this tool.',
       missingPermissions: undefined
     })

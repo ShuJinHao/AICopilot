@@ -3,7 +3,6 @@ using AICopilot.AiGatewayService.Commands.LanguageModels;
 using AICopilot.AiGatewayService.Queries.ConversationTemplates;
 using AICopilot.AiGatewayService.Queries.LanguageModels;
 using AICopilot.AiGatewayService.Queries.Runtime;
-using AICopilot.AiGatewayService.RoutingModels;
 using AICopilot.AiGatewayService.Runtime;
 using AICopilot.HttpApi.Infrastructure;
 using MediatR;
@@ -57,42 +56,6 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(command));
     }
 
-    [HttpPost("routing-model")]
-    public async Task<IActionResult> CreateRoutingModel(CreateRoutingModelConfigurationCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpPut("routing-model")]
-    public async Task<IActionResult> UpdateRoutingModel(UpdateRoutingModelConfigurationCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpDelete("routing-model")]
-    public async Task<IActionResult> DeleteRoutingModel(DeleteRoutingModelConfigurationCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpPut("routing-model/activate")]
-    public async Task<IActionResult> ActivateRoutingModel(ActivateRoutingModelConfigurationCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
-    }
-
-    [HttpGet("routing-model")]
-    public async Task<IActionResult> GetRoutingModel([FromQuery] GetRoutingModelConfigurationQuery query)
-    {
-        return ReturnResult(await Sender.Send(query));
-    }
-
-    [HttpGet("routing-model/list")]
-    public async Task<IActionResult> GetListRoutingModels()
-    {
-        return ReturnResult(await Sender.Send(new GetListRoutingModelConfigurationsQuery()));
-    }
-
     [HttpGet("provider-reliability")]
     public async Task<IActionResult> GetProviderReliability()
     {
@@ -105,22 +68,10 @@ public class AiGatewayController(ISender sender) : ApiControllerBase(sender)
         return ReturnResult(await Sender.Send(new GetModelPoolsQuery()));
     }
 
-    [HttpGet("runtime-settings")]
-    public async Task<IActionResult> GetRuntimeSettings()
-    {
-        return ReturnResult(await Sender.Send(new GetChatRuntimeSettingsQuery()));
-    }
-
     [HttpGet("cloud-readonly/status")]
     public async Task<IActionResult> GetCloudReadonlyStatus()
     {
         return ReturnResult(await Sender.Send(new GetCloudReadonlyStatusQuery()));
-    }
-
-    [HttpPut("runtime-settings")]
-    public async Task<IActionResult> UpdateRuntimeSettings(UpdateChatRuntimeSettingsCommand command)
-    {
-        return ReturnResult(await Sender.Send(command));
     }
 
     [HttpPost("conversation-template")]

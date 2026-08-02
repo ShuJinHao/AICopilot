@@ -1,8 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using AICopilot.AiGatewayService.AgentTasks;
-using AICopilot.AiGatewayService.Approvals;
+using AICopilot.AiGatewayService.Tools;
 using AICopilot.AiGatewayService.Models;
 using AICopilot.AiGatewayService.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
@@ -23,9 +22,8 @@ public class ApprovalDecisionStreamHandler(
     MainChatToolCatalog mainChatToolCatalog,
     IAgentSessionStateStore agentSessionStateStore,
     SessionMessagePersistenceService messagePersistenceService,
-    ApprovalRequirementResolver approvalRequirementResolver,
     ISessionExecutionLock sessionExecutionLock,
-    IAgentExecutionMetadataAccessor executionMetadataAccessor,
+    IChatExecutionMetadataAccessor executionMetadataAccessor,
     IAgentStreamRuntime chatStreamRuntime)
     : IStreamRequestHandler<ApprovalDecisionStreamRequest, ChatChunk>
 {
@@ -115,14 +113,10 @@ public class ApprovalDecisionStreamHandler(
             yield break;
         }
 
-        var storedApproval = ToStoredApproval(binding);
-        var validation = await ApprovalDecisionValidator.ValidateAsync(
+        var validation = ApprovalDecisionValidator.Validate(
             request,
-            storedApproval,
-            session,
-            approvalRequirementResolver,
-            assistantText,
-            ct);
+            binding,
+            assistantText);
         if (!validation.IsValid)
         {
             await CompleteWithoutModelAsync(state, turnId, ct);
@@ -212,7 +206,7 @@ public class ApprovalDecisionStreamHandler(
                     auditedToolName,
                     validation.IsApproved ? AuditResults.Succeeded : AuditResults.Rejected,
                     validation.IsApproved
-                        ? $"Approval accepted: {auditedToolName}; onsiteConfirmed={request.OnsiteConfirmed}."
+                        ? $"Approval accepted: {auditedToolName}."
                         : $"Approval rejected: {auditedToolName}."),
                 ct);
             await auditLogWriter.SaveChangesAsync(ct);
@@ -240,9 +234,7 @@ public class ApprovalDecisionStreamHandler(
                 validation.Identity is null
                     ? validation.ToolName
                     : $"{validation.Identity.TargetName}/{validation.Identity.ToolName}",
-                validation.IsApproved,
-                request.OnsiteConfirmed,
-                validation.Requirement.RequiresOnsiteAttestation),
+                validation.IsApproved),
             MessageType.User));
 
         var checkpointSink = new AgentSessionCheckpointSink(
@@ -261,6 +253,11 @@ public class ApprovalDecisionStreamHandler(
                 tools,
                 checkpointSink,
                 ct);
+            var configurationSnapshot = scopedRuntime.ConfigurationSnapshot
+                ?? throw new InvalidOperationException(
+                    "Approval continuation did not return its effective model configuration.");
+            executionMetadataAccessor.SetFinalConfiguration(
+                configurationSnapshot);
             harnessAgent = scopedRuntime.Agent as IHarnessRuntimeChatAgent
                 ?? throw new InvalidOperationException(
                     "Approval continuation did not create a Harness agent.");
@@ -293,6 +290,15 @@ public class ApprovalDecisionStreamHandler(
         }
 
         await using var runtimeLease = scopedRuntime!;
+        var modelMetadata = AgentStreamRuntime.CreateMetadataChunk(
+            scopedRuntime!.ConfigurationSnapshot!,
+            "HarnessAgent");
+        if (modelMetadata is not null)
+        {
+            renderChunks.Add(modelMetadata);
+            yield return modelMetadata;
+        }
+
         var runtimeApproval = new AiToolApprovalRequest(
             binding.RequestId,
             new AiToolCall(
@@ -508,24 +514,6 @@ public class ApprovalDecisionStreamHandler(
         catch (AgentSessionStateException)
         {
         }
-    }
-
-    private static StoredToolApprovalRequest ToStoredApproval(
-        AgentApprovalBinding binding)
-    {
-        return new StoredToolApprovalRequest(
-            binding.RequestId,
-            binding.ToolCallId,
-            binding.ToolKind.ToString(),
-            binding.CanonicalToolName,
-            binding.ServerName,
-            binding.Arguments.ToDictionary(
-                item => item.Key,
-                item => item.Value,
-                StringComparer.OrdinalIgnoreCase),
-            binding.TargetType?.ToString(),
-            binding.TargetName,
-            binding.ToolName);
     }
 
     private static string FormatToolName(AgentApprovalBinding binding)

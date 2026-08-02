@@ -76,7 +76,6 @@ public class AICopilotAppEnvironment : IAsyncDisposable
             await WaitForHealthyResourceAsync("postgres");
             await WaitForHealthyResourceAsync("eventbus");
             await WaitForHealthyResourceAsync("qdrant");
-            await WaitForHealthyResourceAsync("final-agent-context-redis");
             await WaitForHealthyResourceAsync("aicopilot-httpapi");
 
             if (EnableRagWorker)
@@ -216,9 +215,6 @@ public class AICopilotAppEnvironment : IAsyncDisposable
         SetEnvironmentVariable("BootstrapAdmin__UserName", BootstrapUserName);
         SetEnvironmentVariable("BootstrapAdmin__Password", BootstrapPassword);
         SetEnvironmentVariable("AICopilotSecurity__ApiKeyEncryptionKey", "test-aicopilot-api-key-encryption-key");
-        SetEnvironmentVariable(
-            "ArtifactWorkspace__RootPath",
-            Path.Combine(Path.GetTempPath(), "AICopilotIntegrationTests", "artifact-workspaces"));
         SetEnvironmentVariable("AppHost__EnableDockerComposeEnvironment", "false");
         SetEnvironmentVariable("AppHost__EnableWebUi", "false");
         SetEnvironmentVariable("AppHost__EnablePgWeb", "false");
@@ -352,7 +348,6 @@ public class AICopilotAppEnvironment : IAsyncDisposable
         yield return "postgres";
         yield return "eventbus";
         yield return "qdrant";
-        yield return "final-agent-context-redis";
         yield return "aicopilot-migration";
         yield return "aicopilot-httpapi";
 

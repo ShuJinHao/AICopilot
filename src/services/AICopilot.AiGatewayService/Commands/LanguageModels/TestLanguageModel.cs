@@ -153,21 +153,6 @@ public class TestLanguageModelCommandHandler(
             values.Add(nameof(LanguageModelUsage.Chat));
         }
 
-        if (usage.Value.HasFlag(LanguageModelUsage.Routing))
-        {
-            values.Add(nameof(LanguageModelUsage.Routing));
-        }
-
-        if (usage.Value.HasFlag(LanguageModelUsage.Planner))
-        {
-            values.Add(nameof(LanguageModelUsage.Planner));
-        }
-
-        if (usage.Value.HasFlag(LanguageModelUsage.Embedding))
-        {
-            values.Add(nameof(LanguageModelUsage.Embedding));
-        }
-
         return values;
     }
 

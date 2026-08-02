@@ -5,121 +5,130 @@ import type {
   Widget
 } from '@/types/protocols'
 
-export type NormalizedWidget = Widget | ChartWidget | DataTableWidget | StatsCardWidget
+export type NormalizedWidget = ChartWidget | DataTableWidget | StatsCardWidget
 
-const widgetTypes = new Set(['Chart', 'DataTable', 'StatsCard'])
+const chartCategories = new Set(['Bar', 'Line', 'Pie'])
+const tableDataTypes = new Set(['string', 'number', 'date', 'boolean'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function getField(record: Record<string, unknown>, ...keys: string[]) {
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(record, key)) {
-      return record[key]
-    }
-  }
-
-  return undefined
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
-function asString(value: unknown, fallback = '') {
-  return typeof value === 'string' ? value : fallback
-}
-
-function normalizeWidgetType(value: unknown) {
-  if (typeof value !== 'string' || !value.trim()) {
+function readBase(value: Record<string, unknown>): Widget | null {
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.type !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.description !== 'string'
+  ) {
     return null
   }
 
-  const trimmed = value.trim().replace(/Widget$/, '')
-  return widgetTypes.has(trimmed) ? trimmed : trimmed
-}
-
-function normalizeBaseWidget(record: Record<string, unknown>, type: string, data: unknown): Widget {
-  const title = asString(getField(record, 'title', 'Title'), '')
   return {
-    id: asString(getField(record, 'id', 'Id'), `${type}-${title || 'widget'}`),
-    type,
-    title,
-    description: asString(getField(record, 'description', 'Description'), ''),
-    data
+    id: value.id,
+    type: value.type,
+    title: value.title,
+    description: value.description,
+    data: value.data
   }
 }
 
-function normalizeChartData(data: unknown): ChartWidget['data'] {
-  const dataRecord = isRecord(data) ? data : {}
-  const datasetRecord = getField(dataRecord, 'dataset', 'Dataset')
-  const dataset = isRecord(datasetRecord) ? datasetRecord : {}
-  const encodingRecord = getField(dataRecord, 'encoding', 'Encoding')
-  const encoding = isRecord(encodingRecord) ? encodingRecord : {}
-  const source = getField(dataset, 'source', 'Source')
-  const dimensions = getField(dataset, 'dimensions', 'Dimensions')
-  const y = getField(encoding, 'y', 'Y')
-  const seriesName = getField(encoding, 'seriesName', 'SeriesName')
+function readChart(base: Widget): ChartWidget | null {
+  if (!isRecord(base.data)) {
+    return null
+  }
+
+  const { category, dataset, encoding } = base.data
+  if (
+    typeof category !== 'string' ||
+    !chartCategories.has(category) ||
+    !isRecord(dataset) ||
+    !isRecord(encoding) ||
+    !isStringArray(dataset.dimensions) ||
+    !Array.isArray(dataset.source) ||
+    !dataset.source.every(isRecord) ||
+    typeof encoding.x !== 'string' ||
+    !isStringArray(encoding.y) ||
+    (encoding.seriesName !== undefined && typeof encoding.seriesName !== 'string')
+  ) {
+    return null
+  }
 
   return {
-    category: asString(getField(dataRecord, 'category', 'Category'), 'Bar') as ChartWidget['data']['category'],
-    dataset: {
-      dimensions: Array.isArray(dimensions) ? dimensions.map((item) => String(item)) : [],
-      source: Array.isArray(source) ? (source as Array<Record<string, unknown>>) : []
-    },
-    encoding: {
-      x: asString(getField(encoding, 'x', 'X'), ''),
-      y: Array.isArray(y) ? y.map((item) => String(item)) : typeof y === 'string' ? [y] : [],
-      seriesName: typeof seriesName === 'string' ? seriesName : undefined
+    ...base,
+    type: 'Chart',
+    data: {
+      category: category as ChartWidget['data']['category'],
+      dataset: {
+        dimensions: dataset.dimensions,
+        source: dataset.source
+      },
+      encoding: {
+        x: encoding.x,
+        y: encoding.y,
+        ...(encoding.seriesName === undefined ? {} : { seriesName: encoding.seriesName })
+      }
     }
   }
 }
 
-function normalizeStatsData(data: unknown): StatsCardWidget['data'] {
-  const dataRecord = isRecord(data) ? data : {}
-  const value = getField(dataRecord, 'value', 'Value')
-  const unit = getField(dataRecord, 'unit', 'Unit')
+function readStatsCard(base: Widget): StatsCardWidget | null {
+  if (!isRecord(base.data)) {
+    return null
+  }
+
+  const { label, value, unit } = base.data
+  if (
+    typeof label !== 'string' ||
+    (typeof value !== 'string' && typeof value !== 'number') ||
+    (unit !== undefined && typeof unit !== 'string')
+  ) {
+    return null
+  }
 
   return {
-    label: asString(getField(dataRecord, 'label', 'Label'), ''),
-    value: typeof value === 'number' || typeof value === 'string' ? value : '-',
-    unit: typeof unit === 'string' ? unit : undefined
+    ...base,
+    type: 'StatsCard',
+    data: {
+      label,
+      value,
+      ...(unit === undefined ? {} : { unit })
+    }
   }
 }
 
-function inferColumns(rows: Array<Record<string, unknown>>) {
-  const firstRow = rows[0]
-  if (!firstRow) {
-    return []
+function readDataTable(base: Widget): DataTableWidget | null {
+  if (!isRecord(base.data)) {
+    return null
   }
 
-  return Object.keys(firstRow).map((key) => ({
-    key,
-    label: key,
-    dataType: 'string' as const
-  }))
-}
+  const { columns, rows } = base.data
+  if (
+    !Array.isArray(columns) ||
+    !columns.every((column) =>
+      isRecord(column) &&
+      typeof column.key === 'string' &&
+      typeof column.label === 'string' &&
+      typeof column.dataType === 'string' &&
+      tableDataTypes.has(column.dataType)
+    ) ||
+    !Array.isArray(rows) ||
+    !rows.every(isRecord)
+  ) {
+    return null
+  }
 
-function normalizeTableData(data: unknown): DataTableWidget['data'] {
-  if (Array.isArray(data)) {
-    const rows = data.filter(isRecord)
-    return {
-      columns: inferColumns(rows),
+  return {
+    ...base,
+    type: 'DataTable',
+    data: {
+      columns: columns as DataTableWidget['data']['columns'],
       rows
     }
-  }
-
-  const dataRecord = isRecord(data) ? data : {}
-  const columns = getField(dataRecord, 'columns', 'Columns')
-  const rows = getField(dataRecord, 'rows', 'Rows')
-
-  const normalizedRows = Array.isArray(rows) ? rows.filter(isRecord) : []
-  return {
-    columns: Array.isArray(columns)
-      ? columns.filter(isRecord).map((column) => ({
-          key: asString(getField(column, 'key', 'Key'), ''),
-          label: asString(getField(column, 'label', 'Label'), ''),
-          dataType: asString(getField(column, 'dataType', 'DataType'), 'string') as DataTableWidget['data']['columns'][number]['dataType']
-        }))
-      : inferColumns(normalizedRows),
-    rows: normalizedRows
   }
 }
 
@@ -128,42 +137,19 @@ export function normalizeWidgetPayload(value: unknown): NormalizedWidget | null 
     return null
   }
 
-  const directType = normalizeWidgetType(getField(value, 'type', 'Type', 'widget_type'))
-  if (directType) {
-    const rawData = getField(value, 'data', 'Data')
-    const base = normalizeBaseWidget(value, directType, rawData)
-
-    if (directType === 'Chart') {
-      return { ...base, type: 'Chart', data: normalizeChartData(rawData) }
-    }
-
-    if (directType === 'StatsCard') {
-      return { ...base, type: 'StatsCard', data: normalizeStatsData(rawData) }
-    }
-
-    if (directType === 'DataTable') {
-      return { ...base, type: 'DataTable', data: normalizeTableData(rawData) }
-    }
-
-    return base
+  const base = readBase(value)
+  if (!base) {
+    return null
   }
 
-  const decision = getField(value, 'visual_decision', 'VisualDecision')
-  if (isRecord(decision)) {
-    return normalizeWidgetPayload({
-      ...decision,
-      data: getField(value, 'data', 'Data') ?? getField(decision, 'data', 'Data')
-    })
+  switch (base.type) {
+    case 'Chart':
+      return readChart(base)
+    case 'StatsCard':
+      return readStatsCard(base)
+    case 'DataTable':
+      return readDataTable(base)
+    default:
+      return null
   }
-
-  const decisionType = normalizeWidgetType(decision)
-  if (decisionType) {
-    return normalizeWidgetPayload({
-      ...value,
-      type: decisionType,
-      data: getField(value, 'data', 'Data')
-    })
-  }
-
-  return null
 }

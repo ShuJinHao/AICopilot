@@ -1,9 +1,6 @@
 export interface Session {
   id: string
   title: string
-  onsiteConfirmedAt?: string | null
-  onsiteConfirmedBy?: string | null
-  onsiteConfirmationExpiresAt?: string | null
   agentMode?: 'plan' | 'execute' | null
   agentSessionVersion?: number | null
   agentSessionStatus?: 'Ready' | 'Running' | 'Interrupted' | 'ResetRequired' | string | null
@@ -26,13 +23,11 @@ export enum ChunkType {
   Error = 'Error',
   Text = 'Text',
   Metadata = 'Metadata',
-  Intent = 'Intent',
   Widget = 'Widget',
   FunctionResult = 'FunctionResult',
   FunctionCall = 'FunctionCall',
   ApprovalRequest = 'ApprovalRequest',
   AgentEvent = 'AgentEvent',
-  AgentTask = 'AgentTask',
 }
 
 export interface ChatChunk {
@@ -44,8 +39,6 @@ export interface ChatChunk {
 export interface ChatModelMetadataPayload {
   finalModelId?: string | null
   finalModelName?: string | null
-  routingModelId?: string | null
-  routingModelName?: string | null
   contextWindowTokens?: number | null
   maxOutputTokens?: number | null
 }
@@ -56,12 +49,6 @@ export interface ChatErrorPayload {
   userFacingMessage?: string | null
 }
 
-export interface IntentResult {
-  intent: string
-  confidence: number
-  query?: string
-}
-
 export interface FunctionApprovalRequest {
   callId: string
   name: string
@@ -70,8 +57,6 @@ export interface FunctionApprovalRequest {
   targetName?: string | null
   toolName?: string | null
   args: string | Record<string, unknown>
-  requiresOnsiteAttestation: boolean
-  attestationExpiresAt?: string | null
 }
 
 export interface Widget {
@@ -94,273 +79,6 @@ export interface AgentEventPayload {
   status?: 'Ready' | 'Running' | 'Interrupted' | string
   version?: number
   pendingApproval?: boolean
-}
-
-export interface UploadRecord {
-  id: string
-  scope: 'SessionTemp' | 'AgentInput'
-  sessionId?: string | null
-  agentTaskId?: string | null
-  fileName: string
-  contentType: string
-  fileSize: number
-  sha256: string
-  createdAt: string
-}
-
-export interface AgentStep {
-  id: string
-  stepIndex: number
-  title: string
-  description: string
-  stepType: string
-  status: string
-  toolCode?: string | null
-  requiresApproval: boolean
-  errorMessage?: string | null
-}
-
-export interface AgentTaskFailureSummary {
-  stepIndex?: number | null
-  toolCode?: string | null
-  errorCode: string
-  safeMessage: string
-  canRetry: boolean
-  nextAction: string
-}
-
-export interface AgentTask {
-  id: string
-  taskCode: string
-  sessionId: string
-  title: string
-  goal: string
-  taskType: string
-  status: string
-  riskLevel: string
-  modelId?: string | null
-  workspaceId?: string | null
-  workspaceCode?: string | null
-  planJson: string
-  finalSummary?: string | null
-  createdAt: string
-  updatedAt: string
-  completedAt?: string | null
-  steps: AgentStep[]
-  pendingApprovalCount?: number
-  lastFailureReason?: string | null
-  canRun: boolean
-  canRetry?: boolean
-  canSubmitFinalReview: boolean
-  canApproveFinal: boolean
-  failureSummary?: AgentTaskFailureSummary | null
-  activeRunAttemptId?: string | null
-  runAttemptCount?: number
-  isRunInProgress: boolean
-  queuedRunId?: string | null
-  runQueueStatus?: string | null
-  isRunQueued: boolean
-  planSchemaVersion?: string | null
-  planDigest?: string | null
-  topologyProfile?: string | null
-  isPlanExecutable?: boolean
-  planIntegrityStatus?: 'ValidV2' | 'LegacyCompletedReadOnly' | 'Invalid' | string
-}
-
-export interface AgentRuntimeNode {
-  nodeId: string
-  label: string
-  kind: string
-  status: string
-  isRequired: boolean
-  dependencyCount: number
-  joinPolicy?: string | null
-  attemptNo: number
-  maxAttempts: number
-  retryCount: number
-  timeoutSeconds: number
-  durationMs?: number | null
-  startedAt?: string | null
-  completedAt?: string | null
-  failureCode?: string | null
-  safeMessage?: string | null
-}
-
-export interface AgentRuntimeEvidenceQuality {
-  rowCount?: number | null
-  isTruncated: boolean
-  freshness: string
-  missingRate?: number | null
-  confidence?: number | null
-  flags: string[]
-}
-
-export interface AgentRuntimeEvidence {
-  nodeId: string
-  nodeLabel: string
-  evidenceKind: string
-  truthClass:
-    | 'ObservedFact'
-    | 'DerivedFact'
-    | 'ModelPrediction'
-    | 'LlmInference'
-    | 'Recommendation'
-    | string
-  truthLabel: string
-  sourceLabel: string
-  sourceMode: string
-  isSimulation: boolean
-  asOfUtc?: string | null
-  timeRangeStartUtc?: string | null
-  timeRangeEndUtc?: string | null
-  quality: AgentRuntimeEvidenceQuality
-  safeSummary: string
-  findings: string[]
-  typedMetrics: Record<string, number>
-  citationCount: number
-}
-
-export interface AgentRuntimeMetric {
-  code: string
-  label: string
-  value?: number | null
-  unit: string
-  status: string
-  source: string
-}
-
-export interface AgentTaskRuntimeSnapshot {
-  taskId: string
-  runAttemptId?: string | null
-  status: string
-  generatedAt: string
-  evidenceSetDigest?: string | null
-  nodes: AgentRuntimeNode[]
-  evidence: AgentRuntimeEvidence[]
-  metrics: AgentRuntimeMetric[]
-}
-
-export interface AgentApprovalRequest {
-  id: string
-  taskId: string
-  workspaceCode?: string | null
-  type: string
-  targetId: string
-  targetName: string
-  riskLevel: string
-  status: string
-  reason?: string | null
-  requestedAt: string
-  decidedAt?: string | null
-  decidedBy?: string | null
-}
-
-export interface AgentTaskAuditSummary {
-  id: string
-  taskId: string
-  workspaceCode?: string | null
-  actionCode: string
-  targetType: string
-  targetName: string
-  result: string
-  summary: string
-  createdAt: string
-  metadata: Record<string, string>
-}
-
-export interface ArtifactRecord {
-  id: string
-  name: string
-  type: string
-  status: string
-  relativePath: string
-  fileSize: number
-  mimeType: string
-  version: number
-  updatedAt: string
-  previewKind:
-    | 'chart'
-    | 'json'
-    | 'table'
-    | 'markdown'
-    | 'html'
-    | 'pdf'
-    | 'spreadsheet'
-    | 'download'
-    | string
-  downloadUrl: string
-  generatedByStepOrder?: number | null
-  requiresApproval?: boolean
-  approvalStatus?: string
-  finalizedAt?: string | null
-  artifactVersion?: number
-  artifactStatus?: string
-  sourceMode?: string | null
-  boundary?: string | null
-  isSimulation?: boolean
-  isSandbox?: boolean
-  sourceLabel?: string | null
-  queryHash?: string | null
-  resultHash?: string | null
-  rowCount?: number
-  isTruncated?: boolean
-}
-
-export interface ArtifactManifestItem {
-  artifactId: string
-  type: string
-  name: string
-  relativePath: string
-  status: string
-  version: number
-  generatedByStep?: number | null
-  downloadUrl: string
-  createdAt: string
-}
-
-export interface ArtifactWorkspaceFile {
-  name: string
-  relativePath: string
-  isDirectory: boolean
-  fileSize: number
-  updatedAt: string
-}
-
-export interface ArtifactWorkspace {
-  id: string
-  workspaceCode: string
-  taskId: string
-  status: string
-  files: ArtifactWorkspaceFile[]
-  artifacts: ArtifactRecord[]
-  manifest?: ArtifactManifestItem[]
-  draftArtifacts?: ArtifactRecord[]
-  finalArtifacts?: ArtifactRecord[]
-}
-
-export interface AgentArtifactPreview {
-  artifactId: string
-  name: string
-  artifactType: string
-  previewKind: string
-  artifactStatus: string
-  artifactVersion: number
-  relativePath: string
-  fileSize: number
-  mimeType: string
-  sourceMode?: string | null
-  boundary?: string | null
-  isSimulation: boolean
-  isSandbox: boolean
-  sourceLabel?: string | null
-  queryHash?: string | null
-  resultHash?: string | null
-  rowCount: number
-  isTruncated: boolean
-  content?: string | null
-  columns: string[]
-  rows: Array<Record<string, string>>
-  metadata: Record<string, string>
 }
 
 export interface ChartWidget extends Widget {

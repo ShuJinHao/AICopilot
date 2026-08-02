@@ -1,5 +1,5 @@
 using System.Text.Json;
-using AICopilot.AiGatewayService.Workflows.Executors;
+using AICopilot.AiGatewayService.BusinessQueries;
 using AICopilot.DataAnalysisService.BusinessDatabases;
 using AICopilot.Services.Contracts;
 
@@ -74,7 +74,6 @@ public sealed class BusinessQueryPipelineTests
             StandardBusinessDataSourceProfiles.CloudReadOnly);
 
         decision.IsEligible.Should().Be(expected);
-        decision.RequiresModelDecision.Should().Be(expected);
     }
 
     [Fact]
@@ -379,12 +378,12 @@ public sealed class BusinessQueryPipelineTests
         var challenge = store.BeginConfirmation(pending);
 
         store.TryConfirmPending(
-                pending.TaskId,
+                Guid.NewGuid(),
                 $"确认 {challenge.Token}",
                 out _)
             .Should().BeFalse();
         store.TryConfirmPending(
-                pending.TaskId,
+                pending.SessionId,
                 $"确认查询 {challenge.Token}",
                 out var confirmed)
             .Should().BeTrue();
@@ -392,7 +391,7 @@ public sealed class BusinessQueryPipelineTests
         confirmed.SourceExplicitlySelected.Should().BeTrue();
         confirmed.SemanticPlan.Should().BeSameAs(pendingPlan);
         store.TryConfirmPending(
-                pending.TaskId,
+                pending.SessionId,
                 $"确认查询 {challenge.Token}",
                 out _)
             .Should().BeFalse("the confirmation challenge is single-use");
@@ -424,7 +423,7 @@ public sealed class BusinessQueryPipelineTests
         clock.UtcNow = clock.UtcNow.AddMinutes(6);
 
         store.TryConfirmPending(
-                pending.TaskId,
+                pending.SessionId,
                 $"确认查询 {challenge.Token}",
                 out _)
             .Should().BeFalse();

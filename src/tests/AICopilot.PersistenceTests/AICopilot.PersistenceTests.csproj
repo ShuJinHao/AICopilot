@@ -34,12 +34,12 @@
     <ProjectReference Include="..\..\services\AICopilot.Services.Contracts\AICopilot.Services.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\AICopilot.SharedKernel\AICopilot.SharedKernel.csproj" />
     <ProjectReference Include="..\..\testing\AICopilot.PersistenceTestKit\AICopilot.PersistenceTestKit.csproj" />
-    <ProjectReference Include="..\..\testing\AICopilot.AgentWorkflowTestKit\AICopilot.AgentWorkflowTestKit.csproj" />
+    <ProjectReference Include="..\..\testing\AICopilot.HarnessTestKit\AICopilot.HarnessTestKit.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="AICopilot.Services.Contracts" />
     <Using Include="AICopilot.PersistenceTestKit" />
-    <Using Include="AICopilot.AgentWorkflowTestKit" />
+    <Using Include="AICopilot.HarnessTestKit" />
     <Using Include="FluentAssertions" />
     <Using Include="Microsoft.Extensions.DependencyInjection" />
     <Using Include="Xunit" />

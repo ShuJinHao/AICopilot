@@ -5,15 +5,10 @@ import { useConfigStore } from '@/stores/configStore'
 const configServiceMock = vi.hoisted(() => ({
   getLanguageModels: vi.fn(),
   getConversationTemplates: vi.fn(),
-  getRoutingModels: vi.fn(),
   getLanguageModel: vi.fn(),
   createLanguageModel: vi.fn(),
   updateLanguageModel: vi.fn(),
   deleteLanguageModel: vi.fn(),
-  getRoutingModel: vi.fn(),
-  createRoutingModel: vi.fn(),
-  updateRoutingModel: vi.fn(),
-  deleteRoutingModel: vi.fn(),
   getConversationTemplate: vi.fn(),
   createConversationTemplate: vi.fn(),
   updateConversationTemplate: vi.fn(),
@@ -34,10 +29,8 @@ vi.mock('@/stores/authStore', () => ({
 function resetConfigServiceMocks() {
   vi.clearAllMocks()
   configServiceMock.getLanguageModels.mockResolvedValue([])
-  configServiceMock.getRoutingModels.mockResolvedValue([])
   configServiceMock.getConversationTemplates.mockResolvedValue([])
   configServiceMock.createLanguageModel.mockResolvedValue(undefined)
-  configServiceMock.createRoutingModel.mockResolvedValue(undefined)
   configServiceMock.createConversationTemplate.mockResolvedValue(undefined)
 }
 
@@ -51,9 +44,7 @@ describe('configStore facade', () => {
     const store = useConfigStore()
 
     expect(typeof store.saveLanguageModel).toBe('function')
-    expect(typeof store.saveRoutingModel).toBe('function')
     expect(typeof store.saveConversationTemplate).toBe('function')
-    expect(typeof store.refreshAgentSlots).toBe('function')
     expect('saveMcpServer' in store).toBe(false)
     expect('openEditBusinessDatabaseDialog' in store).toBe(false)
   })
@@ -79,13 +70,12 @@ describe('configStore facade', () => {
     )
   })
 
-  it('refreshes only fixed agent slot domains', async () => {
+  it('refreshes only current model and conversation-template domains', async () => {
     const store = useConfigStore()
 
     await store.refresh()
 
     expect(configServiceMock.getLanguageModels).toHaveBeenCalledOnce()
-    expect(configServiceMock.getRoutingModels).toHaveBeenCalledOnce()
     expect(configServiceMock.getConversationTemplates).toHaveBeenCalledOnce()
   })
 })

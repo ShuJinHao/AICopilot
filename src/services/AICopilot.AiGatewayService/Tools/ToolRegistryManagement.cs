@@ -1,4 +1,3 @@
-using AICopilot.AiGatewayService.AgentTasks;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Services.CrossCutting.Attributes;
 using AICopilot.SharedKernel.Ai;
@@ -26,11 +25,9 @@ public sealed record ToolRegistrationDto(
     string Category,
     IReadOnlyCollection<string> BusinessDomains,
     string DataBoundary,
-    bool IsVisibleToPlanner,
     bool IsExecutableByAgent,
     int SchemaVersion,
     int CatalogVersion,
-    string ApprovalPolicy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     bool RuntimeAvailable,
@@ -40,64 +37,21 @@ public sealed record ToolRegistrationDto(
 public sealed record ToolRegistryCatalogDto(
     int Version,
     int AvailableToolCount,
-    bool MockMcpOnly,
     IReadOnlyDictionary<string, int> RiskSummary,
-    IReadOnlyCollection<AgentPlannerToolSummary> Tools);
-
-public sealed record ToolRunAuditDto(
-    Guid ToolRunId,
-    Guid TaskId,
-    Guid? PlanId,
-    string ToolCode,
-    string ProviderKind,
-    bool IsMock,
-    string ApprovalStatus,
-    string Status,
-    long? DurationMs,
-    string? ResultHash,
-    string? ErrorCode,
-    DateTimeOffset ExecutedAt);
-
-public sealed record ToolExecutionRecordDto(
-    Guid Id,
-    Guid TaskId,
-    Guid StepId,
-    Guid? RunAttemptId,
-    string ToolCode,
-    string? InputSummary,
-    string? OutputSummary,
-    string Status,
-    DateTimeOffset StartedAt,
-    DateTimeOffset? CompletedAt,
-    long? DurationMs,
-    string? ErrorCode,
-    string? ErrorMessage,
-    string? ArtifactId,
-    string? AuditMetadata,
-    string ProviderKind = "Unknown",
-    bool IsMock = false,
-    string? ApprovalStatus = null,
-    string? ResultHash = null);
-
-public sealed record ToolExecutionRecordPageDto(
-    IReadOnlyCollection<ToolExecutionRecordDto> Items,
-    int PageIndex,
-    int PageSize,
-    int TotalCount,
-    int TotalPages,
-    bool HasPrevious,
-    bool HasNext);
+    IReadOnlyCollection<ToolRegistrationDto> Tools);
 
 [AuthorizeRequirement("AiGateway.ToolRegistry.Read")]
-public sealed record GetListToolRegistrationsQuery : IQuery<Result<IReadOnlyCollection<ToolRegistrationDto>>>;
+public sealed record GetListToolRegistrationsQuery
+    : IQuery<Result<IReadOnlyCollection<ToolRegistrationDto>>>;
 
 [AuthorizeRequirement("AiGateway.ToolRegistry.Read")]
-public sealed record GetToolRegistrationQuery(string ToolCode) : IQuery<Result<ToolRegistrationDto>>;
+public sealed record GetToolRegistrationQuery(string ToolCode)
+    : IQuery<Result<ToolRegistrationDto>>;
 
 [AuthorizeRequirement("AiGateway.ToolRegistry.Read")]
 public sealed record GetToolCatalogQuery(
-    bool SimulationOnly = true,
-    IReadOnlyCollection<string>? BusinessDomains = null) : IQuery<Result<ToolRegistryCatalogDto>>;
+    IReadOnlyCollection<string>? BusinessDomains = null)
+    : IQuery<Result<ToolRegistryCatalogDto>>;
 
 [AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
 public sealed record UpdateToolRegistrationCommand(
@@ -115,11 +69,9 @@ public sealed record UpdateToolRegistrationCommand(
     string? Category = null,
     IReadOnlyCollection<string>? BusinessDomains = null,
     string? DataBoundary = null,
-    bool? IsVisibleToPlanner = null,
     bool? IsExecutableByAgent = null,
     int? SchemaVersion = null,
-    int? CatalogVersion = null,
-    string? ApprovalPolicy = null) : ICommand<Result<ToolRegistrationDto>>;
+    int? CatalogVersion = null) : ICommand<Result<ToolRegistrationDto>>;
 
 [AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
 public sealed record UpsertToolDefinitionCommand(
@@ -140,11 +92,10 @@ public sealed record UpsertToolDefinitionCommand(
     string Category = "General",
     IReadOnlyCollection<string>? BusinessDomains = null,
     string DataBoundary = nameof(ToolDataBoundary.NoData),
-    bool IsVisibleToPlanner = true,
     bool IsExecutableByAgent = true,
     int SchemaVersion = 1,
-    int CatalogVersion = BuiltInToolRegistrations.CurrentCatalogVersion,
-    string ApprovalPolicy = "None") : ICommand<Result<ToolRegistrationDto>>;
+    int CatalogVersion = BuiltInToolRegistrations.CurrentCatalogVersion)
+    : ICommand<Result<ToolRegistrationDto>>;
 
 [AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
 public sealed record ActivateToolDefinitionVersionCommand(
@@ -153,4 +104,5 @@ public sealed record ActivateToolDefinitionVersionCommand(
     int? SchemaVersion = null) : ICommand<Result<ToolRegistrationDto>>;
 
 [AuthorizeRequirement("AiGateway.ToolRegistry.Manage")]
-public sealed record DisableToolDefinitionCommand(string ToolCode) : ICommand<Result<ToolRegistrationDto>>;
+public sealed record DisableToolDefinitionCommand(string ToolCode)
+    : ICommand<Result<ToolRegistrationDto>>;

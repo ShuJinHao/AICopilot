@@ -11,7 +11,6 @@ import type {
   ChatMessage,
   FunctionCall,
   FunctionCallChunk,
-  IntentChunk,
   WidgetChunk
 } from '@/types/models'
 import type { ChatRunStatus } from '@/stores/sessionScopedState'
@@ -40,12 +39,6 @@ export interface RuntimeEventDetail {
   statusText: string
 }
 
-export interface RuntimeIntentDetail {
-  key: string
-  name: string
-  confidenceText: string
-}
-
 export interface RuntimeToolDetail {
   key: string
   name: string
@@ -67,7 +60,6 @@ export interface RuntimeDetails {
   status: RuntimeStatusDetail | null
   modelBadges: RuntimeTag[]
   events: RuntimeEventDetail[]
-  intents: RuntimeIntentDetail[]
   tools: RuntimeToolDetail[]
   widgets: RuntimeWidgetDetail[]
 }
@@ -363,21 +355,12 @@ function buildStatus(status: ChatRunStatus | null | undefined): RuntimeStatusDet
 function buildModelBadges(message: ChatMessage): RuntimeTag[] {
   const badges: RuntimeTag[] = []
   const finalModelName = message.finalModelName?.trim() || '未知'
-  const routingModelName = message.routingModelName?.trim()
 
   badges.push({
     key: 'final-model',
     tone: 'success',
     text: `回答模型：${finalModelName}`
   })
-
-  if (routingModelName) {
-    badges.push({
-      key: 'routing-model',
-      tone: 'blue',
-      text: `路由模型：${routingModelName}`
-    })
-  }
 
   if (typeof message.contextWindowTokens === 'number') {
     badges.push({
@@ -400,16 +383,8 @@ function buildModelBadges(message: ChatMessage): RuntimeTag[] {
 
 function agentEventLabel(stage: string) {
   switch (stage) {
-    case 'plan_draft_started':
-      return '计划草案开始'
-    case 'intent_understanding':
-      return '理解目标'
-    case 'capability_discovery':
-      return '发现能力'
-    case 'plan_draft_ready':
-      return '草案就绪'
-    case 'plan_draft_failed':
-      return '草案失败'
+    case 'agent_session_state':
+      return '会话状态'
     default:
       return stage
   }
@@ -423,16 +398,6 @@ function buildEvents(chunks: ChatChunk[]): RuntimeEventDetail[] {
       detail: formatAgentEventDetail(chunk.event),
       tone: chunk.event.recoverable ? 'blue' as const : 'warning' as const,
       statusText: chunk.event.recoverable ? '可继续' : '需关注'
-    }))
-}
-
-function buildIntents(chunks: ChatChunk[]): RuntimeIntentDetail[] {
-  return (chunks.filter((chunk) => chunk.type === ChunkType.Intent) as IntentChunk[])
-    .flatMap((chunk) => chunk.intents)
-    .map((intent, index) => ({
-      key: `${intent.intent}-${index}`,
-      name: intent.intent,
-      confidenceText: `${Math.round(intent.confidence * 100)}%`
     }))
 }
 
@@ -502,10 +467,12 @@ function summarizeWidget(chunk: WidgetChunk) {
     }
   }
 
+  const exhaustiveWidget: never = normalized
+  void exhaustiveWidget
   return {
-    typeLabel: widgetTypeLabel(normalized.type),
-    title: normalized.title || '结构化展示',
-    summary: normalized.description || '组件载荷已记录'
+    typeLabel: '组件',
+    title: '结构化展示',
+    summary: '组件载荷已记录'
   }
 }
 
@@ -530,7 +497,6 @@ export function buildRuntimeDetails(
       status: null,
       modelBadges: [],
       events: [],
-      intents: [],
       tools: [],
       widgets: []
     }
@@ -539,7 +505,6 @@ export function buildRuntimeDetails(
   const statusDetail = buildStatus(status)
   const modelBadges = buildModelBadges(message)
   const events = buildEvents(message.chunks)
-  const intents = buildIntents(message.chunks)
   const tools = buildTools(message.chunks)
   const widgets = buildWidgets(message.chunks)
 
@@ -547,14 +512,12 @@ export function buildRuntimeDetails(
     status: statusDetail,
     modelBadges,
     events,
-    intents,
     tools,
     widgets,
     count:
       (statusDetail ? 1 : 0) +
       modelBadges.length +
       events.length +
-      intents.length +
       tools.length +
       widgets.length
   }
