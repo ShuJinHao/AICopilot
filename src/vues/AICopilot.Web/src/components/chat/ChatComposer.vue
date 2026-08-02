@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ListChecks, MessageCircle, Send } from 'lucide-vue-next'
+import { getChatModePresentation } from '@/protocol/chatPresentation'
 import { useChatStore } from '@/stores/chatStore'
 import { shouldResetComposerForSessionChange } from '@/utils/composerSession'
 
@@ -20,6 +21,7 @@ const isSubmissionBlocked = computed(
 const isSessionReady = computed(() =>
   Boolean(store.resolvedSessionId && !store.isSessionTransitionBlocked),
 )
+const modePresentation = computed(() => getChatModePresentation(store.agentMode))
 const composerPlaceholder = computed(() => {
   if (store.isAgentSessionUnavailable) {
     return '当前会话不可恢复，请新建会话'
@@ -31,9 +33,7 @@ const composerPlaceholder = computed(() => {
     return '正在确认待审批状态，可继续编辑'
   }
 
-  return store.agentMode === 'plan'
-    ? 'Plan 模式：描述目标，助手仅规划与整理待办'
-    : 'Execute 模式：输入问题，助手可按权限使用只读业务与知识工具'
+  return modePresentation.value.placeholder
 })
 const isSubmitDisabled = computed(
   () => !isSessionReady.value || !inputValue.value.trim() || isSubmissionBlocked.value,
@@ -86,7 +86,7 @@ watch(
 <template>
   <footer class="command-composer">
     <div class="composer-mode-bar">
-      <div class="mode-switch" role="group" aria-label="Harness Agent 运行模式">
+      <div class="mode-switch" role="group" aria-label="对话模式">
         <button
           type="button"
           :class="{ active: store.agentMode === 'plan' }"
@@ -107,7 +107,8 @@ watch(
         </button>
       </div>
       <span class="composer-context-line">
-        服务端权威模式：{{ store.agentMode === 'execute' ? 'Execute' : 'Plan' }} · Harness 主链
+        <strong>{{ modePresentation.shortLabel }}</strong>
+        {{ modePresentation.description }}
       </span>
     </div>
 

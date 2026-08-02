@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/services/apiClient'
 import {
+  createChatErrorPresentation,
   resolveChatErrorMessage,
+  toChatErrorPresentation,
   toFriendlyMessage,
   useChatErrorStore,
 } from '@/stores/chatErrorStore'
@@ -21,7 +23,7 @@ describe('chatErrorStore', () => {
     ).toBe('custom approval message')
   })
 
-  it('keeps known error codes visible without exposing raw detail', () => {
+  it('keeps stable fallback messages for known error codes', () => {
     expect(
       resolveChatErrorMessage({
         code: 'tool_blocked',
@@ -53,32 +55,64 @@ describe('chatErrorStore', () => {
         code: 'tool_output_schema_invalid',
         detail: 'provider raw output must never be rendered',
       }),
-    ).toBe('工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。')
-
+    ).toBe(
+      '工具输出与注册契约不一致，本次执行未记为成功，结果不可用于后续审批或完成，请联系管理员检查工具配置。',
+    )
   })
 
   it('scopes active errors to the current session', () => {
     const store = useChatErrorStore()
 
     store.bindCurrentSession('session-1')
-    store.setSessionError('session-2', 'other session error')
+    store.setSessionError('session-2', {
+      code: 'other_session_error',
+      detail: 'other session detail',
+      userFacingMessage: 'other session error',
+    })
 
     expect(store.errorMessage).toBe('')
+    expect(store.errorPresentation).toBeNull()
 
-    store.setSessionError('session-1', 'current session error')
+    store.setSessionError('session-1', {
+      code: 'current_session_error',
+      detail: 'current session detail',
+      userFacingMessage: 'current session error',
+    })
     expect(store.errorMessage).toBe('current session error')
+    expect(store.errorPresentation).toEqual({
+      message: 'current session error',
+      code: 'current_session_error',
+      detail: 'current session detail',
+      userFacingMessage: 'current session error',
+    })
+
+    store.bindCurrentSession('session-2')
+    expect(store.errorPresentation).toBeNull()
 
     store.clearSessionError('session-1')
     expect(store.errorMessage).toBe('')
   })
 
-  it('does not expose backend detail for unknown error codes', () => {
+  it('keeps the fixed fallback for an unknown code while retaining its safe detail', () => {
     expect(
       resolveChatErrorMessage({
         code: 'unknown_backend_code',
         detail: '后端返回的真实失败原因',
       }),
     ).toBe('请求失败，请稍后重试。')
+
+    expect(
+      createChatErrorPresentation({
+        code: 'unknown_backend_code',
+        detail: '后端返回的安全失败原因',
+        userFacingMessage: '本次查询未完成。',
+      }),
+    ).toEqual({
+      message: '本次查询未完成。',
+      code: 'unknown_backend_code',
+      detail: '后端返回的安全失败原因',
+      userFacingMessage: '本次查询未完成。',
+    })
   })
 
   it('has explicit messages for model provider failures', () => {
@@ -121,6 +155,34 @@ describe('chatErrorStore', () => {
         }),
       ),
     ).toBe('Model provider unavailable')
+  })
+
+  it('preserves safe code, detail, and user-facing text from ApiError', () => {
+    expect(
+      toChatErrorPresentation(
+        new ApiError('API Error: 409', 409, {
+          code: 'agent_session_version_conflict',
+          detail: '会话版本已从 3 更新为 4。',
+          userFacingMessage: '会话状态已变化，请刷新后重试。',
+        }),
+      ),
+    ).toEqual({
+      message: '会话状态已变化，请刷新后重试。',
+      code: 'agent_session_version_conflict',
+      detail: '会话版本已从 3 更新为 4。',
+      userFacingMessage: '会话状态已变化，请刷新后重试。',
+    })
+
+    expect(
+      toChatErrorPresentation(
+        new ApiError('API Error: 400', 400, {
+          code: 'request_validation_failed',
+          detail: '请求字段校验未通过。',
+          userFacingMessage: '请检查输入后重试。',
+          errors: { Message: ['Message 不能为空。'] },
+        }),
+      ).detail,
+    ).toBe('请求字段校验未通过。；Message: Message 不能为空。')
   })
 
   it('does not expose raw ApiError messages', () => {

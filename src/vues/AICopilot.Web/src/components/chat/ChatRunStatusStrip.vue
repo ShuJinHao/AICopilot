@@ -7,10 +7,11 @@ const props = defineProps<{
   status: ChatRunStatus
 }>()
 
-const isRunning = computed(() =>
-  props.status.phase === 'understanding' ||
-  props.status.phase === 'querying' ||
-  props.status.phase === 'answering'
+const isRunning = computed(
+  () =>
+    props.status.phase === 'understanding' ||
+    props.status.phase === 'querying' ||
+    props.status.phase === 'answering',
 )
 const statusLabel = computed(() => {
   if (props.status.phase === 'failed') {
@@ -92,7 +93,7 @@ const facts = computed(() => {
   border: 1px solid rgba(63, 111, 115, 0.16);
   border-radius: 12px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: color-mix(in srgb, var(--ai-surface) 82%, var(--ai-surface-soft));
   color: var(--ai-text-muted);
   box-shadow: var(--ai-shadow-xs);
   font-size: 12px;
@@ -128,7 +129,7 @@ const facts = computed(() => {
 
 .phase-failed {
   border-color: rgba(180, 35, 24, 0.18);
-  background: rgba(254, 242, 242, 0.88);
+  background: color-mix(in srgb, var(--app-danger) 8%, var(--ai-surface));
 }
 
 .phase-failed .run-icon {

@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
-  UserRound
+  UserRound,
 } from 'lucide-vue-next'
 import AiTooltip from '@/components/ai/AiTooltip.vue'
 import BuildIdentityFacts from '@/components/layout/BuildIdentityFacts.vue'
@@ -36,8 +36,8 @@ const { t } = useI18n()
 
 const cloudPlatformUrl = (import.meta.env.VITE_CLOUD_PLATFORM_URL as string | undefined) || ''
 const activePath = computed(() => route.path)
-const chatNavigationLocked = computed(() =>
-  activePath.value === '/chat' && chatStore.isSessionTransitionBlocked
+const chatNavigationLocked = computed(
+  () => activePath.value === '/chat' && chatStore.isSessionTransitionBlocked,
 )
 const userInitial = computed(() => (authStore.userName || 'A').slice(0, 1).toUpperCase())
 
@@ -47,11 +47,21 @@ const navigationItems = computed<NavigationItem[]>(() => {
       ? { path: '/chat', label: t('nav.chat'), description: '会话、审批、分析结果', icon: Bot }
       : null,
     authStore.canViewConfig
-      ? { path: '/config', label: t('nav.config'), description: '模型、MCP、数据源', icon: Settings2 }
+      ? {
+          path: '/config',
+          label: t('nav.config'),
+          description: '模型、MCP、数据源',
+          icon: Settings2,
+        }
       : null,
     authStore.canManageKnowledge
-      ? { path: '/knowledge', label: t('nav.knowledge'), description: '文档、向量、检索', icon: BookOpen }
-      : null
+      ? {
+          path: '/knowledge',
+          label: t('nav.knowledge'),
+          description: '文档、向量、检索',
+          icon: BookOpen,
+        }
+      : null,
   ]
 
   return items.filter((item): item is NavigationItem => item !== null)
@@ -133,14 +143,25 @@ async function logout() {
         </AiTooltip>
 
         <AiTooltip :content="t('nav.theme')">
-          <button class="dock-button" type="button" :aria-label="t('nav.theme')" @click="toggleTheme()">
+          <button
+            class="dock-button"
+            type="button"
+            :aria-label="t('nav.theme')"
+            @click="toggleTheme()"
+          >
             <Moon v-if="!isDark" :size="20" stroke-width="2.3" />
             <Sun v-else :size="20" stroke-width="2.3" />
           </button>
         </AiTooltip>
 
         <AiTooltip :content="t('nav.logout')">
-          <button class="dock-button" type="button" :disabled="chatNavigationLocked" :aria-label="t('nav.logout')" @click="logout">
+          <button
+            class="dock-button"
+            type="button"
+            :disabled="chatNavigationLocked"
+            :aria-label="t('nav.logout')"
+            @click="logout"
+          >
             <LogOut :size="20" stroke-width="2.3" />
           </button>
         </AiTooltip>
@@ -240,7 +261,11 @@ async function logout() {
   height: 48px;
   border: 0;
   cursor: pointer;
-  transition: transform 0.18s ease, background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .dock-button:hover:not(:disabled) {
@@ -408,13 +433,28 @@ html.dark .dock-button.active {
   }
 
   .ai-topbar {
-    align-items: flex-start;
-    flex-direction: column;
-    padding: 18px 20px 10px;
+    min-height: 72px;
+    flex-wrap: wrap;
+    padding: 14px 20px 10px;
+  }
+
+  .topbar-copy strong {
+    font-size: 22px;
+  }
+
+  .topbar-status {
+    flex-wrap: wrap;
   }
 
   .ai-content-main {
     padding: 0 18px 18px;
+  }
+}
+
+@media (max-width: 820px) {
+  .ai-topbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

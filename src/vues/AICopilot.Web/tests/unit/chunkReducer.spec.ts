@@ -45,11 +45,7 @@ describe('chunkReducer current Harness protocol', () => {
     const message = createMessage()
     const content = JSON.stringify({ type: 'Chart', data: [{ secret: 'model-authored' }] })
 
-    processChunk(
-      message,
-      { source: 'HarnessAgent', type: ChunkType.Text, content },
-      callbacks(),
-    )
+    processChunk(message, { source: 'HarnessAgent', type: ChunkType.Text, content }, callbacks())
 
     expect(message.chunks).toContainEqual(
       expect.objectContaining({ type: ChunkType.Text, content }),
@@ -227,7 +223,7 @@ describe('chunkReducer current Harness protocol', () => {
     ).toBeNull()
   })
 
-  it('shows backend safe text and never renders an unknown raw error detail', () => {
+  it('renders the safe primary message and forwards complete safe error fields', () => {
     const safeMessage = createMessage()
     const safeHandlers = callbacks()
     processChunk(
@@ -253,7 +249,7 @@ describe('chunkReducer current Harness protocol', () => {
         type: ChunkType.Error,
         content: JSON.stringify({
           code: 'unknown_backend_code',
-          detail: 'SQL table dbo.SecretTable failed at /internal/model.',
+          detail: '工具调用未通过服务端安全校验。',
         }),
       },
       unknownHandlers,
@@ -261,6 +257,15 @@ describe('chunkReducer current Harness protocol', () => {
 
     expect(safeMessage.chunks[0]?.content).toBe('模型这次响应超时，请稍后重试。')
     expect(unknownMessage.chunks[0]?.content).toBe('请求失败，请稍后重试。')
-    expect(JSON.stringify(unknownMessage)).not.toContain('SecretTable')
+    expect(JSON.stringify(unknownMessage)).not.toContain('工具调用未通过服务端安全校验。')
+    expect(safeHandlers.setSessionError).toHaveBeenCalledWith('session-1', {
+      code: 'model_request_timeout',
+      detail: 'Model provider did not return in time.',
+      userFacingMessage: '模型这次响应超时，请稍后重试。',
+    })
+    expect(unknownHandlers.setSessionError).toHaveBeenCalledWith('session-1', {
+      code: 'unknown_backend_code',
+      detail: '工具调用未通过服务端安全校验。',
+    })
   })
 })

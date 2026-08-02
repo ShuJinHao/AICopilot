@@ -151,7 +151,7 @@ Cloud AiRead 设备契约：
 ## 8. 对话产品规则
 
 - 主产品形态是 Codex-like 对话流，不是任务控制台、试点运营台或系统调试台。
-- 普通用户默认只看到用户问题、AI 回答、Harness 模式、批准卡、inline Widget 和安全错误。
+- 普通用户默认只看到用户问题、AI 回答、Plan/Execute 产品模式、批准卡、inline Widget 和安全错误；不得显示“服务端权威”“Harness 主链”等实现术语。
 - 实际最终模型、工具调用、安全参数摘要、运行事件和风险细节默认折叠到运行详情。
 - 运行详情只能基于本轮 stream/history chunks、消息 metadata 和按会话隔离的运行状态生成安全摘要；不得作为批准、工具执行、Cloud 查询或 Widget 的权威状态源。
 - 运行详情不得展开 SQL 原文、连接串、密码、token、sourceName、表/视图名、endpoint、内部字段、原始工具结果行或未脱敏错误原文；工具参数和结果只能展示白名单业务过滤条件、查询次数、返回行数、截断状态、Widget 类型等安全事实。
@@ -159,6 +159,9 @@ Cloud AiRead 设备契约：
 - AI 对话中任何可能超过 1 秒的工具调用、DataAnalysis 或 Cloud 只读查询，必须有用户可见、按会话隔离的运行状态；状态只能来自本轮 stream/request/chunk/error/complete 执行事实，不得用假进度、假查询次数或假返回行数填充。
 - 前端必须完整展示后端错误契约中的 `code`、`detail`、`userFacingMessage` 和失败类 `AgentEvent` 详情；不得用泛化文案覆盖真实诊断信息。
 - 前端会话级运行状态必须按 Session 隔离；新建或切换会话时不得残留其他会话的运行状态、错误、批准或 Widget。
+- 批准卡只展示规范工具身份和与运行详情共用的白名单安全参数摘要，不得显示原始参数或“不再询问”；批准/拒绝提交后立即锁定，刷新后以 `/approval/pending` 为唯一权威。
+- `Interrupted` / `ResetRequired` 只提供明确的“新建会话”主操作，发送、模式切换和批准保持禁用，不得恢复或自动重放旧 turn。
+- 对话会话栏在窄屏使用抽屉；`1920×1080`、`1366×768`、`1024×768` 下工具栏、消息流和固定输入区不得重叠，触控操作命中区域不得小于 40px，light/dark token 必须同步维护。
 - 模型推理标签例如 `<mm:think>`、`<think>` 或裸 `mm:think` 不得出现在用户可见正文；如保留，只能进入默认折叠的运行详情。
 - `render_payload_json` 只能恢复稳定消息内容，例如文本、Widget 或错误结果；不得作为批准、工具调用或运行状态的权威来源。
 - 历史消息按 `Message.Sequence` 分页；`FunctionCall`、`FunctionResult`、`ApprovalRequest` 或 `Metadata` chunk 不得作为普通文本消息重新摊开。
@@ -169,6 +172,7 @@ Cloud AiRead 设备契约：
 - `Plan` 与 `Execute` 是同一服务端 `AgentSession` 的模式；新会话默认 `Plan`，模式切换只能通过 owner-only 且带 `expectedVersion` 的会话 API。
 - `Plan` 只向模型公开 Harness Todo 与 `mode_get`，不公开 Cloud、RAG、MCP、`BusinessQuery`、`KnowledgeQuery` 或其它业务工具。
 - `Execute` 可以直接回答，或调用经过当前用户、Session、权限、注册和安全元数据实时筛选的工具。
+- 空态文案和建议必须使用当前模式：`Plan` 只生成分析步骤和待办，`Execute` 才发起设备日志、状态、工序、版本等真实只读查询；建议操作不得隐式切换模式。
 - `BusinessQuery` 的查询确认键是 `SessionId`；追问改变设备、工序、日志级别、时间或数据源时必须重新确认，不得从旧回答文本反推事实。
 - 主回答的模型 provenance 只来自 Harness 实际创建的 `ConfigurationSnapshot`；请求不得临时指定最终模型。
 

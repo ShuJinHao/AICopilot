@@ -2,10 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PanelLeftOpen, RefreshCw, TriangleAlert, X } from 'lucide-vue-next'
 import AiTag from '@/components/ai/AiTag.vue'
+import {
+  getChatModePresentation,
+  requiresNewConversation,
+  resolveConversationStatus,
+} from '@/protocol/chatPresentation'
 import { useChatStore } from '@/stores/chatStore'
 import { useUiLayoutStore } from '@/stores/uiLayoutStore'
+import AgentSessionRecoveryNotice from './AgentSessionRecoveryNotice.vue'
 import ChatComposer from './ChatComposer.vue'
 import ChatEmptyState from './ChatEmptyState.vue'
+import ChatErrorBanner from './ChatErrorBanner.vue'
 import MessageItem from './MessageItem.vue'
 import SessionList from './SessionList.vue'
 
@@ -13,34 +20,50 @@ const store = useChatStore()
 const uiLayoutStore = useUiLayoutStore()
 
 const scrollContainer = ref<HTMLElement | null>(null)
-const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 1024 : false)
+const isNarrowViewport = ref(typeof window !== 'undefined' ? window.innerWidth <= 1100 : false)
 const sessionDrawerVisible = ref(false)
 const preserveScrollAnchor = ref(false)
 
 const currentTitle = computed(() => store.currentSession?.title || '新会话')
-const sessionStatusLabel = computed(() => {
-  if (store.isSessionActivating) return '初始化中'
-  if (store.agentSessionStatus === 'Interrupted') return '已中断'
-  if (store.isAgentSessionUnavailable) return '需重建'
-  if (store.agentSessionStatus === 'Running' && !store.isStreaming) return '中断检查'
-  if (!store.resolvedSessionId && store.errorMessage) return '不可用'
-  return store.isStreaming ? '生成中' : '就绪'
-})
-const sessionStatusTone = computed(() => {
-  if (store.isAgentSessionUnavailable) return 'danger'
-  return sessionStatusLabel.value === '就绪' ? 'success' : 'warning'
-})
-const agentModeLabel = computed(() =>
-  store.agentMode === 'execute' ? 'Execute · 执行' : 'Plan · 规划',
+const modePresentation = computed(() => getChatModePresentation(store.agentMode))
+const sessionStatus = computed(() =>
+  resolveConversationStatus({
+    isSessionActivating: store.isSessionActivating,
+    agentSessionStatus: store.agentSessionStatus,
+    agentSessionResetRequired: store.currentSession?.agentSessionResetRequired,
+    isStreaming: store.isStreaming,
+    hasPendingApproval: Boolean(
+      store.hasPendingApproval || store.currentSession?.hasPendingApproval,
+    ),
+    hasMessages: store.currentMessages.length > 0,
+    hasError: Boolean(store.errorPresentation),
+  }),
 )
+const unavailableStatus = computed<'Interrupted' | 'ResetRequired' | null>(() => {
+  if (
+    !requiresNewConversation(
+      store.agentSessionStatus,
+      store.currentSession?.agentSessionResetRequired,
+    )
+  ) {
+    return null
+  }
 
-async function createPlanFromSuggestion(text: string) {
+  return store.agentSessionStatus === 'Interrupted' ? 'Interrupted' : 'ResetRequired'
+})
+
+async function useSuggestion(text: string) {
   if (!store.resolvedSessionId || store.isSessionTransitionBlocked) {
     return
   }
 
   store.clearCurrentSessionError()
   await store.sendMessage(text)
+}
+
+async function createNewSession() {
+  if (store.isSessionTransitionBlocked) return
+  await store.createNewSession()
 }
 
 async function loadOlderMessages() {
@@ -73,8 +96,8 @@ async function scrollToBottom() {
 
 function handleResize() {
   if (typeof window === 'undefined') return
-  isMobile.value = window.innerWidth < 1024
-  if (!isMobile.value) {
+  isNarrowViewport.value = window.innerWidth <= 1100
+  if (!isNarrowViewport.value) {
     sessionDrawerVisible.value = false
   }
 }
@@ -115,7 +138,7 @@ onBeforeUnmount(() => {
     :class="{ 'session-rail-collapsed': uiLayoutStore.isSessionRailCollapsed }"
   >
     <aside
-      v-if="!isMobile"
+      v-if="!isNarrowViewport"
       class="session-rail"
       :class="{ collapsed: uiLayoutStore.isSessionRailCollapsed }"
     >
@@ -135,7 +158,7 @@ onBeforeUnmount(() => {
       <header class="canvas-header">
         <div class="title-zone">
           <button
-            v-if="isMobile"
+            v-if="isNarrowViewport"
             class="icon-button"
             type="button"
             aria-label="打开会话"
@@ -144,18 +167,17 @@ onBeforeUnmount(() => {
             <PanelLeftOpen :size="20" />
           </button>
           <div>
-            <p class="canvas-kicker">对话工作区</p>
+            <p class="canvas-kicker">AI 对话</p>
             <h1>{{ currentTitle }}</h1>
           </div>
         </div>
         <div class="canvas-toolbar">
-          <AiTag :tone="sessionStatusTone">
-            {{ sessionStatusLabel }}
+          <AiTag :tone="sessionStatus.tone">
+            {{ sessionStatus.label }}
           </AiTag>
           <AiTag :tone="store.agentMode === 'execute' ? 'blue' : 'teal'">
-            {{ agentModeLabel }}
+            {{ modePresentation.label }}
           </AiTag>
-          <AiTag tone="success">Harness 主链</AiTag>
           <button
             class="soft-action"
             type="button"
@@ -173,11 +195,15 @@ onBeforeUnmount(() => {
       </header>
 
       <div ref="scrollContainer" class="message-viewport">
-        <div v-if="store.errorMessage" class="canvas-error" role="alert">
-          <TriangleAlert :size="18" />
-          {{ store.errorMessage }}
-        </div>
-        <div v-if="store.agentSessionNotice" class="canvas-error" role="alert">
+        <ChatErrorBanner v-if="store.errorPresentation" :error="store.errorPresentation" />
+        <AgentSessionRecoveryNotice
+          v-if="unavailableStatus"
+          :status="unavailableStatus"
+          :message="store.agentSessionNotice"
+          :busy="store.isSessionTransitionBlocked"
+          @create-session="createNewSession"
+        />
+        <div v-else-if="store.agentSessionNotice" class="canvas-notice" role="status">
           <TriangleAlert :size="18" />
           {{ store.agentSessionNotice }}
         </div>
@@ -204,8 +230,13 @@ onBeforeUnmount(() => {
         </div>
 
         <ChatEmptyState
-          v-if="store.currentMessages.length === 0 && !store.isLoadingHistory"
-          @use-suggestion="createPlanFromSuggestion"
+          v-if="
+            store.currentMessages.length === 0 &&
+            !store.isLoadingHistory &&
+            !store.isAgentSessionUnavailable
+          "
+          :mode="modePresentation.mode"
+          @use-suggestion="useSuggestion"
         />
 
         <div class="message-list">

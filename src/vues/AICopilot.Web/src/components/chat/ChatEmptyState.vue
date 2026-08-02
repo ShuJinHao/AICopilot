@@ -1,29 +1,39 @@
 <script setup lang="ts">
-import { ChevronRight, Sparkles } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { ChevronRight, ListChecks, Search } from 'lucide-vue-next'
+import { getChatModePresentation, type ChatAgentMode } from '@/protocol/chatPresentation'
+
+const props = defineProps<{
+  mode: ChatAgentMode
+}>()
 
 const emit = defineEmits<{
   useSuggestion: [text: string]
 }>()
 
-const suggestions = [
-  '查看 DEV-001 最近 24 小时设备日志，并给出根因线索',
-  '查看 DEV-001 最后上报运行状态和心跳时间',
-  '列出工序主数据，并说明正式字段边界',
-  '列出 stable 通道、win-x64 运行时的已发布客户端版本'
-]
+const presentation = computed(() => getChatModePresentation(props.mode))
+const modeIcon = computed(() => (props.mode === 'plan' ? ListChecks : Search))
 </script>
 
 <template>
   <section class="empty-chat">
     <div class="empty-chat-copy">
-      <Sparkles :size="24" />
+      <span class="empty-mode-icon">
+        <component :is="modeIcon" :size="21" />
+      </span>
       <div>
-        <h2>直接开始对话</h2>
-        <p>输入问题后我会先直接回答；需要拆解步骤时，再手动切换到计划模式。</p>
+        <span class="empty-mode-label">{{ presentation.shortLabel }}</span>
+        <h2>{{ presentation.title }}</h2>
+        <p>{{ presentation.description }} 模式只会在你明确切换后改变。</p>
       </div>
     </div>
     <div class="suggestions">
-      <button v-for="item in suggestions" :key="item" type="button" @click="emit('useSuggestion', item)">
+      <button
+        v-for="item in presentation.suggestions"
+        :key="item"
+        type="button"
+        @click="emit('useSuggestion', item)"
+      >
         {{ item }}
         <ChevronRight :size="17" />
       </button>
