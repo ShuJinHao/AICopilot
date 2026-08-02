@@ -48,10 +48,11 @@
 - 直接写 Cloud 数据库。
 - 通过 MCP、Tool、Harness、后台任务或隐藏适配器间接调用 Cloud 写接口。
 
-Cloud tool 安全元数据只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 这一精确组合有效。`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失/动态无法静态证明的声明都必须 fail-closed；动态 MCP 的 enum、alias、描述或 endpoint 不能证明可信 NonCloud，server/tool 必须统一使用精确只读组合，并在聚合注册、runtime builder、Plan 能力发现和每次 MCP 执行时经过同一 `AiToolSafetyPolicy` 评估。runtime MCP tool 必须显式携带独立 canonical `ToolName`，缺失时直接阻断，禁止回退到 runtime `Name` 或其它 alias。
+Cloud tool 安全元数据只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 这一精确组合有效。`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失/动态无法静态证明的声明都必须 fail-closed；动态 MCP 的 enum、alias、描述或 endpoint 不能证明可信 NonCloud，server/tool 必须统一使用精确只读组合，并在聚合注册、runtime builder、Harness 工具发现和每次 MCP 执行时经过同一 `AiToolSafetyPolicy` 评估。runtime MCP tool 必须显式携带独立 canonical `ToolName`，缺失时直接阻断，禁止回退到 runtime `Name` 或其它 alias。
 
 Human-in-the-loop 不能把禁止的 Cloud 业务写入变成允许动作。
 当前默认不存在专门给 AICopilot 使用的云端写 API。
+Cloud/MES/ERP 写入、生产控制和越权访问的硬阻断不依赖 Plan / Execute；模型或用户切换行为模式不能改变身份、Tool Gate、`AiToolSafetyPolicy`、SQL AST guard、只读账号、MCP 治理或批准结论。
 
 Cloud AiRead 设备契约：
 
@@ -171,10 +172,12 @@ Cloud AiRead 设备契约：
 
 ### 8.1 Harness Plan / Execute 语义
 
-- `Plan` 与 `Execute` 是同一服务端 `AgentSession` 的模式；新会话默认 `Plan`。只有当前认证 owner 显式调用带 `expectedVersion` 的会话 API 才能切换模式。
-- `Plan` 始终只读，只向模型公开 Harness Todo 与 `mode_get`，不公开 Cloud、RAG、MCP、`BusinessQuery`、`KnowledgeQuery` 或其它业务工具。模型永远不能自行切换模式，`mode_set` 不得进入模型工具面。
-- `Execute` 可以直接回答，或调用经过当前用户、Session、权限、注册和安全元数据实时筛选的工具。
-- 空态文案和建议必须使用当前模式：`Plan` 只生成分析步骤和待办，`Execute` 才发起设备日志、状态、工序、版本等真实只读查询；建议操作不得隐式切换模式。
+- `Plan` 与 `Execute` 完全由官方 `AgentModeProvider` 持有并持久化在同一 `AgentSession`；新会话使用框架默认 `Plan`。模式是行为状态，不是安全隔离或授权边界，模式与授权正交。
+- `Plan` 用于交互式澄清、调查、调用受治理工具和形成 Todo；`Execute` 用于自主、连续地完成 Todo。两种模式看到的工具都必须先经过当前用户、Session、权限、注册、安全元数据和批准边界实时筛选，切换模式不得扩大或缩小用户权限、工具注册、数据边界或批准策略。
+- 模型保留官方 `mode_get` / `mode_set`。当前认证 owner 也可显式调用带 `expectedVersion` 的会话 API，并由该 API 调用官方 `SetModeAsync`；公开 API 是并列切换入口，不是唯一切换入口。
+- 空态文案和建议必须使用当前行为模式：`Plan` 建议澄清、调查和形成待办，`Execute` 建议连续完成待办；建议操作不得伪造权限变化或替用户隐式切换模式。
+- Harness 裁剪只允许使用官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。
+- MAF / Harness 升级必须作为独立 BOM 批次，核心包保持同版本；先核对官方 release notes 与公开 API，再运行真实框架合同测试。上游模式语义变化时跟随框架，不重造旧行为。
 - `BusinessQuery` 的查询确认键是 `SessionId`；追问改变设备、工序、日志级别、时间或数据源时必须重新确认，不得从旧回答文本反推事实。
 - 主回答的模型 provenance 只来自 Harness 实际创建的 `ConfigurationSnapshot`；请求不得临时指定最终模型。
 
