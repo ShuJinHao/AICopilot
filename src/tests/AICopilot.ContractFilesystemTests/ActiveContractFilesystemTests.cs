@@ -70,7 +70,7 @@ public sealed class ActiveContractFilesystemTests
     }
 
     [Fact]
-    public void AiAuthorityDocuments_ShouldKeepServerOwnedModeFallbackAndDurabilitySemantics()
+    public void AiAuthorityDocuments_ShouldKeepNativeMafModeFallbackAndDurabilitySemantics()
     {
         var root = FindRepositoryRoot();
         var agentInstructions = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
@@ -103,12 +103,36 @@ public sealed class ActiveContractFilesystemTests
         agentContract.Should().Contain(
             "`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner");
 
-        agentInstructions.Should().Contain("Plan 模式始终只读");
-        businessRules.Should().Contain("`Plan` 始终只读");
-        businessRules.Should().Contain("模型永远不能自行切换模式");
-        businessRules.Should().Contain("`mode_set` 不得进入模型工具面");
-        agentContract.Should().Contain("当前认证 owner 显式调用");
-        agentContract.Should().Contain("`mode_set` 永不进入模型工具面");
+        string[] retiredModeAuthorityMarkers =
+        [
+            "Plan 模式始终只读",
+            "`Plan` 始终只读",
+            "模型永远不能自行切换模式",
+            "模型不能自行切换模式",
+            "`mode_set` 不得进入模型工具面",
+            "`mode_set` 永不进入模型工具面",
+            "模式切换唯一入口",
+            "Execute-only 服务端工具",
+            "Plan 模式绝不公开",
+        ];
+        foreach (var marker in retiredModeAuthorityMarkers)
+        {
+            activeContractText.Should().NotContain(marker);
+        }
+
+        agentInstructions.Should().Contain("行为状态，不是安全隔离或授权边界");
+        agentInstructions.Should().Contain("模式与授权正交");
+        businessRules.Should().Contain(
+            "`Plan` 用于交互式澄清、调查、调用受治理工具和形成 Todo");
+        businessRules.Should().Contain("模型保留官方 `mode_get` / `mode_set`");
+        businessRules.Should().Contain("模式与授权正交");
+        agentContract.Should().Contain(
+            "`AgentModeProvider` 必须继续向模型提供 `mode_get` 与 `mode_set`");
+        agentContract.Should().Contain("该公开 API 不是唯一切换入口");
+        agentContract.Should().Contain("该业务安全边界不依赖 Plan / Execute");
+        agentContract.Should().Contain(
+            "官方 `HarnessAgentOptions`、`AgentModeProviderOptions`");
+        agentContract.Should().Contain("禁止 fork MAF、反射私有成员或复制模式状态机");
 
         agentContract.Should().Contain("AgentSession checkpoint 只用于会话连续性");
         agentContract.Should().Contain("不是 durable Tool checkpoint");
@@ -118,9 +142,15 @@ public sealed class ActiveContractFilesystemTests
         persistenceContract.Should().Contain(
             "不是 Agent durable 编排、Tool checkpoint");
 
-        roadmap.Should().Contain("源码架构已收口");
+        roadmap.Should().Contain("当前仍存在 `ToolSurfaceGuardChatClient`");
+        roadmap.Should().Contain("隐藏 `mode_set`、按模式过滤工具");
+        roadmap.Should().Contain("属于待退出兼容债");
+        roadmap.Should().Contain("MAF 原生模式尚未完成运行时对齐");
+        roadmap.Should().Contain("## 3. MAF 原生模式运行时退出门");
+        roadmap.Should().NotContain("MAF 原生模式已经收口");
+        roadmap.Should().Contain("源码已收口");
         roadmap.Should().Contain("生产状态继续保持“未验收”");
-        roadmap.Should().Contain("## 3. 候选验证退出门");
+        roadmap.Should().Contain("## 4. 候选验证退出门");
     }
 
     [Fact]

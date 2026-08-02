@@ -9,14 +9,15 @@
 - 对话运行时公开入口只保留 Session、消息历史、Chat、Agent mode 与 Harness tool approval。`/agent/task/**`、`/agent/approval/**`、`/workspace/**`、`/artifact/**`、`/upload/**`、`/approval-policy/**`、`session/timeline` 和 `session/safety-attestation` 当前必须不可达。
 - Harness 主聊天固定使用 `Microsoft.Agents.AI.Harness` / `Microsoft.Agents.AI` `1.16.0`，每轮最多 8 次模型调用。必须关闭 FileMemory、WebSearch、AgentSkills、BackgroundAgents、LoopEvaluators 与 compaction，不注册 FileAccessStore、Shell 或文件 Artifact；聊天只允许文本和服务端可信 inline Widget。
 - 模型端点、认证、配额、熔断和遥测由轻量 `IChatClient` 工厂负责，且作用于每一次真实模型调用。Text-to-SQL、分类和结构化生成直接使用轻量客户端，禁止嵌套 Harness；主聊天不得恢复 `Microsoft.Agents.AI.Workflows` 依赖。
-- `ToolSurfaceGuardChatClient` 是模型请求与模型工具调用的最内层边界：请求侧按服务端真实模式过滤工具并始终删除 `mode_set`；响应侧对未公开工具、伪造批准响应和模式不允许的调用 fail-closed。该边界不能依赖提示词。
+- Harness 裁剪只允许使用官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。MAF / Harness 升级必须作为独立 BOM 批次，核心包保持同版本；先核对官方 release notes 与公开 API，再运行真实框架合同测试，上游语义变化时跟随框架。
+- 当前 `ToolSurfaceGuardChatClient` 仍在请求侧按模式过滤工具并隐藏官方 `mode_set`，这是项目私有、待退出的兼容债，不是 MAF 原生能力或安全边界；后续运行时对齐批次必须移除这两项模式裁剪。它在本批仍承担未登记工具、伪造批准响应和多工具违约的 fail-closed 校验，但这些校验必须与模式无关。
 
 ### 1.1 Plan / Execute
 
-- `Plan` 与 `Execute` 是同一 Harness `AgentSession` 的服务端权威模式；新会话默认 `Plan`，不得映射为另一套任务状态机。
-- `Plan` 始终只读，只允许 Harness Todo 与 `mode_get`，不得向模型公开 Cloud、RAG、MCP、`BusinessQuery`、`KnowledgeQuery` 或其它外部/业务工具，也不得执行真实业务动作。
-- `Execute` 可以直接回答，或调用经过当前用户、当前会话和实时安全门禁筛选的工具。模式切换不能扩大注册表、权限、风险、批准或数据边界。
-- 模式切换唯一入口是当前认证 owner 显式调用 `PUT /api/aigateway/session/{sessionId}/agent-mode`，请求携带 `plan|execute` 与 `expectedVersion`，并通过 Harness 官方 `SetModeAsync` 修改。模型永远不能自行切换模式，`mode_set` 永不进入模型工具面；活跃 turn、待批准、Interrupted 或版本冲突必须拒绝。
+- `Plan` 与 `Execute` 完全由官方 `AgentModeProvider` 持有并持久化在同一 Harness `AgentSession`；新会话使用框架默认 `Plan`，不得映射为另一套任务状态机。
+- `Plan` 是交互式行为模式，用于澄清、调查、调用受治理工具和形成 Todo；`Execute` 是自主行为模式，用于连续完成 Todo。模式不是安全隔离或授权边界，模式与授权正交。
+- 官方 `AgentModeProvider` 必须继续向模型提供 `mode_get` 与 `mode_set`。当前认证 owner 也可调用 `PUT /api/aigateway/session/{sessionId}/agent-mode`，请求携带 `plan|execute` 与 `expectedVersion`，并通过官方 `SetModeAsync` 修改；该公开 API 不是唯一切换入口，活跃 turn、待批准、Interrupted 或版本冲突仍必须拒绝 API 写入。
+- 切换模式不得扩大或缩小用户权限、工具注册、数据边界、风险元数据或批准策略。模型在任一模式调用工具时，都必须通过相同的身份、Session、`MainChatToolGate`、`AiToolSafetyPolicy`、schema、参数摘要与批准门禁。
 
 ### 1.2 AgentSession 持久化
 
@@ -41,7 +42,7 @@
 
 ### 2.2 BusinessQuery
 
-- `BusinessQuery` 是服务端固定 Execute-only 工具，先校验 `AiGateway.Chat` 权限；Text-to-SQL 只可作为内部 fallback，绝不直接暴露给模型。
+- `BusinessQuery` 是服务端受治理工具，每次调用先校验 `AiGateway.Chat` 权限；模式不能授予或撤销该工具，Text-to-SQL 只可作为内部 fallback，绝不直接暴露给模型。
 - Cloud typed provider 是首选路径。`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner；只有同一 Cloud profile 返回 `Unsupported` 或 `Unavailable` 且全部服务端治理条件通过时，`BusinessQueryExecutor` 才自动进入受控 Text-to-SQL。模型既看不到 Text-to-SQL 工具，也不得决定或触发 fallback；`Success`、`Empty`、`NeedClarification`、`Unauthorized` 均不得 fallback。禁止跨源、Simulation、MCP 或隐藏 adapter fallback。
 - `Analysis.Recipe.*` 具体配方数据在语义规划器、provider、数据库和 fallback 之前即被拒绝。SQL 最终统一经过 profile-aware AST 只读门禁和只读数据库账号。
 - 模型只接收 bounded、脱敏的业务摘要和治理证据，不得接收 SQL、原始行、连接信息、内部 schema、provider raw output 或未授权字段。
@@ -57,7 +58,7 @@ Cloud 只读正式能力为：
 
 ### 2.3 KnowledgeQuery
 
-- `KnowledgeQuery(question, knowledgeBaseNames)` 是服务端固定 Execute-only 工具，同时校验 `AiGateway.Chat` 与 `Rag.SearchKnowledgeBase`；Plan 模式绝不公开。
+- `KnowledgeQuery(question, knowledgeBaseNames)` 是服务端受治理工具，每次调用同时校验 `AiGateway.Chat` 与 `Rag.SearchKnowledgeBase`；模式不能授予或撤销该工具。
 - 授权目录只能由服务端按当前用户实时生成。恰好一个授权知识库时可自动选择；存在多个知识库时，调用必须给出服务端授权目录中的精确名称。
 - 每个知识库最多返回 3 条，总计最多 12 条。模型只接收脱敏摘要、引用和治理证据，不得接收凭据、控制文本、原始向量结果或未授权内容。
 - 空问题、未知名称、无权名称、歧义名称、超出上限或检索失败必须 fail-closed，不能退化为跨库搜索、默认全选或暴露知识库存在性差异。
@@ -80,6 +81,7 @@ Cloud 只读正式能力为：
 
 - Harness、MCP、Tool、后台任务、直接 SQL 和隐藏 adapter 均不得创建、修改、删除、补录、审批、派发或触发 Cloud 业务数据。
 - Human-in-the-loop 不是 Cloud 业务写入授权。
+- Cloud/MES/ERP 写入、生产控制和越权访问由身份、`MainChatToolGate`、`AiToolSafetyPolicy`、SQL AST guard、只读账号与 MCP 治理永久阻断；该业务安全边界不依赖 Plan / Execute，`mode_set`、公开模式 API 或人工批准都不能改变结论。
 - 未来若需要 Cloud AI-facing 写接口，必须由用户明确批准新的跨仓库接口、权限、审计和回滚契约；不得在 AICopilot 内部先行实现。
 
 ## 5. 异常、日志与持久化
@@ -94,7 +96,7 @@ Cloud 只读正式能力为：
 
 - 普通 API、SSE、AgentEvent、Harness ApprovalRequest、Chat Error、OIDC、auth、RAG、Config 与 route guard 的失败必须进入可见错误栏、dialog 或安全 fallback，不得只写 console 或空 catch。
 - 前端错误栏完整展示后端 `code`、`userFacingMessage`、validation errors、安全 `detail` 与 `title`；未知 code 在缺少用户提示时使用固定 fallback，但仍保留后端安全诊断字段。
-- 新会话默认 `Plan`。空态建议必须随当前模式变化：`Plan` 只能建议规划步骤和待办，`Execute` 才能建议设备日志、状态、工序、版本等真实只读查询；点击建议不得自动切换模式。
+- 新会话默认 `Plan`。空态建议必须随当前行为模式变化：`Plan` 建议澄清、调查和形成待办，`Execute` 建议连续完成待办；点击建议不得自动切换模式，也不得暗示模式会改变权限或安全边界。
 - `Running`、等待批准、`Completed`、`Failed`、`Interrupted`、`ResetRequired` 必须由真实 Session、stream、pending approval 和 error 状态统一投影。`Interrupted` / `ResetRequired` 禁用发送、模式切换和批准，并只提供“新建会话”主操作，不得恢复或自动重放。
 - 批准卡只展示服务端返回的规范工具身份和白名单安全参数摘要；不得展开原始参数，不得提供 standing rule 或“不再询问”。提交批准或拒绝时按钮立即锁定，刷新后只以 `/api/aigateway/approval/pending` 恢复权威状态。
 - 运行详情默认折叠，只展示工具名、查询次数、返回行数、截断状态、Widget 类型、业务过滤条件和安全摘要；不得展示 SQL、连接信息、内部路径、原始结果行或未脱敏错误。
