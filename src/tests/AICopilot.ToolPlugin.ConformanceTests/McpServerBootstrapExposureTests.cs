@@ -81,7 +81,7 @@ public sealed class McpServerBootstrapExposureTests
     }
 
     [Fact]
-    public async Task StartAsync_ShouldOnlyExposeEnabledAllowlistedAdvisoryServers_AndFailClosedOnMissingOutputSchema()
+    public async Task StartAsync_ShouldOnlyExposeEnabledAllowlistedAdvisoryServers_WithClosedSchemas()
     {
         var exposedServer = new McpServerInfo(
             "advisory-mcp",
@@ -237,9 +237,12 @@ public sealed class McpServerBootstrapExposureTests
             var discoveredTools = await ((McpClient)clients.Single()).ListToolsAsync(
                 cancellationToken: CancellationToken.None);
             var discoveredDeviceLogs = discoveredTools.Single(tool => tool.Name == "queryDeviceLogs");
-            discoveredDeviceLogs.ReturnJsonSchema.Should().BeNull();
-            toolRepository.Items.Should().BeEmpty(
-                "MCP discovery without a closed output schema must not create an executable registry contract");
+            discoveredDeviceLogs.ProtocolTool.OutputSchema.Should().NotBeNull();
+            discoveredDeviceLogs.ProtocolTool.Annotations!.ReadOnlyHint.Should().BeTrue();
+            var registration = toolRepository.Items.Should().ContainSingle().Which;
+            registration.ToolCode.Should().Be("mcp__advisory_mcp__querydevicelogs");
+            registration.IsEnabled.Should().BeFalse();
+            registration.IsExecutableByAgent.Should().BeTrue();
         }
         finally
         {
@@ -247,6 +250,172 @@ public sealed class McpServerBootstrapExposureTests
             {
                 await client.DisposeAsync();
             }
+        }
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldFailClosed_WhenAllowlistedToolHasNoOutputSchema()
+    {
+        var server = new McpServerInfo(
+            "unstructured-mcp",
+            "server without schema-bound output",
+            McpTransportType.Stdio,
+            "dotnet",
+            string.Empty,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            ChatExposureMode.Advisory,
+            [
+                new McpAllowedTool(
+                    "queryUnstructured",
+                    ReadOnlyDeclared: true,
+                    McpReadOnlyHint: true,
+                    McpDestructiveHint: false)
+            ],
+            true);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentPlugin(registrar =>
+            registrar.RegisterPluginFromAssembly(typeof(DiagnosticAdvisorPlugin).Assembly));
+        using var provider = services.BuildServiceProvider();
+        await using var bootstrap = new TestMcpServerBootstrap(
+            new InMemoryReadRepository<McpServerInfo>([server]),
+            new TestMcpToolRegistryReadService(),
+            provider.GetRequiredService<AgentPluginLoader>(),
+            NullLogger<McpServerBootstrap>.Instance);
+
+        var clients = new List<IAsyncDisposable>();
+        await foreach (var client in bootstrap.StartAsync(CancellationToken.None))
+        {
+            clients.Add(client);
+        }
+
+        clients.Should().BeEmpty();
+        provider.GetRequiredService<AgentPluginLoader>()
+            .GetPlugin("unstructured-mcp")
+            .Should()
+            .BeNull();
+    }
+
+    [Fact]
+    public async Task StdioV2_ShouldDiscoverTypedAnnotations_AndReturnNaturalStructuredValue()
+    {
+        const string sentinelName = "AICOPILOT_MCP_SECRET_SENTINEL";
+        var originalSentinel = Environment.GetEnvironmentVariable(sentinelName);
+        Environment.SetEnvironmentVariable(sentinelName, "must-not-cross-stdio-boundary");
+        var serverAssembly = typeof(TestingMcpServerMarker).Assembly.Location;
+        var server = new McpServerInfo(
+            "stdio-v2-mcp",
+            "v2 stdio conformance server",
+            McpTransportType.Stdio,
+            "dotnet",
+            serverAssembly,
+            AiToolExternalSystemType.CloudReadOnly,
+            AiToolCapabilityKind.ReadOnlyQuery,
+            ChatExposureMode.Advisory,
+            [
+                new McpAllowedTool(
+                    "queryEcho",
+                    ReadOnlyDeclared: true,
+                    McpReadOnlyHint: true,
+                    McpDestructiveHint: false,
+                    McpIdempotentHint: true)
+            ],
+            true);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAgentPlugin(registrar =>
+            registrar.RegisterPluginFromAssembly(typeof(DiagnosticAdvisorPlugin).Assembly));
+        using var provider = services.BuildServiceProvider();
+        var loader = provider.GetRequiredService<AgentPluginLoader>();
+        var toolCode = AiToolIdentity.CreateRuntimeName(
+            AiToolTargetType.McpServer,
+            server.Name,
+            "queryEcho");
+        var bootstrap = new McpServerBootstrap(
+            new InMemoryReadRepository<McpServerInfo>([server]),
+            new TestMcpToolRegistryReadService(
+                new McpToolRegistryReadModel(
+                    toolCode,
+                    server.Name,
+                    "queryEcho",
+                    RuntimeAvailable: false,
+                    IsEnabled: true,
+                    RiskLevel: nameof(AiToolRiskLevel.High),
+                    RequiresApproval: true,
+                    RequiredPermission: "AiGateway.Mcp.Query",
+                    UpdatedAt: DateTimeOffset.UtcNow,
+                    AuditLevel: "Verbose",
+                    DataBoundary: "GovernedBusinessReadOnly",
+                    SchemaVersion: 7)),
+            loader,
+            NullLogger<McpServerBootstrap>.Instance);
+
+        var clients = new List<McpClient>();
+        try
+        {
+            await foreach (var discoveredClient in bootstrap.StartAsync(CancellationToken.None))
+            {
+                clients.Add(discoveredClient);
+            }
+
+            var client = clients.Should().ContainSingle().Which;
+            var tools = await client.ListToolsAsync(cancellationToken: CancellationToken.None);
+            var tool = tools.Should().ContainSingle(item => item.Name == "queryEcho").Which;
+            tool.ProtocolTool.InputSchema.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Object);
+            tool.ProtocolTool.OutputSchema.Should().NotBeNull();
+            tool.ProtocolTool.OutputSchema!.Value.GetProperty("type").GetString().Should().Be("string");
+            tool.ProtocolTool.Annotations!.ReadOnlyHint.Should().BeTrue();
+            tool.ProtocolTool.Annotations.DestructiveHint.Should().BeFalse();
+            tool.ProtocolTool.Annotations.IdempotentHint.Should().BeTrue();
+
+            var protocolResult = await tool.CallAsync(
+                new Dictionary<string, object?> { ["input"] = "v2" },
+                cancellationToken: CancellationToken.None);
+            protocolResult.StructuredContent.Should().NotBeNull();
+            protocolResult.StructuredContent!.Value.ValueKind
+                .Should().Be(System.Text.Json.JsonValueKind.String);
+            protocolResult.StructuredContent.Value.GetString().Should().Be("echo:v2");
+
+            var environmentTool = tools
+                .Should()
+                .ContainSingle(item => item.Name == "queryEnvironmentSentinel")
+                .Which;
+            var environmentResult = await environmentTool.CallAsync(
+                cancellationToken: CancellationToken.None);
+            environmentResult.StructuredContent!.Value.GetString().Should().Be(
+                "absent",
+                "the official Stdio transport must not inherit unapproved parent variables");
+
+            var runtimeTool = loader.GetPlugin("stdio-v2-mcp")!
+                .GetTools()!
+                .Should()
+                .ContainSingle()
+                .Which;
+            runtimeTool.Name.Should().Be(toolCode);
+            runtimeTool.RiskLevel.Should().Be(AiToolRiskLevel.High);
+            runtimeTool.RequiresApproval.Should().BeTrue();
+            runtimeTool.RequiredPermission.Should().Be("AiGateway.Mcp.Query");
+            runtimeTool.AuditLevel.Should().Be("Verbose");
+            runtimeTool.DataBoundary.Should().Be("GovernedBusinessReadOnly");
+            runtimeTool.SchemaVersion.Should().Be(7);
+            var runtimeResult = await runtimeTool.InvokeAsync!(
+                new AiToolInvocationContext(
+                    new Dictionary<string, object?> { ["input"] = "runtime" },
+                    Services: null,
+                    Context: null),
+                CancellationToken.None);
+            runtimeResult.Should().BeOfType<System.Text.Json.JsonElement>()
+                .Which.GetString().Should().Be("echo:runtime");
+        }
+        finally
+        {
+            foreach (var client in clients)
+            {
+                await client.DisposeAsync();
+            }
+
+            Environment.SetEnvironmentVariable(sentinelName, originalSentinel);
         }
     }
 

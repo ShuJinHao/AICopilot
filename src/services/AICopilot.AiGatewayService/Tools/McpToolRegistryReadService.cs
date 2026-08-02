@@ -47,6 +47,9 @@ public sealed class McpToolRegistryReadService(
             tool.RiskLevel.ToString(),
             tool.RequiresApproval,
             tool.RequiredPermission,
-            tool.UpdatedAt);
+            tool.UpdatedAt,
+            tool.AuditLevel.ToString(),
+            tool.DataBoundary.ToString(),
+            tool.SchemaVersion);
     }
 }

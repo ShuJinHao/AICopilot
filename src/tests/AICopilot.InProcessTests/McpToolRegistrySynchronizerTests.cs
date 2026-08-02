@@ -2,11 +2,102 @@ using AICopilot.HarnessTestKit;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Infrastructure.Mcp;
 using AICopilot.SharedKernel.Ai;
+using ModelContextProtocol.Protocol;
+using System.Text.Json;
 
 namespace AICopilot.InProcessTests;
 
 public sealed class McpToolRegistrySynchronizerTests
 {
+    [Fact]
+    public async Task McpToolRegistrySynchronizer_ShouldAcceptClosedScalarOutput_AndDisableDeletedTool()
+    {
+        var repository = new InMemoryRepository<ToolRegistration>();
+        var synchronizer = new McpToolRegistrySynchronizer(repository);
+
+        await synchronizer.UpsertDiscoveredToolsAsync(
+            "runtime-mcp",
+            [
+                new McpDiscoveredToolRegistration(
+                    "mcp__runtime_mcp__queryecho",
+                    "queryEcho",
+                    "Return a schema-bound scalar.",
+                    """{"type":"object","properties":{},"additionalProperties":false}""",
+                    """{"type":"string"}""",
+                    AiToolRiskLevel.Low)
+            ],
+            CancellationToken.None);
+
+        var tool = repository.Items.Should().ContainSingle().Which;
+        tool.OutputSchemaJson.Should().Be("""{"type":"string"}""");
+        tool.Update(
+            tool.DisplayName,
+            tool.Description,
+            tool.ProviderType,
+            tool.TargetType,
+            tool.TargetName,
+            tool.InputSchemaJson,
+            tool.OutputSchemaJson,
+            tool.RiskLevel,
+            tool.RequiredPermission,
+            tool.RequiresApproval,
+            isEnabled: true,
+            tool.TimeoutSeconds,
+            tool.AuditLevel,
+            DateTimeOffset.UtcNow);
+
+        await synchronizer.UpsertDiscoveredToolsAsync(
+            "runtime-mcp",
+            [],
+            CancellationToken.None);
+
+        tool.IsEnabled.Should().BeFalse();
+        tool.IsExecutableByAgent.Should().BeFalse();
+        tool.RequiresApproval.Should().BeTrue();
+    }
+
+    [Fact]
+    public void McpRuntimeToolContract_ShouldReturnRawClosedScalar_AndRejectUnknownShape()
+    {
+        using var schemaDocument = JsonDocument.Parse("""{"type":"string"}""");
+        using var scalarDocument = JsonDocument.Parse("\"schema-bound\"");
+        using var objectDocument = JsonDocument.Parse("""{"result":"legacy-wrapper"}""");
+
+        var accepted = McpRuntimeToolContract.ValidateStructuredResult(
+            schemaDocument.RootElement,
+            new CallToolResult
+            {
+                Content = [],
+                StructuredContent = scalarDocument.RootElement.Clone(),
+                IsError = false
+            });
+        var rejected = McpRuntimeToolContract.ValidateStructuredResult(
+            schemaDocument.RootElement,
+            new CallToolResult
+            {
+                Content = [],
+                StructuredContent = objectDocument.RootElement.Clone(),
+                IsError = false
+            });
+        var missing = McpRuntimeToolContract.ValidateStructuredResult(
+            schemaDocument.RootElement,
+            new CallToolResult { Content = [], IsError = false });
+        var remoteError = McpRuntimeToolContract.ValidateStructuredResult(
+            schemaDocument.RootElement,
+            new CallToolResult
+            {
+                Content = [],
+                StructuredContent = scalarDocument.RootElement.Clone(),
+                IsError = true
+            });
+
+        accepted.IsValid.Should().BeTrue();
+        accepted.Value!.Value.GetString().Should().Be("schema-bound");
+        rejected.IsValid.Should().BeFalse();
+        missing.IsValid.Should().BeFalse();
+        remoteError.IsValid.Should().BeFalse();
+    }
+
     [Fact]
     public async Task McpToolRegistrySynchronizer_ShouldRejectInvalidSchemaBeforeRegistration_AndDisablePriorVersion()
     {
@@ -118,7 +209,7 @@ public sealed class McpToolRegistrySynchronizerTests
             tool.TargetName,
             tool.InputSchemaJson,
             tool.OutputSchemaJson,
-            AiToolRiskLevel.Low,
+            AiToolRiskLevel.High,
             "AiGateway.ToolRegistry.Manage",
             requiresApproval: false,
             isEnabled: true,
@@ -145,7 +236,9 @@ public sealed class McpToolRegistrySynchronizerTests
         tool.RequiredPermission.Should().Be("AiGateway.ToolRegistry.Manage");
         tool.AuditLevel.Should().Be(ToolAuditLevel.Verbose);
         tool.InputSchemaJson.Should().Contain("\"input\"");
-        tool.RiskLevel.Should().Be(AiToolRiskLevel.RequiresApproval);
+        tool.RiskLevel.Should().Be(
+            AiToolRiskLevel.High,
+            "rediscovery must preserve stricter administrator governance");
         tool.SchemaVersion.Should().Be(2);
         tool.CatalogVersion.Should().Be(2);
 
@@ -179,12 +272,14 @@ public sealed class McpToolRegistrySynchronizerTests
             ],
             CancellationToken.None);
 
-        tool.TargetName.Should().Be("replacement-mcp");
+        tool.TargetName.Should().Be(
+            "runtime-mcp",
+            "a supplied code cannot alias a different serverName + toolName identity");
         tool.RiskLevel.Should().Be(
-            AiToolRiskLevel.RequiresApproval,
+            AiToolRiskLevel.High,
             "risk precedence is explicit because AiToolRiskLevel enum values are not severity ordered");
-        tool.SchemaVersion.Should().Be(3);
-        tool.CatalogVersion.Should().Be(3);
+        tool.SchemaVersion.Should().Be(2, "a rejected alias must not churn the governed contract");
+        tool.CatalogVersion.Should().Be(2);
         tool.IsEnabled.Should().BeFalse();
         tool.IsExecutableByAgent.Should().BeFalse();
         tool.RequiresApproval.Should().BeTrue();

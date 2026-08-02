@@ -1,7 +1,6 @@
 using AICopilot.AgentPlugin;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.SharedKernel.Ai;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Client;
 
@@ -9,7 +8,7 @@ namespace AICopilot.Infrastructure.Mcp;
 
 internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
 {
-    public (McpClientTool Tool, McpAllowedTool Exposure)[] SelectExposedTools(
+    public McpRuntimeToolCandidate[] SelectExposedTools(
         McpServerInfo mcpServerInfo,
         IEnumerable<McpClientTool> tools)
     {
@@ -18,30 +17,25 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
             StringComparer.OrdinalIgnoreCase);
 
         return tools
+            .GroupBy(tool => tool.Name, StringComparer.OrdinalIgnoreCase)
+            .Where(group => HasUniqueCanonicalIdentity(mcpServerInfo.Name, group))
+            .Select(group => group.Single())
             .Where(tool => allowlist.ContainsKey(tool.Name))
-            .Select(tool => (Tool: tool, Exposure: allowlist[tool.Name]))
-            .Where(candidate => CanExposeTool(mcpServerInfo, candidate.Exposure, candidate.Tool))
+            .Select(tool => TryCreateCandidate(mcpServerInfo, allowlist[tool.Name], tool))
+            .Where(candidate => candidate is not null)
+            .Cast<McpRuntimeToolCandidate>()
             .ToArray();
     }
 
     public GenericBridgePlugin BuildMcpPlugin(
         McpServerInfo mcpServerInfo,
-        IReadOnlyCollection<(McpClientTool Tool, McpAllowedTool Exposure)> mcpTools,
-        HashSet<string> protectedNames,
+        IReadOnlyCollection<McpRuntimeToolBinding> mcpTools,
         McpRuntimeClientHandle clientHandle)
     {
         var tools = mcpTools
-            .Select(candidate => ToToolDefinition(
+            .Select(binding => ToToolDefinition(
                 mcpServerInfo.Name,
-                candidate.Exposure.EffectiveExternalSystemType(mcpServerInfo.ExternalSystemType),
-                candidate.Exposure.EffectiveCapabilityKind(mcpServerInfo.CapabilityKind),
-                candidate.Exposure.EffectiveRiskLevel(mcpServerInfo.RiskLevel),
-                candidate.Exposure.ReadOnlyDeclared,
-                candidate.Exposure.McpReadOnlyHint ?? ReadMcpAnnotationHint(candidate.Tool, "ReadOnlyHint", "readOnlyHint"),
-                candidate.Exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(candidate.Tool, "DestructiveHint", "destructiveHint"),
-                candidate.Exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(candidate.Tool, "IdempotentHint", "idempotentHint"),
-                candidate.Tool,
-                protectedNames,
+                binding,
                 clientHandle))
             .ToArray();
 
@@ -54,21 +48,34 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
         };
     }
 
+    public McpRuntimeToolBinding[] BindGovernance(
+        string serverName,
+        IReadOnlyCollection<McpRuntimeToolCandidate> candidates,
+        IReadOnlyDictionary<string, McpRuntimeToolGovernance> governanceByCode)
+    {
+        return candidates
+            .Select(candidate =>
+            {
+                var toolCode = AiToolIdentity.CreateRuntimeName(
+                    AiToolTargetType.McpServer,
+                    serverName,
+                    candidate.Tool.Name);
+                var governance = governanceByCode.TryGetValue(toolCode, out var registered)
+                    ? registered
+                    : CreateDefaultGovernance(toolCode, candidate.RiskLevel);
+                return new McpRuntimeToolBinding(candidate, governance);
+            })
+            .ToArray();
+    }
+
     private static AiToolDefinition ToToolDefinition(
         string serverName,
-        AiToolExternalSystemType externalSystemType,
-        AiToolCapabilityKind capabilityKind,
-        AiToolRiskLevel riskLevel,
-        bool readOnlyDeclared,
-        bool? mcpReadOnlyHint,
-        bool? mcpDestructiveHint,
-        bool? mcpIdempotentHint,
-        McpClientTool tool,
-        HashSet<string> protectedNames,
+        McpRuntimeToolBinding binding,
         McpRuntimeClientHandle clientHandle)
     {
-        var requiresApproval = protectedNames.Contains(tool.Name)
-                               || riskLevel == AiToolRiskLevel.RequiresApproval;
+        var candidate = binding.Candidate;
+        var governance = binding.Governance;
+        var tool = candidate.Tool;
 
         return new AiToolDefinition
         {
@@ -79,31 +86,92 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
             TargetType = AiToolTargetType.McpServer,
             TargetName = serverName,
             ServerName = serverName,
-            RequiresApproval = requiresApproval,
-            ExternalSystemType = externalSystemType,
-            CapabilityKind = capabilityKind,
-            RiskLevel = riskLevel,
-            ReadOnlyDeclared = readOnlyDeclared,
-            McpReadOnlyHint = mcpReadOnlyHint,
-            McpDestructiveHint = mcpDestructiveHint,
-            McpIdempotentHint = mcpIdempotentHint,
-            JsonSchema = tool.JsonSchema.Clone(),
-            ReturnJsonSchema = tool.ReturnJsonSchema?.Clone(),
+            RequiresApproval = governance.RequiresApproval,
+            ExternalSystemType = candidate.ExternalSystemType,
+            CapabilityKind = candidate.CapabilityKind,
+            RiskLevel = governance.RiskLevel,
+            RequiredPermission = governance.RequiredPermission,
+            AuditLevel = governance.AuditLevel,
+            DataBoundary = governance.DataBoundary,
+            SchemaVersion = governance.SchemaVersion,
+            ReadOnlyDeclared = candidate.Exposure.ReadOnlyDeclared,
+            McpReadOnlyHint = candidate.McpReadOnlyHint,
+            McpDestructiveHint = candidate.McpDestructiveHint,
+            McpIdempotentHint = candidate.McpIdempotentHint,
+            JsonSchema = candidate.InputSchema.Clone(),
+            ReturnJsonSchema = candidate.OutputSchema.Clone(),
             InvokeAsync = async (context, cancellationToken) =>
             {
                 using var invocation = clientHandle.AcquireInvocation();
-                var argumentValues = context.Arguments.ToDictionary(
-                    item => item.Key,
-                    item => item.Value,
-                    StringComparer.OrdinalIgnoreCase);
-                var arguments = new AIFunctionArguments(argumentValues);
+                var safety = AiToolSafetyPolicy.EvaluateConfiguredMcp(
+                    new AiToolConfiguredMcpMetadata(
+                        candidate.Exposure.ReadOnlyDeclared,
+                        candidate.McpReadOnlyHint,
+                        candidate.McpDestructiveHint,
+                        candidate.McpIdempotentHint,
+                        candidate.CapabilityKind,
+                        candidate.ExternalSystemType,
+                        governance.RiskLevel),
+                    tool.Name,
+                    tool.Description,
+                    candidate.InputSchema,
+                    candidate.OutputSchema);
+                if (!safety.IsAllowed)
+                {
+                    throw new InvalidOperationException(
+                        "MCP tool execution was blocked by the shared safety policy.");
+                }
 
-                return await tool.InvokeAsync(arguments, cancellationToken);
+                var validatedArguments = McpRuntimeToolContract.ValidateArguments(
+                    candidate,
+                    context.Arguments);
+                if (!validatedArguments.IsValid || validatedArguments.Value is not { } argumentsElement)
+                {
+                    throw new InvalidOperationException(
+                        validatedArguments.Error ?? "MCP tool arguments failed governed validation.");
+                }
+
+                var arguments = argumentsElement
+                    .EnumerateObject()
+                    .ToDictionary(
+                        property => property.Name,
+                        property => (object?)property.Value.Clone(),
+                        StringComparer.Ordinal);
+                var result = await tool.CallAsync(
+                    arguments,
+                    progress: null,
+                    options: null,
+                    cancellationToken);
+                var validatedResult = McpRuntimeToolContract.ValidateStructuredResult(candidate, result);
+                if (!validatedResult.IsValid || validatedResult.Value is not { } output)
+                {
+                    throw new InvalidOperationException(
+                        validatedResult.Error ?? "MCP tool output failed governed validation.");
+                }
+
+                return output;
             }
         };
     }
 
-    private bool CanExposeTool(McpServerInfo server, McpAllowedTool exposure, McpClientTool tool)
+    private static McpRuntimeToolGovernance CreateDefaultGovernance(
+        string toolCode,
+        AiToolRiskLevel riskLevel)
+    {
+        return new McpRuntimeToolGovernance(
+            toolCode,
+            riskLevel,
+            riskLevel is AiToolRiskLevel.RequiresApproval or AiToolRiskLevel.High or AiToolRiskLevel.Critical,
+            RequiredPermission: null,
+            AuditLevel: "Standard",
+            DataBoundary: "NoData",
+            SchemaVersion: 1);
+    }
+
+    private McpRuntimeToolCandidate? TryCreateCandidate(
+        McpServerInfo server,
+        McpAllowedTool exposure,
+        McpClientTool tool)
     {
         var targetDecision = AiToolSafetyPolicy.EvaluateConfiguredMcpTarget(
             server.ExternalSystemType,
@@ -115,42 +183,25 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
                 server.Name,
                 tool.Name,
                 string.Join("; ", targetDecision.BlockReasons));
-            return false;
+            return null;
         }
 
-        var externalSystemType = exposure.EffectiveExternalSystemType(server.ExternalSystemType);
-        var capabilityKind = exposure.EffectiveCapabilityKind(server.CapabilityKind);
-        var riskLevel = exposure.EffectiveRiskLevel(server.RiskLevel);
-        var readOnlyDeclared = exposure.ReadOnlyDeclared;
-        var mcpReadOnlyHint = exposure.McpReadOnlyHint ?? ReadMcpAnnotationHint(tool, "ReadOnlyHint", "readOnlyHint");
-        var mcpDestructiveHint = exposure.McpDestructiveHint ?? ReadMcpAnnotationHint(tool, "DestructiveHint", "destructiveHint");
-        var mcpIdempotentHint = exposure.McpIdempotentHint ?? ReadMcpAnnotationHint(tool, "IdempotentHint", "idempotentHint");
-        var safetyMetadata = new AiToolConfiguredMcpMetadata(
-            readOnlyDeclared,
-            mcpReadOnlyHint,
-            mcpDestructiveHint,
-            mcpIdempotentHint,
-            capabilityKind,
-            externalSystemType,
-            riskLevel);
-        var decision = AiToolSafetyPolicy.EvaluateConfiguredMcp(
-            safetyMetadata,
-            tool.Name,
-            tool.Description,
-            tool.JsonSchema,
-            tool.ReturnJsonSchema);
-
-        if (decision.IsAllowed)
+        if (McpRuntimeToolContract.TryCreateCandidate(
+                server,
+                exposure,
+                tool,
+                out var candidate,
+                out var error))
         {
             logger.LogInformation(
                 "MCP server {ServerName} tool {ToolName} passed safety policy. RuntimeName={RuntimeName}; ReadOnlyDeclared={ReadOnlyDeclared}; McpReadOnlyHint={McpReadOnlyHint}; McpDestructiveHint={McpDestructiveHint}",
                 server.Name,
                 tool.Name,
                 AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, server.Name, tool.Name),
-                readOnlyDeclared,
-                mcpReadOnlyHint,
-                mcpDestructiveHint);
-            return true;
+                candidate!.Exposure.ReadOnlyDeclared,
+                candidate.McpReadOnlyHint,
+                candidate.McpDestructiveHint);
+            return candidate;
         }
 
         logger.LogWarning(
@@ -158,33 +209,23 @@ internal sealed class McpRuntimeToolPluginBuilder(ILogger logger)
             server.Name,
             tool.Name,
             AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, server.Name, tool.Name),
-            string.Join("; ", decision.BlockReasons));
-        return false;
-    }
-
-    private static bool? ReadMcpAnnotationHint(McpClientTool tool, params string[] propertyNames)
-    {
-        var annotations = tool.GetType().GetProperty("Annotations")?.GetValue(tool);
-        if (annotations is null)
-        {
-            return ReadBooleanProperty(tool, propertyNames);
-        }
-
-        return ReadBooleanProperty(annotations, propertyNames) ?? ReadBooleanProperty(tool, propertyNames);
-    }
-
-    private static bool? ReadBooleanProperty(object target, params string[] propertyNames)
-    {
-        var type = target.GetType();
-        foreach (var propertyName in propertyNames)
-        {
-            var property = type.GetProperty(propertyName);
-            if (property?.GetValue(target) is bool value)
-            {
-                return value;
-            }
-        }
-
+            error ?? "governed_contract_invalid");
         return null;
+    }
+
+    private bool HasUniqueCanonicalIdentity(
+        string serverName,
+        IGrouping<string, McpClientTool> tools)
+    {
+        if (tools.Count() == 1)
+        {
+            return true;
+        }
+
+        logger.LogWarning(
+            "MCP server {ServerName} returned duplicate tool identity {ToolName}; every duplicate was blocked.",
+            serverName,
+            tools.Key);
+        return false;
     }
 }

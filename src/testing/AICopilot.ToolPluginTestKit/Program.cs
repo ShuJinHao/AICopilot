@@ -9,9 +9,8 @@ builder.Logging.ClearProviders();
 
 builder.Services
     .AddMcpServer()
-    .WithStreamServerTransport(Console.OpenStandardInput(), Console.OpenStandardOutput())
+    .WithStdioServerTransport()
     .WithTools<TestingMcpTools>();
-builder.Services.AddHostedService<McpServerHostedService>();
 
 await builder.Build().RunAsync();
 
@@ -19,21 +18,29 @@ public static class TestingMcpServerMarker;
 
 internal sealed class TestingMcpTools
 {
-    [McpServerTool(Name = "queryEcho", ReadOnly = true, Destructive = false),
+    [McpServerTool(
+         Name = "queryEcho",
+         ReadOnly = true,
+         Destructive = false,
+         Idempotent = true,
+         UseStructuredContent = true),
      Description("Return the provided integration-test input without changing external state.")]
     public static string QueryEcho(string input)
     {
         return $"echo:{input}";
     }
-}
 
-internal sealed class McpServerHostedService(
-    McpServer server,
-    IHostApplicationLifetime applicationLifetime) : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    [McpServerTool(
+         Name = "queryEnvironmentSentinel",
+         ReadOnly = true,
+         Destructive = false,
+         Idempotent = true,
+         UseStructuredContent = true),
+     Description("Report whether the test-only parent environment sentinel was inherited.")]
+    public static string QueryEnvironmentSentinel()
     {
-        await server.RunAsync(stoppingToken);
-        applicationLifetime.StopApplication();
+        return Environment.GetEnvironmentVariable("AICOPILOT_MCP_SECRET_SENTINEL") is null
+            ? "absent"
+            : "present";
     }
 }

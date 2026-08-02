@@ -32,6 +32,7 @@ public sealed class McpRuntimeRegistration(
     Guid serverId,
     string serverName,
     uint rowVersion,
+    string toolSchemaFingerprint,
     IAgentPlugin plugin,
     McpRuntimeClientHandle clientHandle)
     : IAsyncDisposable
@@ -41,6 +42,8 @@ public sealed class McpRuntimeRegistration(
     public string ServerName { get; } = serverName;
 
     public uint RowVersion { get; } = rowVersion;
+
+    public string ToolSchemaFingerprint { get; } = toolSchemaFingerprint;
 
     public IAgentPlugin Plugin { get; } = plugin;
 
@@ -181,17 +184,42 @@ public sealed class McpRuntimeRegistrySynchronizer(
 
         foreach (var candidate in candidatesByName.Values)
         {
-            if (activeRegistrations.TryGetValue(candidate.Name, out var existing)
-                && existing.ServerId == candidate.ServerId
-                && existing.RowVersion == candidate.RowVersion)
+            McpRuntimeRegistration? replacement;
+            try
             {
+                replacement = await registrationProvider.CreateRegistrationAsync(
+                    candidate,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                await RemoveRegistrationAsync(candidate.Name);
+                logger.LogWarning(
+                    "MCP runtime discovery failed for {Name}; the stale registration was withdrawn. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                    candidate.Name,
+                    ex.GetType().Name);
                 continue;
             }
 
-            var replacement = await registrationProvider.CreateRegistrationAsync(candidate, cancellationToken);
             if (replacement is null)
             {
                 await RemoveRegistrationAsync(candidate.Name);
+                continue;
+            }
+
+            if (activeRegistrations.TryGetValue(candidate.Name, out var existing)
+                && existing.ServerId == replacement.ServerId
+                && existing.RowVersion == replacement.RowVersion
+                && string.Equals(
+                    existing.ToolSchemaFingerprint,
+                    replacement.ToolSchemaFingerprint,
+                    StringComparison.Ordinal))
+            {
+                await DisposeRegistrationAsync(replacement);
                 continue;
             }
 

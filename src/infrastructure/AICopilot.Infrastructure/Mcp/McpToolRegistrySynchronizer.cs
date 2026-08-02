@@ -19,17 +19,62 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
         IReadOnlyCollection<McpDiscoveredToolRegistration> tools,
         CancellationToken cancellationToken)
     {
-        if (tools.Count == 0)
-        {
-            return;
-        }
-
         var now = DateTimeOffset.UtcNow;
+        var discoveredToolCodes = tools
+            .Select(tool => tool.ToolCode)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var existingTools = await toolRepository.GetListAsync(
+            item => (item.ProviderType == ToolProviderType.Mcp &&
+                     item.TargetType == ToolRegistrationTargetType.McpServer &&
+                     item.TargetName == serverName) ||
+                    discoveredToolCodes.Contains(item.ToolCode),
+            cancellationToken);
+        var existingByCode = existingTools.ToDictionary(
+            item => item.ToolCode,
+            StringComparer.Ordinal);
+        var discoveredCodes = new HashSet<string>(StringComparer.Ordinal);
+        var hasChanges = false;
+
         foreach (var discoveredTool in tools)
         {
-            var existing = await toolRepository.GetAsync(
-                item => item.ToolCode == discoveredTool.ToolCode,
-                cancellationToken: cancellationToken);
+            if (!discoveredCodes.Add(discoveredTool.ToolCode))
+            {
+                if (existingByCode.TryGetValue(discoveredTool.ToolCode, out var duplicateExisting) &&
+                    duplicateExisting.DisableForUnavailableContract(
+                        SelectConservativeRiskLevel(
+                            duplicateExisting.RiskLevel,
+                            discoveredTool.RiskLevel),
+                        now))
+                {
+                    toolRepository.Update(duplicateExisting);
+                    hasChanges = true;
+                }
+
+                continue;
+            }
+
+            existingByCode.TryGetValue(discoveredTool.ToolCode, out var existing);
+            var canonicalToolCode = AiToolIdentity.CreateRuntimeName(
+                AiToolTargetType.McpServer,
+                serverName,
+                discoveredTool.ToolName);
+            if (!string.Equals(
+                    discoveredTool.ToolCode,
+                    canonicalToolCode,
+                    StringComparison.Ordinal))
+            {
+                if (existing is not null && existing.DisableForUnavailableContract(
+                        SelectConservativeRiskLevel(existing.RiskLevel, discoveredTool.RiskLevel),
+                        now))
+                {
+                    toolRepository.Update(existing);
+                    hasChanges = true;
+                }
+
+                continue;
+            }
+
             var inputSchemaContract = ToolInputSchemaContractV1.Validate(discoveredTool.InputSchemaJson);
             var outputSchemaContract = ToolOutputSchemaContractV1.Validate(discoveredTool.OutputSchemaJson);
             if (!inputSchemaContract.IsValid || !outputSchemaContract.IsValid)
@@ -44,6 +89,7 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
                             now))
                     {
                         toolRepository.Update(existing);
+                        hasChanges = true;
                     }
                 }
 
@@ -71,16 +117,20 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
                     timeoutSeconds: 120,
                     ToolAuditLevel.Standard,
                     now));
+                hasChanges = true;
                 continue;
             }
 
+            var conservativeRiskLevel = SelectConservativeRiskLevel(
+                existing.RiskLevel,
+                discoveredTool.RiskLevel);
             var hasGovernedContractDrift =
                 existing.ProviderType != ToolProviderType.Mcp ||
                 existing.TargetType != ToolRegistrationTargetType.McpServer ||
                 !string.Equals(existing.TargetName, serverName, StringComparison.Ordinal) ||
                 !string.Equals(existing.InputSchemaJson, canonicalInputSchema, StringComparison.Ordinal) ||
                 !string.Equals(existing.OutputSchemaJson, canonicalOutputSchema, StringComparison.Ordinal) ||
-                existing.RiskLevel != discoveredTool.RiskLevel;
+                existing.RiskLevel != conservativeRiskLevel;
 
             if (hasGovernedContractDrift)
             {
@@ -92,7 +142,7 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
                     serverName,
                     canonicalInputSchema,
                     canonicalOutputSchema,
-                    SelectConservativeRiskLevel(existing.RiskLevel, discoveredTool.RiskLevel),
+                    conservativeRiskLevel,
                     existing.RequiredPermission,
                     requiresApproval: true,
                     isEnabled: false,
@@ -103,28 +153,52 @@ public sealed class McpToolRegistrySynchronizer(IRepository<ToolRegistration> to
                     schemaVersion: checked(existing.SchemaVersion + 1),
                     catalogVersion: checked(existing.CatalogVersion + 1));
                 toolRepository.Update(existing);
+                hasChanges = true;
                 continue;
             }
 
-            existing.Update(
-                BuildDisplayName(serverName, discoveredTool.ToolName),
-                BuildDescription(serverName, discoveredTool),
-                ToolProviderType.Mcp,
-                ToolRegistrationTargetType.McpServer,
-                serverName,
-                canonicalInputSchema,
-                canonicalOutputSchema,
-                existing.RiskLevel,
-                existing.RequiredPermission,
-                existing.RequiresApproval,
-                existing.IsEnabled,
-                existing.TimeoutSeconds,
-                existing.AuditLevel,
-                now);
-            toolRepository.Update(existing);
+            var displayName = BuildDisplayName(serverName, discoveredTool.ToolName);
+            var description = BuildDescription(serverName, discoveredTool);
+            if (!string.Equals(existing.DisplayName, displayName, StringComparison.Ordinal) ||
+                !string.Equals(existing.Description, description, StringComparison.Ordinal))
+            {
+                existing.Update(
+                    displayName,
+                    description,
+                    ToolProviderType.Mcp,
+                    ToolRegistrationTargetType.McpServer,
+                    serverName,
+                    canonicalInputSchema,
+                    canonicalOutputSchema,
+                    existing.RiskLevel,
+                    existing.RequiredPermission,
+                    existing.RequiresApproval,
+                    existing.IsEnabled,
+                    existing.TimeoutSeconds,
+                    existing.AuditLevel,
+                    now);
+                toolRepository.Update(existing);
+                hasChanges = true;
+            }
         }
 
-        await toolRepository.SaveChangesAsync(cancellationToken);
+        foreach (var staleTool in existingTools.Where(tool =>
+                     tool.ProviderType == ToolProviderType.Mcp &&
+                     tool.TargetType == ToolRegistrationTargetType.McpServer &&
+                     string.Equals(tool.TargetName, serverName, StringComparison.Ordinal) &&
+                     !discoveredCodes.Contains(tool.ToolCode)))
+        {
+            if (staleTool.DisableForUnavailableContract(staleTool.RiskLevel, now))
+            {
+                toolRepository.Update(staleTool);
+                hasChanges = true;
+            }
+        }
+
+        if (hasChanges)
+        {
+            await toolRepository.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private static AiToolRiskLevel SelectConservativeRiskLevel(

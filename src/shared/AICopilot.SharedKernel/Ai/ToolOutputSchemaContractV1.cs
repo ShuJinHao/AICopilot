@@ -30,7 +30,7 @@ public static class ToolOutputSchemaContractV1
     {
         version = ContractVersion,
         engine = ToolStrictSchemaEngineV1.EngineVersion,
-        rootType = "object",
+        rootType = "any-supported-json-type",
         supportedKeywords = ToolStrictSchemaEngineV1.SupportedSchemaKeywords
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray(),
@@ -69,7 +69,7 @@ public static class ToolOutputSchemaContractV1
         var result = ToolStrictSchemaEngineV1.ValidateDefinition(
             schemaJson,
             "Tool registry output schema",
-            requireObjectRoot: true);
+            requireObjectRoot: false);
         if (!result.IsValid)
         {
             return ToolOutputSchemaContractResult.Failure(result.Error!);

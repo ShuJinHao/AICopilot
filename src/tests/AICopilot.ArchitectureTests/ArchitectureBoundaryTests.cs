@@ -208,6 +208,70 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void McpSdk_ShouldStayOnStableGovernedV2Surface()
+    {
+        var mcpPackages = EnumeratePackageReferences(Path.Combine(SolutionRoot, "src"))
+            .Where(package => package.Include.StartsWith(
+                "ModelContextProtocol",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        mcpPackages.Should().ContainSingle();
+        mcpPackages[0].Include.Should().Be("ModelContextProtocol");
+        mcpPackages[0].Version.Should().Be("2.0.0");
+
+        var projectPolicyFiles = Directory
+            .EnumerateFiles(Path.Combine(SolutionRoot, "src"), "*.csproj", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(SolutionRoot, "src", "tests"),
+                "*.props",
+                SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(SolutionRoot, "Directory.*", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(SolutionRoot, ".github"),
+                "*.yml",
+                SearchOption.AllDirectories))
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(SolutionRoot, ".github"),
+                "*.yaml",
+                SearchOption.AllDirectories))
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(SolutionRoot, "scripts"),
+                "*.ps1",
+                SearchOption.AllDirectories));
+        var projectPolicyText = projectPolicyFiles
+            .Select(File.ReadAllText)
+            .ToArray();
+        string.Join('\n', projectPolicyText).Should()
+            .NotContain("MCP9005")
+            .And.NotContain("MCP9006")
+            .And.NotContain("MCP9007")
+            .And.NotContain("MCPEXP");
+
+        var mcpSourceDirectory = Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.Infrastructure",
+            "Mcp");
+        var runtimeSource = string.Join(
+            '\n',
+            Directory.EnumerateFiles(mcpSourceDirectory, "*.cs", SearchOption.TopDirectoryOnly)
+                .Select(File.ReadAllText));
+
+        runtimeSource.Should().Contain("HttpTransportMode.AutoDetect")
+            .And.Contain("InheritEnvironmentVariables = false")
+            .And.Contain("StdioClientTransportOptions.GetDefaultEnvironmentVariables()")
+            .And.Contain("protocolTool.Annotations")
+            .And.Contain("protocolTool.InputSchema")
+            .And.Contain("protocolTool.OutputSchema")
+            .And.Contain("ToolSchemaFingerprint");
+        runtimeSource.Should().NotContain("System.Reflection")
+            .And.NotContain("BindingFlags")
+            .And.NotContain("GetProperty(\"Annotations\"");
+    }
+
+    [Fact]
     public void ServiceProjects_ShouldNotReferenceSharpTokenPackage()
     {
         var violations = EnumeratePackageReferences(Path.Combine(SolutionRoot, "src", "services"))

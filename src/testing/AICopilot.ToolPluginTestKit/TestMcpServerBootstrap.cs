@@ -61,7 +61,6 @@ internal sealed class TestMcpServerBootstrap(
             .AddMcpServer()
             .WithStreamServerTransport(serverInput, serverOutput)
             .WithTools<InProcessTestingMcpTools>();
-        builder.Services.AddHostedService<InProcessMcpServerHostedService>();
 
         return builder.Build();
     }
@@ -107,27 +106,26 @@ internal sealed class TestMcpServerBootstrap(
         return (serverInput, clientOutput, serverOutput, clientInput);
     }
 
-    private sealed class InProcessMcpServerHostedService(
-        McpServer server,
-        IHostApplicationLifetime applicationLifetime) : BackgroundService
-    {
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            await server.RunAsync(stoppingToken);
-            applicationLifetime.StopApplication();
-        }
-    }
-
     private sealed class InProcessTestingMcpTools
     {
-        [McpServerTool(Name = "queryEcho", ReadOnly = true, Destructive = false),
+        [McpServerTool(
+             Name = "queryEcho",
+             ReadOnly = true,
+             Destructive = false,
+             Idempotent = true,
+             UseStructuredContent = true),
          Description("Return the provided integration-test input without changing external state.")]
         public static string QueryEcho(string input)
         {
             return $"echo:{input}";
         }
 
-        [McpServerTool(Name = "queryDeviceLogs", ReadOnly = true, Destructive = false),
+        [McpServerTool(
+             Name = "queryDeviceLogs",
+             ReadOnly = true,
+             Destructive = false,
+             Idempotent = true,
+             UseStructuredContent = true),
          Description("Query device logs without changing Cloud state.")]
         public static string QueryDeviceLogs()
         {
@@ -139,6 +137,13 @@ internal sealed class TestMcpServerBootstrap(
         public static string DeleteDevice()
         {
             return "unexpected";
+        }
+
+        [McpServerTool(Name = "queryUnstructured", ReadOnly = true, Destructive = false),
+         Description("Return text without a schema-bound structured result.")]
+        public static string QueryUnstructured()
+        {
+            return "unstructured";
         }
 
     }
