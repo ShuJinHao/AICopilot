@@ -44,7 +44,7 @@ const statusTone = computed(() => {
   if (props.chunk.status === 'pending') return 'warning'
   return 'neutral'
 })
-const approvalTitle = computed(() => '确认调用只读工具')
+const approvalTitle = computed(() => '确认调用受治理工具')
 
 function approve() {
   if (isPending.value && hasStrictIdentity.value && !controlsLocked.value) {

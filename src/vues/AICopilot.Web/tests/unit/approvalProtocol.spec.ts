@@ -64,6 +64,8 @@ describe('approvalProtocol', () => {
 
     expect(source).not.toContain('ArgumentViewer')
     expect(source).not.toContain('request.args')
+    expect(source).not.toContain('确认调用只读工具')
+    expect(source).toContain('确认调用受治理工具')
     expect(source).toContain('safeArgsSummary')
     expect(source).toContain('locallyLocked.value = true')
   })

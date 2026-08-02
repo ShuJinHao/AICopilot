@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useChatRunStatusStore, extractReturnedRowsFromFunctionResult } from '@/stores/chatRunStatusStore'
+import {
+  useChatRunStatusStore,
+  extractReturnedRowsFromFunctionResult,
+} from '@/stores/chatRunStatusStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { ChunkType } from '@/types/protocols'
 
@@ -19,7 +22,7 @@ function createSessionStorageMock() {
     },
     clear() {
       state.clear()
-    }
+    },
   }
 }
 
@@ -50,23 +53,47 @@ describe('chatRunStatusStore', () => {
       messageKey: 'message-1',
       phase: 'understanding',
       summary: '正在理解问题',
-      elapsedMs: 8000
+      elapsedMs: 8000,
     })
   })
 
-  it('maps function call chunks to querying phase', () => {
+  it('maps CloudReadOnly MCP calls to the Cloud read-only querying status', () => {
     const store = useChatRunStatusStore()
     store.startRun('session-1', 'message-1')
 
     store.advanceFromChunk('session-1', 'message-1', {
-      source: 'DataAnalysisExecutor',
+      source: 'HarnessAgent',
       type: ChunkType.FunctionCall,
-      content: JSON.stringify({ id: 'call-1', name: 'queryDeviceLogs', args: '{}' })
+      content: JSON.stringify({
+        id: 'call-1',
+        name: 'mcp__cloudreadonly__query_device_logs',
+        args: '{}',
+      }),
     })
 
     expect(store.getStatus('session-1', 'message-1')).toMatchObject({
       phase: 'querying',
-      summary: '正在查询 Cloud 只读数据'
+      summary: '正在查询 Cloud 只读数据',
+    })
+  })
+
+  it('maps Diagnostics plugin calls to the neutral governed-tool status', () => {
+    const store = useChatRunStatusStore()
+    store.startRun('session-1', 'message-1')
+
+    store.advanceFromChunk('session-1', 'message-1', {
+      source: 'HarnessAgent',
+      type: ChunkType.FunctionCall,
+      content: JSON.stringify({
+        id: 'call-1',
+        name: 'plugin__diagnostics__query_runtime_health',
+        args: '{}',
+      }),
+    })
+
+    expect(store.getStatus('session-1', 'message-1')).toMatchObject({
+      phase: 'querying',
+      summary: '正在调用受治理工具',
     })
   })
 
@@ -80,14 +107,14 @@ describe('chatRunStatusStore', () => {
       content: JSON.stringify({
         id: 'call-1',
         name: 'queryDeviceLogs',
-        result: JSON.stringify({ rows: [{ level: 'ERROR' }, { level: 'WARN' }] })
-      })
+        result: JSON.stringify({ rows: [{ level: 'ERROR' }, { level: 'WARN' }] }),
+      }),
     })
 
     expect(store.getStatus('session-1', 'message-1')).toMatchObject({
       phase: 'querying',
       queryCount: 1,
-      returnedRows: 2
+      returnedRows: 2,
     })
   })
 
@@ -98,12 +125,12 @@ describe('chatRunStatusStore', () => {
     store.advanceFromChunk('session-1', 'message-1', {
       source: 'HarnessAgent',
       type: ChunkType.Text,
-      content: '分析结论'
+      content: '分析结论',
     })
 
     expect(store.getStatus('session-1', 'message-1')).toMatchObject({
       phase: 'answering',
-      summary: '正在生成回答'
+      summary: '正在生成回答',
     })
   })
 
@@ -114,7 +141,7 @@ describe('chatRunStatusStore', () => {
 
     expect(store.getStatus('session-1', 'message-1')).toMatchObject({
       phase: 'completed',
-      summary: '回答已完成'
+      summary: '回答已完成',
     })
 
     store.startRun('session-1', 'message-2')
@@ -123,8 +150,8 @@ describe('chatRunStatusStore', () => {
       type: ChunkType.Error,
       content: JSON.stringify({
         code: 'data_analysis_failed',
-        userFacingMessage: 'DataAnalysis 查询失败'
-      })
+        userFacingMessage: 'DataAnalysis 查询失败',
+      }),
     })
     store.completeRun('session-1', 'message-2')
 
@@ -133,8 +160,8 @@ describe('chatRunStatusStore', () => {
       summary: 'DataAnalysis 查询失败',
       error: {
         code: 'data_analysis_failed',
-        message: 'DataAnalysis 查询失败'
-      }
+        message: 'DataAnalysis 查询失败',
+      },
     })
   })
 
@@ -161,22 +188,30 @@ describe('chatRunStatusStore', () => {
   })
 
   it('extracts row count only from structured function result facts', () => {
-    expect(extractReturnedRowsFromFunctionResult({
-      source: 'DataAnalysisExecutor',
-      type: ChunkType.FunctionResult,
-      content: JSON.stringify({ result: JSON.stringify({ rowCount: 20 }) })
-    })).toBe(20)
+    expect(
+      extractReturnedRowsFromFunctionResult({
+        source: 'DataAnalysisExecutor',
+        type: ChunkType.FunctionResult,
+        content: JSON.stringify({ result: JSON.stringify({ rowCount: 20 }) }),
+      }),
+    ).toBe(20)
 
-    expect(extractReturnedRowsFromFunctionResult({
-      source: 'DataAnalysisExecutor',
-      type: ChunkType.FunctionResult,
-      content: JSON.stringify({ result: JSON.stringify({ rows: [{ id: 1 }, { id: 2 }, { id: 3 }] }) })
-    })).toBe(3)
+    expect(
+      extractReturnedRowsFromFunctionResult({
+        source: 'DataAnalysisExecutor',
+        type: ChunkType.FunctionResult,
+        content: JSON.stringify({
+          result: JSON.stringify({ rows: [{ id: 1 }, { id: 2 }, { id: 3 }] }),
+        }),
+      }),
+    ).toBe(3)
 
-    expect(extractReturnedRowsFromFunctionResult({
-      source: 'DataAnalysisExecutor',
-      type: ChunkType.FunctionResult,
-      content: JSON.stringify({ result: '没有结构化行数' })
-    })).toBeUndefined()
+    expect(
+      extractReturnedRowsFromFunctionResult({
+        source: 'DataAnalysisExecutor',
+        type: ChunkType.FunctionResult,
+        content: JSON.stringify({ result: '没有结构化行数' }),
+      }),
+    ).toBeUndefined()
   })
 })
