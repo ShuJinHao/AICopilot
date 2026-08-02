@@ -100,6 +100,16 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
                 return;
             }
 
+            if (ShouldTriggerNativeModeSet(latestUserText) &&
+                ExtractToolName(root, "mode_set") is { } modeSetToolName)
+            {
+                await WriteToolCallStreamAsync(
+                    context,
+                    modeSetToolName,
+                    new { mode = "execute" });
+                return;
+            }
+
             if (ShouldTriggerMultipleDiagnosticApprovals(latestUserText))
             {
                 var toolName = ExtractDiagnosticToolName(root) ?? "GenerateDiagnosticChecklist";
@@ -433,6 +443,13 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
     {
         return latestUserText.Contains(
             "force two diagnostic approvals",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldTriggerNativeModeSet(string latestUserText)
+    {
+        return latestUserText.Contains(
+            "switch native harness mode to execute",
             StringComparison.OrdinalIgnoreCase);
     }
 

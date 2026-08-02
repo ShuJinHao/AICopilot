@@ -2,11 +2,11 @@
 
 本文只记录当前目标架构、能力状态和后续退出门。业务和安全规则以 [AICopilot 业务规则](./AICopilot业务规则.md)、[Agent 工作流与异常契约](./Agent工作流与异常契约.md)、[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md) 和 [DDD 聚合根边界](./DDD聚合根边界.md) 为准；历史方案和阶段执行过程只通过 Git 追溯。
 
-## 1. 当前源码架构与待对齐偏差
+## 1. 当前源码架构
 
 - 主聊天只有 Microsoft Agent Framework Harness 一条执行主链，并已接入官方 `AgentModeProvider`；`Plan` / `Execute` 由该 provider 持有并持久化在同一 `AgentSession`。
 - 目标语义跟随 MAF：Plan 是交互式澄清、调查、调用受治理工具和形成 Todo 的行为模式，Execute 是自主连续完成 Todo 的行为模式；官方 `mode_get` / `mode_set` 均保留。模式与授权正交，不是安全隔离机制。
-- 当前仍存在 `ToolSurfaceGuardChatClient` 隐藏 `mode_set`、按模式过滤工具，以及 Harness 指令禁止模型切换的项目私有兼容层，属于待退出兼容债，不是 MAF 原生能力。在后续运行时对齐批次完成前，MAF 原生模式尚未完成运行时对齐。
+- MAF 原生模式运行时已对齐：Harness 使用框架默认 `AgentModeProviderOptions` 与官方模式指令，保留 `mode_get` / `mode_set`；`ToolInvocationGuardChatClient` 只按每次请求的有效工具集合校验 provider 返回，不删除、不重排，也不按模式过滤工具。
 - Harness 裁剪只允许官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。MAF / Harness 升级使用独立 BOM 批次，核心包保持同版本，并以官方 release notes、公开 API 和真实框架合同测试为准。
 - 主 Harness 保留 Todo、受治理工具、逐次批准、会话连续性 checkpoint 与中断语义；AgentSession checkpoint 不是 durable Tool checkpoint，Interrupted 后不恢复、不重放。系统不维护第二套任务编排或文件产物运行时。
 - `ConversationTemplate.ModelId` 决定主回答模型。Harness 创建后从 `ScopedRuntimeAgent.ConfigurationSnapshot` 记录实际最终模型 provenance，请求不得临时覆盖。
@@ -21,7 +21,7 @@
 
 | 能力 | 源码状态 | 候选验证退出门 | 生产状态 |
 |---|---|---|---|
-| Harness 主聊天 | 部分对齐：单主链、官方 AgentModeProvider、stream/history 已接入；私有模式过滤层待退出 | 移除隐藏 `mode_set` 与按模式过滤工具，真实 MAF 合同及 exact-SHA Harness、HTTP/SSE 证据有效 | 未验收 |
+| Harness 主聊天 | 已收口：单主链、官方 AgentModeProvider、原生 mode 工具、模式无关工具目录、stream/history 已接入 | 真实 MAF 合同及 exact-SHA Harness、HTTP/SSE、版本冲突与安全边界证据有效 | 未验收 |
 | AgentSession 持久化 | 已收口：认证加密、TTL、版本、会话 checkpoint、Interrupted | exact-SHA 空库 baseline、并发、超限、损坏和重启边界有效 | 未验收 |
 | 逐次工具批准 | 已收口：受保护绑定、单工具、所有权/权限/schema/摘要复验 | exact-SHA 批准、拒绝、重复决定、漂移和双待批违约全部 fail-closed | 未验收 |
 | 对话前端 | 已收口：当前 Session/Approval/Interrupted 协议与安全展示 | exact-SHA lint、typecheck、受影响 Vitest 与 production build 有效 | 未验收 |
@@ -30,16 +30,9 @@
 | MCP 2.0 受治理通道 | 已收口：discovery-first、独立 deadline、typed contract、MCP 专用 structured result、timeout/漂移撤下 | exact-SHA Stdio/HTTP conformance、Architecture/Security、Tool Gate、批准与 Interrupted 证据有效 | 未验收 |
 | 工具与数据安全 | 已建立：权限、身份、注册元数据、脱敏和只读边界 | AIARCH001–007、Architecture/Security、`AgentSafetyApplicationTests` 与 Tool Gate 证据有效 | 未验收 |
 
-AgentSession、逐次批准、对话前端和 MCP 2.0 的源码架构已收口；Harness 单主链已经建立，但 MAF 原生模式运行时仍有上述兼容债，不能提前标记为已收口。“源码已收口”只说明对应能力当前活动树应维持的结构，不等于 exact SHA 已通过候选验证、产物准备或生产验收。所有能力的生产状态继续保持“未验收”；旧分支、旧 CI run 和固定测试数不能证明当前候选完成。
+Harness 原生模式运行时、AgentSession、逐次批准、对话前端和 MCP 2.0 的源码架构已收口。“源码已收口”只说明对应能力当前活动树应维持的结构，不等于 exact SHA 已通过候选验证、产物准备或生产验收。所有能力的生产状态继续保持“未验收”；旧分支、旧 CI run 和固定测试数不能证明当前候选完成。
 
-## 3. MAF 原生模式运行时退出门
-
-- 后续独立运行时批次必须移除 `HarnessToolSurfacePolicy` / `ToolSurfaceGuardChatClient` 的模式白名单和 `mode_set` 隐藏，并删除禁止模型切换的私有模式指令；未完成前不得宣称原生 MAF 对齐完成。
-- 官方 `AgentModeProvider` 继续拥有 Plan / Execute、`mode_get` / `mode_set` 与 Session 状态。认证 owner 的带版本 API 继续调用官方 `SetModeAsync`，但不再是唯一切换入口。
-- 两种模式使用同一套与模式无关的受治理工具目录和执行门禁；身份、权限、工具注册、数据边界、schema、批准及 Cloud/MES/ERP 写阻断必须在切换前后保持等价。
-- 运行时对齐必须以官方公开 API 的真实框架合同测试和受影响 Architecture/Security/Business 证明，不 fork、不反射、不复制 MAF 模式状态机；本规则批次不实施这些运行时代码改动。
-
-## 4. 候选验证退出门
+## 3. 候选验证退出门
 
 - 候选必须是已合入、已推送且 `HEAD == origin/main` 的 clean `main` exact SHA；PR head、旧分支或本地未提交字节不能作为候选。
 - 生产 baseline 只能来自获批的只读生产状态工作流，并必须是当前仓库历史中的有效完整 SHA；状态缺失、不健康或无法验证时停止，不得使用旧标签、文档或猜测值替代。
@@ -47,14 +40,14 @@ AgentSession、逐次批准、对话前端和 MCP 2.0 的源码架构已收口�
 - 只有绑定同一候选 SHA、真实生产 baseline、Architecture/Security/Business 分类和 Analyzer-enabled Release production graph 的签名绿色证据，才允许在后续独立批次进入 `Prepare-Release`。
 - 未完成候选验证、产物准备和真实部署前，生产状态始终保持“未验收”。
 
-## 5. 验证约束
+## 4. 验证约束
 
 - 根据当前 diff 选择不可弱化的 Analyzer/Architecture/Security 与受影响 Business；不使用旧固定 runner/case 数。
 - 任何 `dotnet test --filter` 必须先用同项目、同配置、同 filter 的 `--list-tests` 证明至少命中一项；0-hit 不是有效证据。
 - baseline 只在空库或设计时模型中验证；普通开发批次不应用现有数据库、不清库、不部署。
 - 全量、coverage、mutation、duplication、Quality、CrossProject、真实 Cloud live 与生产操作只能在用户当前轮明确授权时运行。
 
-## 6. 明确不做
+## 5. 明确不做
 
 - 不建设任意用户上传 Agent 定义后直接执行的平台。
 - 不让模型扩大 Tool、MCP、知识库、数据源或证据权限。

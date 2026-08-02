@@ -10,7 +10,7 @@
 - Harness 主聊天固定使用 `Microsoft.Agents.AI.Harness` / `Microsoft.Agents.AI` `1.16.0`，每轮最多 8 次模型调用。必须关闭 FileMemory、WebSearch、AgentSkills、BackgroundAgents、LoopEvaluators 与 compaction，不注册 FileAccessStore、Shell 或文件 Artifact；聊天只允许文本和服务端可信 inline Widget。
 - 模型端点、认证、配额、熔断和遥测由轻量 `IChatClient` 工厂负责，且作用于每一次真实模型调用。Text-to-SQL、分类和结构化生成直接使用轻量客户端，禁止嵌套 Harness；主聊天不得恢复 `Microsoft.Agents.AI.Workflows` 依赖。
 - Harness 裁剪只允许使用官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。MAF / Harness 升级必须作为独立 BOM 批次，核心包保持同版本；先核对官方 release notes 与公开 API，再运行真实框架合同测试，上游语义变化时跟随框架。
-- 当前 `ToolSurfaceGuardChatClient` 仍在请求侧按模式过滤工具并隐藏官方 `mode_set`，这是项目私有、待退出的兼容债，不是 MAF 原生能力或安全边界；后续运行时对齐批次必须移除这两项模式裁剪。它在本批仍承担未登记工具、伪造批准响应和多工具违约的 fail-closed 校验，但这些校验必须与模式无关。
+- `ToolInvocationGuardChatClient` 只在每次实际 provider 请求上，以 Harness 产生的有效 `ChatOptions.Tools` 建立精确允许集合；不得删除、重排或按 Plan / Execute 过滤 MAF 与应用传入的工具，官方 `mode_get` / `mode_set` 保持可见。provider 返回未公开工具、多工具违约或 standing approval 信号时继续 fail-closed；这些校验与模式完全无关。
 
 ### 1.1 Plan / Execute
 
@@ -18,6 +18,7 @@
 - `Plan` 是交互式行为模式，用于澄清、调查、调用受治理工具和形成 Todo；`Execute` 是自主行为模式，用于连续完成 Todo。模式不是安全隔离或授权边界，模式与授权正交。
 - 官方 `AgentModeProvider` 必须继续向模型提供 `mode_get` 与 `mode_set`。当前认证 owner 也可调用 `PUT /api/aigateway/session/{sessionId}/agent-mode`，请求携带 `plan|execute` 与 `expectedVersion`，并通过官方 `SetModeAsync` 修改；该公开 API 不是唯一切换入口，活跃 turn、待批准、Interrupted 或版本冲突仍必须拒绝 API 写入。
 - 切换模式不得扩大或缩小用户权限、工具注册、数据边界、风险元数据或批准策略。模型在任一模式调用工具时，都必须通过相同的身份、Session、`MainChatToolGate`、`AiToolSafetyPolicy`、schema、参数摘要与批准门禁。
+- 模型通过官方 `mode_set` 切换后，新模式必须随同一 `AgentSession` 在 turn 完成时序列化并持久化；`agent_session_state` SSE 以持久化后的 mode/version 为权威。此版本递增会使旧 `expectedVersion` 的并列用户模式请求冲突，前端继续按现有事件投影和冲突刷新协议更新。
 
 ### 1.2 AgentSession 持久化
 

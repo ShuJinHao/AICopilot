@@ -122,6 +122,87 @@ public sealed class LegacyRetirementArchitectureTests
     }
 
     [Fact]
+    public void MainHarnessRuntime_ShouldRemainNativeMafAndModeIndependent()
+    {
+        var runtimeRoot = Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.AiRuntime");
+        var runtimeSource = string.Join(
+            '\n',
+            Directory.EnumerateFiles(runtimeRoot, "*.cs", SearchOption.AllDirectories)
+                .Where(path => !Path.GetRelativePath(runtimeRoot, path)
+                    .Split(Path.DirectorySeparatorChar)
+                    .Any(segment => segment is "bin" or "obj"))
+                .Select(File.ReadAllText));
+        var factorySource = File.ReadAllText(Path.Combine(
+            runtimeRoot,
+            "HarnessAgentRuntimeFactory.cs"));
+        var guardSource = File.ReadAllText(Path.Combine(
+            runtimeRoot,
+            "ToolInvocationGuardChatClient.cs"));
+        var runtimeAgentSource = File.ReadAllText(Path.Combine(
+            runtimeRoot,
+            "HarnessRuntimeChatAgent.cs"));
+        var builtInPromptSource = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "core",
+            "AICopilot.Core.AiGateway",
+            "Aggregates",
+            "ConversationTemplate",
+            "BuiltInConversationTemplates.cs"));
+        var mainChatToolCatalogFileSource = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Agents",
+            "MainChatToolCatalog.cs"));
+        var mainChatToolCatalogSource = mainChatToolCatalogFileSource.Split(
+            "internal sealed class AgentSessionCheckpointSink",
+            StringSplitOptions.None)[0];
+        var mainChatToolGateSource = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "services",
+            "AICopilot.AiGatewayService",
+            "Agents",
+            "MainChatToolGate.cs"));
+
+        runtimeSource.Should().NotContain("HarnessToolSurfacePolicy");
+        runtimeSource.Should().NotContain("ToolSurfaceGuardChatClient");
+        runtimeSource.Should().NotContain("Never call mode_set");
+        factorySource.Should().Contain("AgentModeProviderOptions = null");
+        factorySource.Should().Contain("new ToolInvocationGuardChatClient(modelClient)");
+        guardSource.Should().NotContain("RuntimeAgentMode");
+        guardSource.Should().NotContain("mode_set");
+        guardSource.Should().NotContain(".Tools =");
+        guardSource.Should().Contain("ResolveAllowedToolNames(guardedOptions)");
+        runtimeAgentSource.Should().NotContain("SynchronizeToolSurface");
+        runtimeAgentSource.Should().NotContain("toolSurfacePolicy");
+        builtInPromptSource.Should().Contain("MAF 原生行为模式");
+        builtInPromptSource.Should().Contain("模型可使用官方 mode_get / mode_set");
+        builtInPromptSource.Should().Contain("模式与授权正交");
+        builtInPromptSource.Should().NotContain("Plan 只做规划，不执行外部或业务工具");
+        builtInPromptSource.Should().NotContain("Never call mode_set");
+        string[] forbiddenModeInputs =
+        [
+            "RuntimeAgentMode",
+            "AgentModeProvider",
+            "GetModeAsync",
+            "SetModeAsync",
+            "IAgentSessionStateStore",
+        ];
+        foreach (var marker in forbiddenModeInputs)
+        {
+            mainChatToolCatalogSource.Should().NotContain(marker);
+            mainChatToolGateSource.Should().NotContain(marker);
+        }
+    }
+
+    [Fact]
     public void AiGatewayDbContext_ShouldPersistOnlyHarnessRuntimeAndCurrentCatalogs()
     {
         var actualDbSets = typeof(AiGatewayDbContext)

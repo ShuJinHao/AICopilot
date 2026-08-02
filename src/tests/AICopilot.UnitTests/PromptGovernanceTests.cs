@@ -96,7 +96,7 @@ public sealed class PromptGovernanceTests
     [Fact]
     public void BuiltInConversationTemplates_ShouldUseCurrentPromptVersion()
     {
-        BuiltInConversationTemplates.CurrentVersion.Should().Be(10);
+        BuiltInConversationTemplates.CurrentVersion.Should().Be(11);
         BuiltInConversationTemplates.All
             .Should()
             .OnlyContain(definition => definition.Version == BuiltInConversationTemplates.CurrentVersion);
@@ -135,8 +135,14 @@ public sealed class PromptGovernanceTests
 
         BuiltInConversationTemplates.Find("chat_answer")!.SystemPrompt
             .Should().Contain("Plan 与 Execute")
+            .And.Contain("MAF 原生行为模式")
+            .And.Contain("Plan 用于交互式澄清、调查、调用受治理工具并形成 Todo")
+            .And.Contain("模型可使用官方 mode_get / mode_set")
+            .And.Contain("模式与授权正交")
+            .And.Contain("两种模式都只能使用系统本轮明确授予且通过服务端治理的工具")
             .And.Contain("运行详情")
-            .And.Contain("Cloud 业务数据永久只读");
+            .And.Contain("Cloud 业务数据永久只读")
+            .And.NotContain("Plan 只做规划，不执行外部或业务工具");
     }
 
     [Fact]

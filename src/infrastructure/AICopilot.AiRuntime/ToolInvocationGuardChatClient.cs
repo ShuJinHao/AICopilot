@@ -5,56 +5,14 @@ using Microsoft.Extensions.AI;
 
 namespace AICopilot.AiRuntime;
 
-internal sealed class HarnessToolSurfacePolicy(IEnumerable<string> executeToolNames)
-{
-    private static readonly HashSet<string> HarnessTools =
-    [
-        "mode_get",
-        "todos_add",
-        "todos_complete",
-        "todos_remove",
-        "todos_get_remaining",
-        "todos_get_all"
-    ];
-
-    private readonly HashSet<string> executeTools = executeToolNames
-        .Where(name => !string.IsNullOrWhiteSpace(name))
-        .Where(name => !IsForbiddenCapability(name))
-        .Concat(HarnessTools)
-        .ToHashSet(StringComparer.Ordinal);
-    private volatile RuntimeAgentMode mode = RuntimeAgentMode.Plan;
-
-    public void SetMode(RuntimeAgentMode value) => mode = value;
-
-    public bool IsAllowed(string toolName)
-    {
-        if (string.Equals(toolName, "mode_set", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return mode == RuntimeAgentMode.Plan
-            ? HarnessTools.Contains(toolName)
-            : executeTools.Contains(toolName);
-    }
-
-    private static bool IsForbiddenCapability(string name)
-    {
-        return name.Contains("shell", StringComparison.OrdinalIgnoreCase) ||
-               name.Contains("file_access", StringComparison.OrdinalIgnoreCase) ||
-               name.Contains("file_artifact", StringComparison.OrdinalIgnoreCase) ||
-               name.Contains("background_agent", StringComparison.OrdinalIgnoreCase);
-    }
-}
-
 /// <summary>
 /// Final fail-closed boundary before a request reaches the governed provider.
-/// Context-provider tools are filtered here as well as application tools, so
-/// hidden capabilities cannot be restored by prompt text or run options.
+/// The exact tool set for each provider request comes from the effective
+/// <see cref="ChatOptions"/> produced by the Harness; the guard never applies
+/// mode-specific filtering or changes tool order.
 /// </summary>
-internal sealed class ToolSurfaceGuardChatClient(
-    IChatClient inner,
-    HarnessToolSurfacePolicy policy) : DelegatingChatClient(inner)
+internal sealed class ToolInvocationGuardChatClient(IChatClient inner)
+    : DelegatingChatClient(inner)
 {
     public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
@@ -63,13 +21,16 @@ internal sealed class ToolSurfaceGuardChatClient(
     {
         var materialized = messages.ToArray();
         RejectAlwaysApprove(materialized);
+        var guardedOptions = PrepareOptions(options);
+        var allowedToolNames = ResolveAllowedToolNames(guardedOptions);
         var response = await base.GetResponseAsync(
             materialized,
-            FilterOptions(options),
+            guardedOptions,
             cancellationToken);
         ValidateModelContents(
             response.Messages.SelectMany(message => message.Contents),
-            new HashSet<string>(StringComparer.Ordinal));
+            allowedToolNames,
+            new HashSet<RequestedToolCall>());
         return response;
     }
 
@@ -80,43 +41,52 @@ internal sealed class ToolSurfaceGuardChatClient(
     {
         var materialized = messages.ToArray();
         RejectAlwaysApprove(materialized);
-        var observedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
+        var guardedOptions = PrepareOptions(options);
+        var allowedToolNames = ResolveAllowedToolNames(guardedOptions);
+        var observedToolCalls = new HashSet<RequestedToolCall>();
         await foreach (var update in base.GetStreamingResponseAsync(
                            materialized,
-                           FilterOptions(options),
+                           guardedOptions,
                            cancellationToken))
         {
-            ValidateModelContents(update.Contents, observedToolCallIds);
+            ValidateModelContents(
+                update.Contents,
+                allowedToolNames,
+                observedToolCalls);
             yield return update;
         }
     }
 
-    private ChatOptions FilterOptions(ChatOptions? options)
+    private static ChatOptions PrepareOptions(ChatOptions? options)
     {
-        var filtered = options?.Clone() ?? new ChatOptions();
-        filtered.AllowMultipleToolCalls = false;
-        filtered.Tools = filtered.Tools?
-            .Where(tool => ResolveName(tool) is { } name && policy.IsAllowed(name))
-            .ToList();
-        return filtered;
+        var guarded = options?.Clone() ?? new ChatOptions();
+        guarded.AllowMultipleToolCalls = false;
+        return guarded;
     }
 
-    private void ValidateModelContents(
+    private static HashSet<string> ResolveAllowedToolNames(ChatOptions options) =>
+        options.Tools?
+            .Select(ResolveName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Cast<string>()
+            .ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
+
+    private static void ValidateModelContents(
         IEnumerable<AIContent> contents,
-        ISet<string> observedToolCallIds)
+        IReadOnlySet<string> allowedToolNames,
+        ISet<RequestedToolCall> observedToolCalls)
     {
         foreach (var request in contents
                      .Select(ResolveRequestedTool)
                      .Where(request => request is not null)
                      .Select(request => request!.Value))
         {
-            if (!policy.IsAllowed(request.ToolName))
+            if (!allowedToolNames.Contains(request.ToolName))
             {
-                throw new HarnessToolSurfaceViolationException(request.ToolName);
+                throw new HarnessToolInvocationViolationException(request.ToolName);
             }
 
-            if (observedToolCallIds.Add(request.ToolCallId) &&
-                observedToolCallIds.Count > 1)
+            if (observedToolCalls.Add(request) && observedToolCalls.Count > 1)
             {
                 throw new AgentRuntimeMultipleToolCallsException();
             }
@@ -174,9 +144,9 @@ internal sealed class ToolSurfaceGuardChatClient(
         string ToolName);
 }
 
-internal sealed class HarnessToolSurfaceViolationException(string toolName)
+internal sealed class HarnessToolInvocationViolationException(string toolName)
     : InvalidOperationException(
-        $"The model attempted to invoke hidden tool '{toolName}'. The request was blocked.");
+        $"The model attempted to invoke unexposed tool '{toolName}'. The request was blocked.");
 
 internal sealed class HarnessAlwaysApproveRejectedException()
     : InvalidOperationException(

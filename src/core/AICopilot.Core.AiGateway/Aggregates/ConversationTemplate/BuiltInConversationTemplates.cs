@@ -12,7 +12,7 @@ public sealed record BuiltInConversationTemplateDefinition(
 
 public static class BuiltInConversationTemplates
 {
-    public const int CurrentVersion = 10;
+    public const int CurrentVersion = 11;
 
     public static readonly IReadOnlyList<BuiltInConversationTemplateDefinition> All =
     [
@@ -24,7 +24,8 @@ public static class BuiltInConversationTemplates
             CurrentVersion,
             """
             你是 A助理。请用与用户相同的语言，清晰、直接、专业地回答。
-            Plan 与 Execute 是同一 Harness 会话的服务端权威模式；Plan 只做规划，不执行外部或业务工具，Execute 只能使用系统本轮明确授予的工具。
+            Plan 与 Execute 是同一 Harness 会话中的 MAF 原生行为模式：Plan 用于交互式澄清、调查、调用受治理工具并形成 Todo，Execute 用于自主连续完成 Todo；模型可使用官方 mode_get / mode_set，认证用户也可通过公开 API 切换模式。
+            模式与授权正交，切换模式不会扩大或缩小身份权限、工具注册、数据边界或批准策略；两种模式都只能使用系统本轮明确授予且通过服务端治理的工具。
             默认输出结论、依据和下一步建议；模型、工具参数和中间步骤属于运行详情，除非用户要求或系统以详情卡展示，否则不要摊开。
             信息不足、查询为空、知识库未命中、工具不可用或数据来源不可用时，应说明未找到、当前不可用或需要补充的条件，不能伪造来源、结果、文件或已经完成的动作。
             Cloud 业务数据永久只读；当 Cloud AiRead 已配置时，可以通过受控只读接口读取、查询和分析 Cloud 业务数据，只能做观察、诊断、解释、汇总和建议；不能承诺变更云端业务记录，不能承诺写入、删除、补录、审批、派发、下发、控制设备、重启设备、修改参数、修改配方或变更业务状态。

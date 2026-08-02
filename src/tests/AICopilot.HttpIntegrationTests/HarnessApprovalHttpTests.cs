@@ -171,10 +171,98 @@ public sealed class HarnessApprovalHttpTests(CoreAICopilotAppFixture fixture)
         }
     }
 
+    [Fact]
+    public async Task ModelModeSet_ShouldPersistProjectToSseAndGet_AndInvalidateStaleUserVersion()
+    {
+        await AuthenticateAsAdminAsync();
+
+        Guid languageModelId = Guid.Empty;
+        Guid templateId = Guid.Empty;
+        Guid sessionId = Guid.Empty;
+
+        try
+        {
+            languageModelId = await CreateLanguageModelAsync(
+                $"native-mode-set-lm-{Guid.NewGuid():N}");
+            templateId = await CreateConversationTemplateAsync(
+                $"native-mode-set-template-{Guid.NewGuid():N}",
+                languageModelId,
+                "native MAF mode persistence",
+                "Use the official mode tools when the user explicitly requests a mode change.");
+            sessionId = await CreateSessionAsync(templateId);
+
+            var initial = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            initial.AgentMode.Should().Be("plan");
+            initial.AgentSessionVersion.Should().Be(1);
+
+            var events = await PostEventStreamAsync(
+                "/api/aigateway/chat",
+                new
+                {
+                    sessionId,
+                    message = "switch native harness mode to execute"
+                });
+
+            events.Should().NotContain(item => item.Type == "Error");
+            var stateEvent = ReadAgentSessionStateEvent(events);
+            stateEvent.GetProperty("mode").GetString().Should().Be("execute");
+            stateEvent.GetProperty("status").GetString()
+                .Should().Be(nameof(AgentSessionRuntimeStatus.Ready));
+            stateEvent.GetProperty("pendingApproval").GetBoolean().Should().BeFalse();
+
+            var persistedVersion = stateEvent.GetProperty("version").GetInt64();
+            persistedVersion.Should().BeGreaterThan(initial.AgentSessionVersion!.Value);
+
+            var projection = await GetJsonAsync<AgentSessionProjectionDto>(
+                $"/api/aigateway/session?id={sessionId}");
+            projection.AgentMode.Should().Be("execute");
+            projection.AgentSessionVersion.Should().Be(persistedVersion);
+            projection.AgentSessionStatus.Should().Be(nameof(AgentSessionRuntimeStatus.Ready));
+
+            using var staleModeResponse = await SendJsonRawAsync(
+                HttpMethod.Put,
+                $"/api/aigateway/session/{sessionId}/agent-mode",
+                new
+                {
+                    mode = "plan",
+                    expectedVersion = initial.AgentSessionVersion
+                });
+            staleModeResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await ReadJsonAsync<ProblemDetailsDto>(staleModeResponse)).Code
+                .Should().Be("agent_session_version_conflict");
+        }
+        finally
+        {
+            await DeleteTestConfigurationAsync(sessionId, templateId, languageModelId);
+        }
+    }
+
     private static ProblemChunkDto ReadSingleError(IReadOnlyCollection<ChatChunkDto> events)
     {
         var errorChunk = events.Single(item => item.Type == "Error");
         return JsonSerializer.Deserialize<ProblemChunkDto>(errorChunk.Content, JsonOptions)!;
+    }
+
+    private static JsonElement ReadAgentSessionStateEvent(
+        IReadOnlyCollection<ChatChunkDto> events)
+    {
+        JsonElement? match = null;
+        foreach (var item in events.Where(item => item.Type == "AgentEvent"))
+        {
+            using var document = JsonDocument.Parse(item.Content);
+            if (!document.RootElement.TryGetProperty("stage", out var stage) ||
+                stage.GetString() != "agent_session_state")
+            {
+                continue;
+            }
+
+            match.Should().BeNull("only one persisted AgentSession event is emitted per turn");
+            match = document.RootElement.Clone();
+        }
+
+        match.Should().NotBeNull();
+        return match!.Value;
     }
 
     private async Task AuthenticateAsAdminAsync()
@@ -387,6 +475,7 @@ public sealed class HarnessApprovalHttpTests(CoreAICopilotAppFixture fixture)
 
     private sealed record AgentSessionProjectionDto(
         Guid Id,
+        string? AgentMode,
         long? AgentSessionVersion,
         string? AgentSessionStatus,
         bool AgentSessionResetRequired,
@@ -408,4 +497,6 @@ public sealed class HarnessApprovalHttpTests(CoreAICopilotAppFixture fixture)
     private sealed record ChatChunkDto(string Source, string Type, string Content);
 
     private sealed record ProblemChunkDto(string? Code, string? Detail, string? UserFacingMessage);
+
+    private sealed record ProblemDetailsDto(string? Code);
 }

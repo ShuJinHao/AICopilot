@@ -39,11 +39,7 @@ internal sealed class HarnessAgentRuntimeFactory(
             var modelClient = chatClientFactory.Create(
                 request.Runtime,
                 scope.ServiceProvider);
-            var toolSurfacePolicy = new HarnessToolSurfacePolicy(
-                request.Runtime.Options.Tools.Select(tool => tool.Name));
-            var guardedClient = new ToolSurfaceGuardChatClient(
-                modelClient,
-                toolSurfacePolicy);
+            var guardedClient = new ToolInvocationGuardChatClient(modelClient);
             var harnessOptions = CreateOptions(request.Runtime, historyProvider);
             agent = guardedClient.AsHarnessAgent(
                 harnessOptions,
@@ -54,7 +50,7 @@ internal sealed class HarnessAgentRuntimeFactory(
                     "Harness AgentModeProvider is required for the main chat runtime.");
 
             return new ScopedRuntimeAgent(
-                new HarnessRuntimeChatAgent(agent, modeProvider, toolSurfacePolicy),
+                new HarnessRuntimeChatAgent(agent, modeProvider),
                 new HarnessRuntimeHandle(agent, scope));
         }
         catch
@@ -94,27 +90,7 @@ internal sealed class HarnessAgentRuntimeFactory(
             DisableWebSearch = true,
             DisableTodoProvider = false,
             DisableAgentModeProvider = false,
-            AgentModeProviderOptions = new AgentModeProviderOptions
-            {
-                DefaultMode = "plan",
-                Instructions =
-                    """
-                    Available operating modes: {available_modes}.
-                    Current operating mode: {current_mode}.
-                    Use mode_get when you need to confirm the mode.
-                    Mode changes are authorized only through the server session endpoint.
-                    Never call mode_set.
-                    """,
-                Modes =
-                [
-                    new AgentModeProviderOptions.AgentMode(
-                        "plan",
-                        "Plan interactively. You may manage todos and inspect the current mode, but you must not call application, business query, RAG, MCP, Cloud, MES, ERP, or write tools."),
-                    new AgentModeProviderOptions.AgentMode(
-                        "execute",
-                        "Execute the user's approved request using only the tools exposed by the server for this session. Never change mode yourself.")
-                ]
-            },
+            AgentModeProviderOptions = null,
             DisableAgentSkillsProvider = true,
             AgentSkillsSource = null,
             BackgroundAgents = Array.Empty<AIAgent>(),
