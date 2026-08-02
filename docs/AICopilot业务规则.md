@@ -46,14 +46,11 @@
 - 写入、补录、删除或修正产能、日志、生产数据、过站数据。
 - 触发 Cloud 业务流程、派发任务或代办审批。
 - 直接写 Cloud 数据库。
-- 直接写云端数据库。
 - 通过 MCP、Tool、Harness、后台任务或隐藏适配器间接调用 Cloud 写接口。
-- 通过 MCP、Tool、Harness、后台任务或隐藏适配器间接调用云端写接口。
 
 Cloud tool 安全元数据只有 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 这一精确组合有效。`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失/动态无法静态证明的声明都必须 fail-closed；动态 MCP 的 enum、alias、描述或 endpoint 不能证明可信 NonCloud，server/tool 必须统一使用精确只读组合，并在聚合注册、runtime builder、Plan 能力发现和每次 MCP 执行时经过同一 `AiToolSafetyPolicy` 评估。runtime MCP tool 必须显式携带独立 canonical `ToolName`，缺失时直接阻断，禁止回退到 runtime `Name` 或其它 alias。
 
 Human-in-the-loop 不能把禁止的 Cloud 业务写入变成允许动作。
-Human-in-the-loop 不能作为放开云端业务写入的理由。
 当前默认不存在专门给 AICopilot 使用的云端写 API。
 
 Cloud AiRead 设备契约：
@@ -102,12 +99,12 @@ Cloud AiRead 设备契约：
 - 当前唯一真实外部业务数据源是 Cloud；MES、ERP 后续只能通过统一 provider/profile registry 扩展。插件只注册 provider、dialect、schema、能力和执行 adapter，不复制 Runner、Guard、RepairLoop 或 Prompt。
 - 每个分析任务首次执行前必须确认数据源、数据类型、设备/业务对象、时间范围和过滤条件；来源不唯一、信息不足或置信度不足时先询问。同一任务后续追问复用已确认 `BusinessQueryContext`。
 - 数据能力统一为 `Device`、`DeviceLog`、`Capacity`、`ProductionRecord`、`Process`、`ClientRelease`，插件必须声明支持范围和结果契约。
-- 插件结果统一为 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable`、`Unauthorized`。只有 `Unsupported` 或同一来源的 `Unavailable` 可由模型决定是否尝试同源 Text-to-SQL；`Empty` 是真实空集，`NeedClarification` 继续询问，权限/凭据失败不得绕过，禁止跨源 fallback。
+- 插件结果统一为 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable`、`Unauthorized`。`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner：只有同一来源的 `Unsupported` 或 `Unavailable` 且查询上下文、数据源 profile 与 capability profile 全部允许时，服务端才自动进入受控 Text-to-SQL；模型不得决定、触发或绕过 fallback。`Empty` 是真实空集，`NeedClarification` 继续询问，权限/凭据失败不得绕过，禁止跨源 fallback。
 - CP/AP 生产查询继续复用唯一 `ProductionRecord` 通用业务数据插件，不得按工序复制插件、端点、Runner 或结果语义。
 - SQL 安全唯一 owner 是执行咽喉的共享 AST guard + 已选择 source profile；只允许单条只读查询，拒绝 DML、DDL、管理语句和多语句，表列范围来自 profile，数据库账号保持只读。
 - 查询结果只用于分析展示，不产生业务写入。
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。
-- Cloud 同时配置 typed business plugin 和受控 Text-to-SQL profile。Text-to-SQL 只由上述 `Unsupported`/同源 `Unavailable` 触发；Simulation 必须显式选择，不得暗中接管 Cloud 空集、失败或未确认来源。
+- Cloud 同时配置 typed business plugin 和受控 Text-to-SQL profile。Text-to-SQL 只由上述服务端 policy 触发；Simulation 必须显式选择，不得暗中接管 Cloud 空集、失败或未确认来源。
 - CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema` 治理白名单，最多包含批准表名、列名、列类型、join hints 和必要业务描述；不得把连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段发给模型。
 - CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
 - CloudReadOnly Text-to-SQL 修复历史不得保存完整 SQL、用户 prompt、连接串、参数值或敏感字段；上一轮失败 SQL 只允许在当前调用内以内存参数临时回传给 LLM 生成下一版，不能写入审计、日志、state、结果或持久化对象。
@@ -174,8 +171,8 @@ Cloud AiRead 设备契约：
 
 ### 8.1 Harness Plan / Execute 语义
 
-- `Plan` 与 `Execute` 是同一服务端 `AgentSession` 的模式；新会话默认 `Plan`，模式切换只能通过 owner-only 且带 `expectedVersion` 的会话 API。
-- `Plan` 只向模型公开 Harness Todo 与 `mode_get`，不公开 Cloud、RAG、MCP、`BusinessQuery`、`KnowledgeQuery` 或其它业务工具。
+- `Plan` 与 `Execute` 是同一服务端 `AgentSession` 的模式；新会话默认 `Plan`。只有当前认证 owner 显式调用带 `expectedVersion` 的会话 API 才能切换模式。
+- `Plan` 始终只读，只向模型公开 Harness Todo 与 `mode_get`，不公开 Cloud、RAG、MCP、`BusinessQuery`、`KnowledgeQuery` 或其它业务工具。模型永远不能自行切换模式，`mode_set` 不得进入模型工具面。
 - `Execute` 可以直接回答，或调用经过当前用户、Session、权限、注册和安全元数据实时筛选的工具。
 - 空态文案和建议必须使用当前模式：`Plan` 只生成分析步骤和待办，`Execute` 才发起设备日志、状态、工序、版本等真实只读查询；建议操作不得隐式切换模式。
 - `BusinessQuery` 的查询确认键是 `SessionId`；追问改变设备、工序、日志级别、时间或数据源时必须重新确认，不得从旧回答文本反推事实。
@@ -254,7 +251,7 @@ Cloud AiRead 设备契约：
 - 没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；DataAnalysis/MCP 不写 Outbox，AiGateway `Session` 领域事件和 RAG delayed integration-event factory 只能在 repository commit participant 内物化到短生命周期 `OutboxDbContext`，业务 Context 不映射共享 Outbox。
 - 审计写入必须遵守 Audit writer decision tree：有业务保存点的命令应把业务变更和审计行放在同一事务；`auditLogWriter.SaveChangesAsync` 只允许出现在没有业务保存点且已被白名单记录的执行路径。
 - Outbox 多实例调度必须使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略，不能让多 worker 重复发布同一消息。
-- 普通 repository 的业务、Outbox、审计和 durable commit marker 必须由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交；每个 execution-strategy attempt 对业务 Context 只允许一次 `SaveChangesAsync(false)`，事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。Identity 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine；非成功 `Result` 必须回滚 UserManager/RoleManager 已触发的所有中间保存，拒绝审计只能在回滚后另行提交，禁止恢复 `EfTransactionalExecutionService` 或复制第二套 transaction/retry。
+- 普通 repository 的业务、Outbox、审计和数据库 durable commit marker 必须由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交；commit marker 只保障数据库事务结果验证，不是 Agent durable 编排或 Tool checkpoint。每个 execution-strategy attempt 对业务 Context 只允许一次 `SaveChangesAsync(false)`，事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。Identity 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine；非成功 `Result` 必须回滚 UserManager/RoleManager 已触发的所有中间保存，拒绝审计只能在回滚后另行提交，禁止恢复 `EfTransactionalExecutionService` 或复制第二套 transaction/retry。
 - EF execution-strategy 必须使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，禁止手写业务重试循环。commit-unknown 不能用 `SaveChanges(false)`、Outbox 或 audit 是否存在推断成功；必须写入同事务 durable marker，并由 fresh context 在独立超时与 execution strategy 下验证，真实 PostgreSQL 必须覆盖 commit-ACK 丢失、verification transient/persistent failure、caller cancellation 和数据库生成 identity 重放。
 - marker 写入后不得再让 caller cancellation 中断 commit/verification；fresh verification 无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id，不自动重放业务。RAG `UploadDocument` 必须先写持久化对账日志再写物理文件，并复用同一 commit id；请求与 DataWorker 通过 PostgreSQL advisory lease 互斥。结果未知时保留文件和日志，后台看到 marker 才保留文件并清日志，看不到 marker 才删除文件。知识库文件唯一写入口是 RAG Document API。
 - RAG/AiGateway 数据库绑定上传调用方必须复用唯一 `PersistenceFileCommitProtocol`；repository 未消费预留 commit id 时，确认必须 fail-closed、回滚未提交文件并保留失败信号，不得因 callback 正常返回就清除 journal。

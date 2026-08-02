@@ -2,37 +2,41 @@
 
 本文只记录当前目标架构、能力状态和后续退出门。业务和安全规则以 [AICopilot 业务规则](./AICopilot业务规则.md)、[Agent 工作流与异常契约](./Agent工作流与异常契约.md)、[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md) 和 [DDD 聚合根边界](./DDD聚合根边界.md) 为准；历史方案和阶段执行过程只通过 Git 追溯。
 
-## 1. 当前目标架构
+## 1. 当前已收口源码架构
 
 - 主聊天只有 Microsoft Agent Framework Harness 一条执行主链，`Plan` / `Execute` 是同一 `AgentSession` 的服务端权威模式。
-- 主 Harness 保留 Todo、受治理工具、逐次批准、持久化 checkpoint 与中断语义；不维护第二套任务编排或文件产物运行时。
+- `Plan` 始终只读，只允许 Todo 与 `mode_get`；只有当前认证 owner 显式调用带 `expectedVersion` 的会话 API 才能进入 `Execute`，模型不能自行切换模式。
+- 主 Harness 保留 Todo、受治理工具、逐次批准、会话连续性 checkpoint 与中断语义；AgentSession checkpoint 不是 durable Tool checkpoint，Interrupted 后不恢复、不重放。系统不维护第二套任务编排或文件产物运行时。
 - `ConversationTemplate.ModelId` 决定主回答模型。Harness 创建后从 `ScopedRuntimeAgent.ConfigurationSnapshot` 记录实际最终模型 provenance，请求不得临时覆盖。
-- `BusinessQuery` 和 `KnowledgeQuery` 是 Execute-only 服务端工具；前者执行 typed provider 优先、仅同源 `Unsupported` / `Unavailable` 允许受控 Text-to-SQL，后者只检索当前用户授权知识库。
+- `BusinessQuery` 和 `KnowledgeQuery` 是 Execute-only 服务端工具；前者由 `BusinessQueryFallbackPolicy` 固定执行 typed provider 优先，并仅在同源 `Unsupported` / `Unavailable` 时由服务端自动进入受控 Text-to-SQL，后者只检索当前用户授权知识库。
 - `MainChatToolGate` 统一筛选本地与 MCP 工具；`ToolSurfaceGuardChatClient` 在 provider 请求和响应两侧 fail-closed。Cloud 业务数据永久只读，模型和人工批准都不能授予 Cloud 写权限。
 - MCP 使用稳定版 `ModelContextProtocol 2.0.0`：HTTP discovery-first/AutoDetect、官方 Stdio transport、typed schema/annotation、每 server 30 秒 discovery deadline、登记驱动的调用 timeout、MCP 专用原生 structured-result 契约，以及 `RowVersion + schema/hint/governance fingerprint` 双重刷新；既有 MCP HTTP API、数据库结构和 `McpTransportType.Sse` 存量值保持不变。
 - 模型端点池、限额、熔断、使用结算和审计以每次真实模型调用为粒度；进程内选择不代替 PostgreSQL 配额预约。
+- 对话前端只使用当前 Session、Chat、Mode、Harness approval、history 与 Interrupted/ResetRequired 协议；不再调用已退出的任务、业务审批、Artifact、routing/runtime settings 或文件工作台接口。
 - 消息历史直接按 `Message.Sequence` 分页。可持久的 AiGateway 面只包含 LanguageModel、ConversationTemplate、Session、Message、AgentSessionState、ToolRegistration 和 ModelQuotaReservation。
 
 ## 2. 能力状态
 
-| 能力 | 源码目标 | 验证退出门 | 生产状态 |
+| 能力 | 源码状态 | 候选验证退出门 | 生产状态 |
 |---|---|---|---|
-| Harness 主聊天 | 单主链、Plan/Execute、stream/history | Harness、HTTP/SSE 与前端受影响用例通过 | 未验收 |
-| AgentSession 持久化 | 认证加密、TTL、版本、checkpoint、Interrupted | 空库 baseline、并发、超限、损坏和重启边界通过 | 未验收 |
-| 逐次工具批准 | 受保护绑定、单工具、所有权/权限/schema/摘要复验 | 批准、拒绝、重复决定、漂移和双待批违约全部 fail-closed | 未验收 |
-| AI-01 OIDC/JIT 身份 | Cloud 身份与本地 AI 权限分离 | 首次并发、唯一冲突、SecurityStamp 与审计通过 | 未验收 |
-| AI-02 Cloud 真实只读 | 八个 typed GET、同源 fallback、AST guard | `CloudAiReadClientContractTests`、真实非生产 provider 和发布顺序验收 | 未验收 |
-| MCP 2.0 受治理通道 | discovery-first、独立 deadline、typed contract、MCP 专用 structured result、timeout/漂移撤下 | Stdio/HTTP conformance、Architecture/Security、Tool Gate、批准与 Interrupted 回归通过 | 未验收 |
-| 工具与数据安全 | 权限、身份、注册元数据、脱敏和只读边界 | AIARCH001–007、Architecture/Security、`AgentSafetyApplicationTests` 与 Tool Gate 用例通过 | 未验收 |
+| Harness 主聊天 | 已收口：单主链、Plan/Execute、stream/history | exact-SHA Harness、HTTP/SSE 与受影响前端证据有效 | 未验收 |
+| AgentSession 持久化 | 已收口：认证加密、TTL、版本、会话 checkpoint、Interrupted | exact-SHA 空库 baseline、并发、超限、损坏和重启边界有效 | 未验收 |
+| 逐次工具批准 | 已收口：受保护绑定、单工具、所有权/权限/schema/摘要复验 | exact-SHA 批准、拒绝、重复决定、漂移和双待批违约全部 fail-closed | 未验收 |
+| 对话前端 | 已收口：当前 Session/Approval/Interrupted 协议与安全展示 | exact-SHA lint、typecheck、受影响 Vitest 与 production build 有效 | 未验收 |
+| AI-01 OIDC/JIT 身份 | 已建立：Cloud 身份与本地 AI 权限分离 | 首次并发、唯一冲突、SecurityStamp 与审计证据有效 | 未验收 |
+| AI-02 Cloud 真实只读 | 已建立：八个 typed GET、服务端同源 fallback、AST guard | `CloudAiReadClientContractTests`、真实非生产 provider 和发布顺序验收 | 未验收 |
+| MCP 2.0 受治理通道 | 已收口：discovery-first、独立 deadline、typed contract、MCP 专用 structured result、timeout/漂移撤下 | exact-SHA Stdio/HTTP conformance、Architecture/Security、Tool Gate、批准与 Interrupted 证据有效 | 未验收 |
+| 工具与数据安全 | 已建立：权限、身份、注册元数据、脱敏和只读边界 | AIARCH001–007、Architecture/Security、`AgentSafetyApplicationTests` 与 Tool Gate 证据有效 | 未验收 |
 
-“源码目标”只说明当前活动树应维持的结构，不等于 exact SHA 已经过 CI、独立审核或生产验收。旧分支、旧 CI run 和固定测试数不能证明当前候选完成。
+Harness、AgentSession、逐次批准、对话前端和 MCP 2.0 的源码架构已收口。“已收口”只说明当前活动树应维持的结构，不等于 exact SHA 已通过候选验证、产物准备或生产验收。所有能力的生产状态继续保持“未验收”；旧分支、旧 CI run 和固定测试数不能证明当前候选完成。
 
-## 3. 后续路线
+## 3. 候选验证退出门
 
-1. 先保持主链唯一性，完成受影响 Architecture/Security、Business、Persistence、HTTP/SSE 与前端验证，并由独立审核确认无 P0/P1。
-2. 聊天布局与视觉重构只在当前传输契约上进行；不得借 UI 重构恢复已退出的 API 或客户端状态模型。
-3. MCP 2.0 受治理通道保持独立批次；runtime identity、schema、read-only hint、approval、Tool Gate 与 stale-registration 撤下回归未通过前不得进入独立审核门禁，也不得与后续功能扩展混批。
-4. 真实候选只能通过工作区 `Validate-Candidate` / `Prepare-Release` 进入产物阶段；未实际部署时生产状态必须保持“未验收”。
+- 候选必须是已合入、已推送且 `HEAD == origin/main` 的 clean `main` exact SHA；PR head、旧分支或本地未提交字节不能作为候选。
+- 生产 baseline 只能来自获批的只读生产状态工作流，并必须是当前仓库历史中的有效完整 SHA；状态缺失、不健康或无法验证时停止，不得使用旧标签、文档或猜测值替代。
+- 工作区 `Validate-Candidate` 必须先判定同一候选 SHA 的默认 CI：运行中禁止重复本地验证，失败或无效证据不得被本地结果覆盖，成功且范围匹配时复用，缺失范围才由统一入口补齐。
+- 只有绑定同一候选 SHA、真实生产 baseline、Architecture/Security/Business 分类和 Analyzer-enabled Release production graph 的签名绿色证据，才允许在后续独立批次进入 `Prepare-Release`。
+- 未完成候选验证、产物准备和真实部署前，生产状态始终保持“未验收”。
 
 ## 4. 验证约束
 

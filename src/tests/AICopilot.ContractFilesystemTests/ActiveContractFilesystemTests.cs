@@ -61,12 +61,66 @@ public sealed class ActiveContractFilesystemTests
         agentContract.Should().Contain("tool_execution_timeout");
 
         roadmap.Should().Contain(
-            "| 能力 | 源码目标 | 验证退出门 | 生产状态 |");
+            "| 能力 | 源码状态 | 候选验证退出门 | 生产状态 |");
         roadmap.Should().Contain("AI-01");
         roadmap.Should().Contain("AI-02");
         roadmap.Should().Contain("Harness 主聊天");
         roadmap.Should().Contain("ModelContextProtocol 2.0.0");
         roadmap.Should().Contain("MCP 2.0 受治理通道");
+    }
+
+    [Fact]
+    public void AiAuthorityDocuments_ShouldKeepServerOwnedModeFallbackAndDurabilitySemantics()
+    {
+        var root = FindRepositoryRoot();
+        var agentInstructions = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
+        var businessRules = File.ReadAllText(
+            Path.Combine(root, "docs", "AICopilot业务规则.md"));
+        var agentContract = File.ReadAllText(
+            Path.Combine(root, "docs", "Agent工作流与异常契约.md"));
+        var persistenceContract = File.ReadAllText(
+            Path.Combine(root, "docs", "DDD聚合根边界.md"));
+        var roadmap = File.ReadAllText(
+            Path.Combine(root, "docs", "AI架构路线图.md"));
+        var activeContractText = string.Join(
+            '\n',
+            ActiveContractPaths.Select(path => File.ReadAllText(Path.Combine(root, path))));
+
+        string[] modelOwnedFallbackMarkers =
+        [
+            "可由模型决定是否尝试同源 Text-to-SQL",
+            "模型决定是否进入 Text-to-SQL",
+            "模型决定 Text-to-SQL fallback",
+        ];
+        foreach (var marker in modelOwnedFallbackMarkers)
+        {
+            activeContractText.Should().NotContain(marker);
+        }
+
+        businessRules.Should().Contain(
+            "`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner");
+        businessRules.Should().Contain("服务端才自动进入受控 Text-to-SQL");
+        agentContract.Should().Contain(
+            "`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner");
+
+        agentInstructions.Should().Contain("Plan 模式始终只读");
+        businessRules.Should().Contain("`Plan` 始终只读");
+        businessRules.Should().Contain("模型永远不能自行切换模式");
+        businessRules.Should().Contain("`mode_set` 不得进入模型工具面");
+        agentContract.Should().Contain("当前认证 owner 显式调用");
+        agentContract.Should().Contain("`mode_set` 永不进入模型工具面");
+
+        agentContract.Should().Contain("AgentSession checkpoint 只用于会话连续性");
+        agentContract.Should().Contain("不是 durable Tool checkpoint");
+        agentContract.Should().Contain("Interrupted 后不得恢复或重放");
+        persistenceContract.Should().Contain(
+            "数据库 durable commit marker 只用于事务提交结果验证");
+        persistenceContract.Should().Contain(
+            "不是 Agent durable 编排、Tool checkpoint");
+
+        roadmap.Should().Contain("源码架构已收口");
+        roadmap.Should().Contain("生产状态继续保持“未验收”");
+        roadmap.Should().Contain("## 3. 候选验证退出门");
     }
 
     [Fact]
