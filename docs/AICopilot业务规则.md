@@ -134,6 +134,11 @@ Cloud AiRead 设备契约：
 - 不允许配置直接或间接调用 Cloud 写接口的 MCP 工具。
 - 动态配置 MCP 目标默认无法证明为可信 NonCloud；调用方传入 `NonCloud`、opaque URL/alias 或不含 `cloud` 的名称都不得放宽边界。只有 server/tool 同时为 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true` 并通过动词、hint、schema 和 risk 检查才能注册或暴露。
 - MCP 聚合注册、runtime registry refresh、tool plugin builder 和 `MainChatToolGate` 必须复用同一条安全策略；禁止 hostname/token heuristic、伪 allowlist、隐式 fallback 或仅启动时检查。
+- MCP client 固定使用稳定版 `ModelContextProtocol 2.0.0`，不得引入 preview、Tasks、Apps 或其它扩展包，也不得压制 `MCP9005` / `MCP9006` / `MCP9007` / `MCPEXP*` 警告。HTTP 存量 `McpTransportType.Sse` 与数据库/API 值保持不变，内部统一使用 v2 discovery-first `AutoDetect`，由 SDK 自动回退旧 initialize 握手，不维护第二套兼容 client。
+- Stdio 只使用官方 transport，关闭任意父进程环境继承，只传递 SDK 安全默认环境变量；stderr 只能记录脱敏后的长度与错误类别，禁止记录原文、命令输出、token 或环境变量值。
+- discovery 必须从 `ProtocolTool` typed API 读取 canonical tool name、`inputSchema`、`outputSchema` 与 `readOnly` / `destructive` / `idempotent` annotation。每个 server 的连接与 `ListTools` discovery 固定使用独立 30 秒 deadline；超时必须立即撤下旧插件、隔离登记并继续后续 server，迟到任务只能被观察和释放，不能复活 registration。身份缺失、`inputSchema` 缺失、任一 schema 非法、output schema 缺失或 hint 与本地治理元数据冲突时不得注册；既有登记必须标记不可执行并从 Harness 工具面撤下，禁止反射读取 annotation 或退回 runtime alias。
+- 全局 `ToolOutputSchemaContractV1` 保持 object-root；只有 provider 为 MCP 时使用独立 `McpToolOutputSchemaContractV1` 接受受支持的 scalar、array、object。MCP structured result 必须按该本地封闭 schema 和 bounded inline-output 策略验证；验证通过后保留远端原生 JSON 类型交给模型，非 object 结果不得包装成旧 `{ result: ... }`。缺少 structured content、远端 error、类型/字段不匹配或未知 shape 全部 fail-closed，文本 content 不能替代 schema-bound 结果。
+- runtime refresh 每轮同时比较数据库 `RowVersion` 与远端工具 schema/hint、有效注册治理快照组成的指纹；治理快照必须包含 `TimeoutSeconds`。每次 MCP 调用按登记 timeout 执行并在超时时返回稳定 `tool_execution_timeout`，caller cancellation 与宿主停止继续保留取消语义，日志不得包含参数、endpoint 或远端原文。工具删除、schema/hint 漂移、权限/审批/审计/数据边界/schema version/timeout 治理变化、身份冲突或 discovery 失败时必须撤下旧运行时插件并隔离旧登记；即使 `RowVersion` 未变化也不得继续使用陈旧工具。
 - 本地非 MCP 工具仍按其正式 capability/risk/审批策略处理；MCP fail-closed 不等于删除必要的本地副作用工具。
 
 ## 7. Human-in-the-loop 规则
@@ -256,7 +261,7 @@ Cloud AiRead 设备契约：
 - 标准容器共享卷只允许受信任的 AICopilot 后端写入。当前路径边界拒绝既有 symlink/reparse traversal，但不把同 UID 恶意进程在检查与打开之间替换目录的 TOCTOU 视为已解决；扩大威胁模型前必须增加容器权限隔离或 dirfd/`openat` 原子路径操作。
 - 容器必须把 RAG 可写 `FileStorage:RootPath` 固定在共享卷 `/var/lib/aicopilot/storage`，不得回退容器层、`/app`、`LocalApplicationData` 或共享卷外路径。当前 durable local file/journal backend 只支持 Linux/macOS，生产固定 Linux；Windows 必须明确拒绝该 backend。
 - HttpApi 与 DataWorker 必须共享 `/var/lib/aicopilot`；commit marker 默认保留 30 天并按 `created_at_utc` 索引，保留期必须长于对账延迟，有待处理日志的 marker 不得删除。对账日志不可读时必须停止 marker 清理。相关改动由 selector 选择真实 PostgreSQL、migration 和部署配置验证；全量仅在用户显式授权时运行。
-- MCP runtime 配置变更必须进入 runtime registry refresh cycle，禁用、删除或配置变更后不能继续暴露未来工具解析。
+- MCP runtime 配置与远端 discovery 事实都必须进入 runtime registry refresh cycle；禁用、删除、配置变化、schema/hint 漂移或 discovery 失败后不能继续暴露旧工具解析。
 - 身份安全以 security stamp 驱动会话失效；Cloud role 不直接成为 AICopilot 本地 role。
 - 多 DbContext 迁移历史必须通过 `__EFMigrationsHistory` 的上下文隔离或迁移历史表拆分规则治理，不能让单一上下文回滚污染其他上下文状态。
 - 新增或接线 `IStreamPipelineBehavior` 后，必须核对所有公开 `IStreamRequest` 的 `AuthorizeRequirement`，测试种子角色必须覆盖对应权限；无权限场景应返回干净 401/403，不能表现为 SSE 已写 200 后断流。

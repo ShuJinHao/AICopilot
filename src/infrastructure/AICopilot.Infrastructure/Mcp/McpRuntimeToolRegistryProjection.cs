@@ -1,7 +1,5 @@
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.SharedKernel.Ai;
-using ModelContextProtocol.Client;
-using System.Text.Json;
 
 namespace AICopilot.Infrastructure.Mcp;
 
@@ -10,10 +8,10 @@ internal sealed class McpRuntimeToolRegistryProjection(
 {
     public async Task SyncAsync(
         McpServerInfo mcpServerInfo,
-        IReadOnlyCollection<(McpClientTool Tool, McpAllowedTool Exposure)> exposedTools,
+        IReadOnlyCollection<McpRuntimeToolCandidate> exposedTools,
         CancellationToken cancellationToken)
     {
-        if (toolRegistrySynchronizer is null || exposedTools.Count == 0)
+        if (toolRegistrySynchronizer is null)
         {
             return;
         }
@@ -23,9 +21,9 @@ internal sealed class McpRuntimeToolRegistryProjection(
                 AiToolIdentity.CreateRuntimeName(AiToolTargetType.McpServer, mcpServerInfo.Name, candidate.Tool.Name),
                 candidate.Tool.Name,
                 candidate.Tool.Description,
-                JsonSchemaToString(candidate.Tool.JsonSchema),
-                JsonSchemaToString(candidate.Tool.ReturnJsonSchema),
-                candidate.Exposure.EffectiveRiskLevel(mcpServerInfo.RiskLevel)))
+                candidate.InputSchema.GetRawText(),
+                candidate.OutputSchema.GetRawText(),
+                candidate.RiskLevel))
             .ToArray();
 
         await toolRegistrySynchronizer.UpsertDiscoveredToolsAsync(
@@ -34,10 +32,18 @@ internal sealed class McpRuntimeToolRegistryProjection(
             cancellationToken);
     }
 
-    private static string JsonSchemaToString(JsonElement? schema)
+    public async Task MarkUnavailableAsync(
+        string serverName,
+        CancellationToken cancellationToken)
     {
-        return schema.HasValue && schema.Value.ValueKind != JsonValueKind.Undefined
-            ? schema.Value.GetRawText()
-            : "{}";
+        if (toolRegistrySynchronizer is null)
+        {
+            return;
+        }
+
+        await toolRegistrySynchronizer.UpsertDiscoveredToolsAsync(
+            serverName,
+            [],
+            cancellationToken);
     }
 }

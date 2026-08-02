@@ -9,7 +9,11 @@ public sealed record McpToolRegistryReadModel(
     string RiskLevel,
     bool RequiresApproval,
     string? RequiredPermission,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string AuditLevel = "Standard",
+    string DataBoundary = "NoData",
+    int SchemaVersion = 1,
+    int TimeoutSeconds = 120);
 
 public interface IMcpToolRegistryReadService
 {

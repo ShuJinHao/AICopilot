@@ -16,6 +16,37 @@ namespace AICopilot.ApplicationTests;
 public sealed class McpToolGovernanceTests
 {
     [Fact]
+    public void ToolRegistrationOutputContractPolicy_ShouldAllowScalarAndArrayOnlyForMcp()
+    {
+        foreach (var schema in new[] { """{"type":"string"}""", """{"type":"array","items":{"type":"string"}}""" })
+        {
+            ToolRegistrationOutputContractPolicy.Validate(
+                    "mcp__runtime_mcp__query",
+                    ToolProviderType.Mcp,
+                    schema,
+                    schemaVersion: 1,
+                    catalogVersion: 1)
+                .IsValid.Should().BeTrue();
+
+            ToolRegistrationOutputContractPolicy.Validate(
+                    "local_tool",
+                    ToolProviderType.BuiltIn,
+                    schema,
+                    schemaVersion: 1,
+                    catalogVersion: 1)
+                .IsValid.Should().BeFalse();
+
+            ToolRegistrationOutputContractPolicy.Validate(
+                    "cloud_readonly_tool",
+                    ToolProviderType.CloudReadonly,
+                    schema,
+                    schemaVersion: 1,
+                    catalogVersion: 1)
+                .IsValid.Should().BeFalse();
+        }
+    }
+
+    [Fact]
     public async Task GovernanceQuery_ShouldProjectAllowlistRegistryRuntimeAndOrphanStatuses()
     {
         var server = new McpServerInfo(
@@ -139,7 +170,13 @@ public sealed class McpToolGovernanceTests
             ToolProviderType.Mcp,
             ToolRegistrationTargetType.McpServer,
             "runtime-mcp",
-            isEnabled: true);
+            isEnabled: true,
+            riskLevel: AiToolRiskLevel.High,
+            requiredPermission: "AiGateway.Mcp.Query",
+            auditLevel: ToolAuditLevel.Verbose,
+            dataBoundary: ToolDataBoundary.GovernedBusinessReadOnly,
+            schemaVersion: 7,
+            timeoutSeconds: 37);
         var builtInRegistration = CreateToolRegistration(
             "read_uploaded_file",
             ToolProviderType.BuiltIn,
@@ -158,6 +195,13 @@ public sealed class McpToolGovernanceTests
         item.ToolName.Should().Be("read_status");
         item.RuntimeAvailable.Should().BeTrue();
         item.IsEnabled.Should().BeTrue();
+        item.RiskLevel.Should().Be(nameof(AiToolRiskLevel.High));
+        item.RequiresApproval.Should().BeTrue();
+        item.RequiredPermission.Should().Be("AiGateway.Mcp.Query");
+        item.AuditLevel.Should().Be(nameof(ToolAuditLevel.Verbose));
+        item.DataBoundary.Should().Be(nameof(ToolDataBoundary.GovernedBusinessReadOnly));
+        item.SchemaVersion.Should().Be(7);
+        item.TimeoutSeconds.Should().Be(37);
     }
 
     private static McpToolRegistryReadModel Registration(
@@ -184,7 +228,13 @@ public sealed class McpToolGovernanceTests
         ToolProviderType providerType,
         ToolRegistrationTargetType targetType,
         string targetName,
-        bool isEnabled)
+        bool isEnabled,
+        AiToolRiskLevel riskLevel = AiToolRiskLevel.Low,
+        string? requiredPermission = null,
+        ToolAuditLevel auditLevel = ToolAuditLevel.Standard,
+        ToolDataBoundary dataBoundary = ToolDataBoundary.NoData,
+        int schemaVersion = 1,
+        int timeoutSeconds = 120)
     {
         return new ToolRegistration(
             toolCode,
@@ -195,13 +245,15 @@ public sealed class McpToolGovernanceTests
             targetName,
             """{"type":"object"}""",
             """{"type":"object"}""",
-            AiToolRiskLevel.Low,
-            null,
+            riskLevel,
+            requiredPermission,
             requiresApproval: false,
             isEnabled,
-            timeoutSeconds: 120,
-            ToolAuditLevel.Standard,
-            DateTimeOffset.UtcNow);
+            timeoutSeconds,
+            auditLevel,
+            DateTimeOffset.UtcNow,
+            dataBoundary: dataBoundary,
+            schemaVersion: schemaVersion);
     }
 
     private sealed class FakeMcpToolRegistryReadService(params McpToolRegistryReadModel[] registrations)

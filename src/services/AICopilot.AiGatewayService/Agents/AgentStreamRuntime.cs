@@ -169,6 +169,15 @@ public sealed class AgentStreamRuntime : IAgentStreamRuntime
                 runtimeException.UserFacingMessage);
         }
 
+        if (ContainsException<AiToolExecutionTimeoutException>(exception))
+        {
+            return CreateErrorChunk(
+                AppProblemCodes.ToolExecutionTimeout,
+                "Tool execution exceeded its governed timeout.",
+                source,
+                "工具执行超时，请稍后重试或联系管理员检查工具超时配置。");
+        }
+
         if (ContainsException<TimeoutException>(exception)
             || ContainsException<TaskCanceledException>(exception)
             || ContainsException<OperationCanceledException>(exception))

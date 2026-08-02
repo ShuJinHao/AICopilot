@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.Agents;
 using AICopilot.AiGatewayService.Safety;
+using AICopilot.SharedKernel.Ai;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.ContractTests;
@@ -77,6 +78,25 @@ public sealed class ChatErrorContractTests
         payload.Code.Should().Be(AppProblemCodes.ModelRequestTimeout);
         payload.UserFacingMessage.Should().Be("模型响应超时，请稍后重试或缩小问题范围。");
         chunk.Content.Should().NotContain("internal timeout detail");
+    }
+
+    [Fact]
+    public void ToolTimeout_ShouldReturnDedicatedStableCode()
+    {
+        var chunk = AgentStreamRuntime.CreateErrorChunk(
+            new InvalidOperationException(
+                "tool wrapper",
+                new AiToolExecutionTimeoutException()),
+            "test",
+            AppProblemCodes.ChatStreamFailed,
+            "对话执行失败，请稍后重试。");
+
+        var payload = ReadPayload(chunk.Content);
+
+        payload.Code.Should().Be(AppProblemCodes.ToolExecutionTimeout);
+        payload.Detail.Should().Be("Tool execution exceeded its governed timeout.");
+        payload.UserFacingMessage.Should().Be("工具执行超时，请稍后重试或联系管理员检查工具超时配置。");
+        chunk.Content.Should().NotContain("tool wrapper");
     }
 
     [Fact]

@@ -9,6 +9,7 @@
 - `ConversationTemplate.ModelId` 决定主回答模型。Harness 创建后从 `ScopedRuntimeAgent.ConfigurationSnapshot` 记录实际最终模型 provenance，请求不得临时覆盖。
 - `BusinessQuery` 和 `KnowledgeQuery` 是 Execute-only 服务端工具；前者执行 typed provider 优先、仅同源 `Unsupported` / `Unavailable` 允许受控 Text-to-SQL，后者只检索当前用户授权知识库。
 - `MainChatToolGate` 统一筛选本地与 MCP 工具；`ToolSurfaceGuardChatClient` 在 provider 请求和响应两侧 fail-closed。Cloud 业务数据永久只读，模型和人工批准都不能授予 Cloud 写权限。
+- MCP 使用稳定版 `ModelContextProtocol 2.0.0`：HTTP discovery-first/AutoDetect、官方 Stdio transport、typed schema/annotation、每 server 30 秒 discovery deadline、登记驱动的调用 timeout、MCP 专用原生 structured-result 契约，以及 `RowVersion + schema/hint/governance fingerprint` 双重刷新；既有 MCP HTTP API、数据库结构和 `McpTransportType.Sse` 存量值保持不变。
 - 模型端点池、限额、熔断、使用结算和审计以每次真实模型调用为粒度；进程内选择不代替 PostgreSQL 配额预约。
 - 消息历史直接按 `Message.Sequence` 分页。可持久的 AiGateway 面只包含 LanguageModel、ConversationTemplate、Session、Message、AgentSessionState、ToolRegistration 和 ModelQuotaReservation。
 
@@ -21,6 +22,7 @@
 | 逐次工具批准 | 受保护绑定、单工具、所有权/权限/schema/摘要复验 | 批准、拒绝、重复决定、漂移和双待批违约全部 fail-closed | 未验收 |
 | AI-01 OIDC/JIT 身份 | Cloud 身份与本地 AI 权限分离 | 首次并发、唯一冲突、SecurityStamp 与审计通过 | 未验收 |
 | AI-02 Cloud 真实只读 | 八个 typed GET、同源 fallback、AST guard | `CloudAiReadClientContractTests`、真实非生产 provider 和发布顺序验收 | 未验收 |
+| MCP 2.0 受治理通道 | discovery-first、独立 deadline、typed contract、MCP 专用 structured result、timeout/漂移撤下 | Stdio/HTTP conformance、Architecture/Security、Tool Gate、批准与 Interrupted 回归通过 | 未验收 |
 | 工具与数据安全 | 权限、身份、注册元数据、脱敏和只读边界 | AIARCH001–007、Architecture/Security、`AgentSafetyApplicationTests` 与 Tool Gate 用例通过 | 未验收 |
 
 “源码目标”只说明当前活动树应维持的结构，不等于 exact SHA 已经过 CI、独立审核或生产验收。旧分支、旧 CI run 和固定测试数不能证明当前候选完成。
@@ -29,7 +31,7 @@
 
 1. 先保持主链唯一性，完成受影响 Architecture/Security、Business、Persistence、HTTP/SSE 与前端验证，并由独立审核确认无 P0/P1。
 2. 聊天布局与视觉重构只在当前传输契约上进行；不得借 UI 重构恢复已退出的 API 或客户端状态模型。
-3. MCP 版本升级单独立项，必须先重做 runtime identity、schema、read-only hint、approval 和 Tool Gate 回归，不与主链退役同批。
+3. MCP 2.0 受治理通道保持独立批次；runtime identity、schema、read-only hint、approval、Tool Gate 与 stale-registration 撤下回归未通过前不得进入独立审核门禁，也不得与后续功能扩展混批。
 4. 真实候选只能通过工作区 `Validate-Candidate` / `Prepare-Release` 进入产物阶段；未实际部署时生产状态必须保持“未验收”。
 
 ## 4. 验证约束

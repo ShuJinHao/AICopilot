@@ -8,6 +8,7 @@ public sealed class McpRuntimeOptions
     public const int DefaultRefreshIntervalSeconds = 30;
     public const int MinimumRefreshIntervalSeconds = 5;
     public const int MaximumRefreshIntervalSeconds = 300;
+    public const int DiscoveryDeadlineSeconds = 30;
 
     public int RefreshIntervalSeconds { get; init; } = DefaultRefreshIntervalSeconds;
 
@@ -26,12 +27,17 @@ public interface IMcpRuntimeRegistrationProvider
     Task<McpRuntimeRegistration?> CreateRegistrationAsync(
         McpRuntimeServerState server,
         CancellationToken cancellationToken);
+
+    Task QuarantineServerAsync(
+        McpRuntimeServerState server,
+        CancellationToken cancellationToken);
 }
 
 public sealed class McpRuntimeRegistration(
     Guid serverId,
     string serverName,
     uint rowVersion,
+    string toolSchemaFingerprint,
     IAgentPlugin plugin,
     McpRuntimeClientHandle clientHandle)
     : IAsyncDisposable
@@ -41,6 +47,8 @@ public sealed class McpRuntimeRegistration(
     public string ServerName { get; } = serverName;
 
     public uint RowVersion { get; } = rowVersion;
+
+    public string ToolSchemaFingerprint { get; } = toolSchemaFingerprint;
 
     public IAgentPlugin Plugin { get; } = plugin;
 
@@ -162,6 +170,9 @@ public sealed class McpRuntimeRegistrySynchronizer(
     private readonly Dictionary<string, McpRuntimeRegistration> activeRegistrations =
         new(StringComparer.OrdinalIgnoreCase);
 
+    internal TimeSpan DiscoveryDeadline { get; init; } =
+        TimeSpan.FromSeconds(McpRuntimeOptions.DiscoveryDeadlineSeconds);
+
     public async Task ReconcileAsync(
         IMcpRuntimeRegistrationProvider registrationProvider,
         CancellationToken cancellationToken)
@@ -181,17 +192,74 @@ public sealed class McpRuntimeRegistrySynchronizer(
 
         foreach (var candidate in candidatesByName.Values)
         {
-            if (activeRegistrations.TryGetValue(candidate.Name, out var existing)
-                && existing.ServerId == candidate.ServerId
-                && existing.RowVersion == candidate.RowVersion)
+            McpRuntimeRegistration? replacement;
+            using var discoveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            discoveryCts.CancelAfter(DiscoveryDeadline);
+            Task<McpRuntimeRegistration?>? registrationTask = null;
+            try
             {
+                registrationTask = registrationProvider.CreateRegistrationAsync(
+                    candidate,
+                    discoveryCts.Token);
+                replacement = await registrationTask.WaitAsync(
+                    DiscoveryDeadline,
+                    cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                discoveryCts.Cancel();
+                ObserveLateRegistration(registrationTask!, candidate.Name);
+                await WithdrawTimedOutRegistrationAsync(
+                    registrationProvider,
+                    candidate,
+                    cancellationToken);
+                continue;
+            }
+            catch (OperationCanceledException) when (
+                !cancellationToken.IsCancellationRequested &&
+                discoveryCts.IsCancellationRequested)
+            {
+                await WithdrawTimedOutRegistrationAsync(
+                    registrationProvider,
+                    candidate,
+                    cancellationToken);
+                continue;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                discoveryCts.Cancel();
+                if (registrationTask is { IsCompleted: false })
+                {
+                    ObserveLateRegistration(registrationTask, candidate.Name);
+                }
+
+                throw;
+            }
+            catch (Exception ex)
+            {
+                await RemoveRegistrationAsync(candidate.Name);
+                logger.LogWarning(
+                    "MCP runtime discovery failed for {Name}; the stale registration was withdrawn. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                    candidate.Name,
+                    ex.GetType().Name);
                 continue;
             }
 
-            var replacement = await registrationProvider.CreateRegistrationAsync(candidate, cancellationToken);
             if (replacement is null)
             {
                 await RemoveRegistrationAsync(candidate.Name);
+                continue;
+            }
+
+            if (activeRegistrations.TryGetValue(candidate.Name, out var existing)
+                && existing.ServerId == replacement.ServerId
+                && existing.RowVersion == replacement.RowVersion
+                && string.Equals(
+                    existing.ToolSchemaFingerprint,
+                    replacement.ToolSchemaFingerprint,
+                    StringComparison.Ordinal))
+            {
+                await DisposeRegistrationAsync(replacement);
                 continue;
             }
 
@@ -226,6 +294,82 @@ public sealed class McpRuntimeRegistrySynchronizer(
         if (previous is not null)
         {
             await DisposeRegistrationAsync(previous);
+        }
+    }
+
+    private async Task WithdrawTimedOutRegistrationAsync(
+        IMcpRuntimeRegistrationProvider registrationProvider,
+        McpRuntimeServerState server,
+        CancellationToken cancellationToken)
+    {
+        WithdrawRegistrationWithoutWaiting(server.Name);
+
+        try
+        {
+            await registrationProvider.QuarantineServerAsync(server, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                "MCP discovery timed out and the runtime plugin was withdrawn, but registry quarantine failed. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                ex.GetType().Name);
+        }
+
+        logger.LogWarning(
+            "MCP runtime discovery exceeded the independent {DiscoveryDeadlineSeconds}s deadline; the stale plugin was withdrawn and processing continued.",
+            DiscoveryDeadline.TotalSeconds);
+    }
+
+    private void WithdrawRegistrationWithoutWaiting(string name)
+    {
+        pluginRegistry.UnregisterAgentPlugin(name);
+        if (!activeRegistrations.Remove(name, out var registration))
+        {
+            return;
+        }
+
+        // Withdrawal must not wait for a pre-existing invocation or an
+        // unresponsive transport to finish disposing before later servers are
+        // reconciled. DisposeRegistrationAsync observes and contains failures.
+        _ = DisposeRegistrationAsync(registration);
+        logger.LogInformation(
+            "Unregistered timed-out MCP runtime plugin {Name}; client disposal continues independently.",
+            name);
+    }
+
+    private void ObserveLateRegistration(
+        Task<McpRuntimeRegistration?> registrationTask,
+        string serverName)
+    {
+        _ = ObserveLateRegistrationCoreAsync(registrationTask, serverName);
+    }
+
+    private async Task ObserveLateRegistrationCoreAsync(
+        Task<McpRuntimeRegistration?> registrationTask,
+        string serverName)
+    {
+        try
+        {
+            var lateRegistration = await registrationTask.ConfigureAwait(false);
+            if (lateRegistration is not null)
+            {
+                await DisposeRegistrationAsync(lateRegistration);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The server-specific deadline or host cancellation was observed.
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                "Late MCP discovery completion was observed after withdrawal. Server={Name}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                serverName,
+                ex.GetType().Name);
         }
     }
 

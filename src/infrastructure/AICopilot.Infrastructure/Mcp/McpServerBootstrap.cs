@@ -19,7 +19,7 @@ public class McpServerBootstrap(
     McpToolRegistrySynchronizer? toolRegistrySynchronizer = null)
     : IMcpServerBootstrap, IMcpRuntimeRegistrationProvider
 {
-    private readonly McpRuntimeProtectedToolReader protectedToolReader = new(toolRegistryReadService);
+    private readonly McpRuntimeToolGovernanceReader governanceReader = new(toolRegistryReadService);
     private readonly McpRuntimeToolPluginBuilder toolPluginBuilder = new(logger);
     private readonly McpRuntimeToolRegistryProjection toolRegistryProjection = new(toolRegistrySynchronizer);
 
@@ -63,11 +63,59 @@ public class McpServerBootstrap(
         McpRuntimeServerState server,
         CancellationToken cancellationToken)
     {
+        using var discoveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        discoveryCts.CancelAfter(DiscoveryDeadline);
+        var registrationTask = CreateRegistrationCoreAsync(server, discoveryCts.Token);
+
+        try
+        {
+            return await registrationTask.WaitAsync(DiscoveryDeadline, cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            discoveryCts.Cancel();
+            ObserveLateRegistration(registrationTask, server.Name);
+            await MarkUnavailableAsync(server.Name, cancellationToken);
+            logger.LogWarning(
+                "MCP server discovery exceeded the independent {DiscoveryDeadlineSeconds}s deadline and was quarantined.",
+                DiscoveryDeadline.TotalSeconds);
+            return null;
+        }
+        catch (OperationCanceledException) when (
+            !cancellationToken.IsCancellationRequested &&
+            discoveryCts.IsCancellationRequested)
+        {
+            await MarkUnavailableAsync(server.Name, cancellationToken);
+            logger.LogWarning(
+                "MCP server discovery exceeded the independent {DiscoveryDeadlineSeconds}s deadline and was quarantined.",
+                DiscoveryDeadline.TotalSeconds);
+            return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            discoveryCts.Cancel();
+            if (!registrationTask.IsCompleted)
+            {
+                ObserveLateRegistration(registrationTask, server.Name);
+            }
+
+            throw;
+        }
+    }
+
+    protected virtual TimeSpan DiscoveryDeadline =>
+        TimeSpan.FromSeconds(McpRuntimeOptions.DiscoveryDeadlineSeconds);
+
+    private async Task<McpRuntimeRegistration?> CreateRegistrationCoreAsync(
+        McpRuntimeServerState server,
+        CancellationToken cancellationToken)
+    {
         var mcpServerInfo = await mcpServerRepository.GetByIdAsync(
             new McpServerId(server.ServerId),
             cancellationToken);
         if (mcpServerInfo is null || !IsRuntimeCandidate(mcpServerInfo))
         {
+            await MarkUnavailableAsync(server.Name, cancellationToken);
             return null;
         }
 
@@ -78,12 +126,22 @@ public class McpServerBootstrap(
         }
         catch (McpRuntimeStdioCommandUnavailableException ex)
         {
+            await MarkUnavailableAsync(mcpServerInfo.Name, cancellationToken);
             logger.LogWarning(
                 "MCP server {Name} was skipped because stdio command {Command} is unavailable. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
                 mcpServerInfo.Name,
                 ex.Command,
                 ex.GetType().Name);
             return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            await MarkUnavailableAsync(mcpServerInfo.Name, cancellationToken);
+            throw;
         }
 
         var clientHandle = new McpRuntimeClientHandle(mcpClient);
@@ -100,6 +158,8 @@ public class McpServerBootstrap(
                 tools.Count,
                 exposedTools.Length);
 
+            await toolRegistryProjection.SyncAsync(mcpServerInfo, exposedTools, cancellationToken);
+
             if (exposedTools.Length == 0)
             {
                 logger.LogWarning(
@@ -109,21 +169,73 @@ public class McpServerBootstrap(
                 return null;
             }
 
-            var protectedNames = await protectedToolReader.LoadProtectedToolNamesAsync(mcpServerInfo.Name, cancellationToken);
-            await toolRegistryProjection.SyncAsync(mcpServerInfo, exposedTools, cancellationToken);
-            var plugin = toolPluginBuilder.BuildMcpPlugin(mcpServerInfo, exposedTools, protectedNames, clientHandle);
+            var governance = await governanceReader.LoadAsync(mcpServerInfo.Name, cancellationToken);
+            var toolBindings = toolPluginBuilder.BindGovernance(
+                mcpServerInfo.Name,
+                exposedTools,
+                governance);
+            var plugin = toolPluginBuilder.BuildMcpPlugin(mcpServerInfo, toolBindings, clientHandle);
+            var schemaFingerprint = McpRuntimeToolContract.ComputeFingerprint(
+                mcpServerInfo.Name,
+                toolBindings);
 
             return new McpRuntimeRegistration(
                 mcpServerInfo.Id.Value,
                 mcpServerInfo.Name,
                 mcpServerInfo.RowVersion,
+                schemaFingerprint,
                 plugin,
                 clientHandle);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await clientHandle.DisposeAsync();
+            throw;
         }
         catch
         {
             await clientHandle.DisposeAsync();
+            await MarkUnavailableAsync(mcpServerInfo.Name, cancellationToken);
             throw;
+        }
+    }
+
+    public Task QuarantineServerAsync(
+        McpRuntimeServerState server,
+        CancellationToken cancellationToken)
+    {
+        return MarkUnavailableAsync(server.Name, cancellationToken);
+    }
+
+    private void ObserveLateRegistration(
+        Task<McpRuntimeRegistration?> registrationTask,
+        string serverName)
+    {
+        _ = ObserveLateRegistrationCoreAsync(registrationTask, serverName);
+    }
+
+    private async Task ObserveLateRegistrationCoreAsync(
+        Task<McpRuntimeRegistration?> registrationTask,
+        string serverName)
+    {
+        try
+        {
+            var lateRegistration = await registrationTask.ConfigureAwait(false);
+            if (lateRegistration is not null)
+            {
+                await lateRegistration.DisposeAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The server-specific deadline or caller cancellation was observed.
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                "Late MCP bootstrap discovery completion was observed after quarantine. Server={Name}; ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                serverName,
+                ex.GetType().Name);
         }
     }
 
@@ -159,5 +271,26 @@ public class McpServerBootstrap(
     private static string[] ResolveCommandArguments(string rawArguments)
     {
         return McpRuntimeClientFactory.ResolveCommandArguments(rawArguments);
+    }
+
+    private async Task MarkUnavailableAsync(
+        string serverName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await toolRegistryProjection.MarkUnavailableAsync(serverName, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                "Failed to quarantine MCP registrations for {Name}. ErrorType={ErrorType}; OriginalMessage=hidden_by_security_policy",
+                serverName,
+                ex.GetType().Name);
+        }
     }
 }

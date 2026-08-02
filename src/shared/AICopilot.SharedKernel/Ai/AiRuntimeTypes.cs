@@ -261,6 +261,8 @@ public sealed class AiToolDefinition
 
     public int SchemaVersion { get; init; } = 1;
 
+    public int TimeoutSeconds { get; init; } = 120;
+
     public bool ReadOnlyDeclared { get; init; }
 
     public bool? McpReadOnlyHint { get; init; }
@@ -346,7 +348,8 @@ public sealed class AiToolDefinition
         string? requiredPermission,
         string? auditLevel,
         string? dataBoundary,
-        int schemaVersion)
+        int schemaVersion,
+        int? timeoutSeconds = null)
     {
         return Copy(
             requiresApproval: requiresApproval,
@@ -354,7 +357,8 @@ public sealed class AiToolDefinition
             requiredPermission: requiredPermission,
             auditLevel: auditLevel,
             dataBoundary: dataBoundary,
-            schemaVersion: schemaVersion);
+            schemaVersion: schemaVersion,
+            timeoutSeconds: timeoutSeconds);
     }
 
     private AiToolDefinition Copy(
@@ -371,6 +375,7 @@ public sealed class AiToolDefinition
         string? auditLevel = null,
         string? dataBoundary = null,
         int? schemaVersion = null,
+        int? timeoutSeconds = null,
         bool? readOnlyDeclared = null,
         bool? mcpReadOnlyHint = null,
         bool? mcpDestructiveHint = null,
@@ -393,6 +398,7 @@ public sealed class AiToolDefinition
             AuditLevel = auditLevel ?? AuditLevel,
             DataBoundary = dataBoundary ?? DataBoundary,
             SchemaVersion = schemaVersion ?? SchemaVersion,
+            TimeoutSeconds = timeoutSeconds ?? TimeoutSeconds,
             ReadOnlyDeclared = readOnlyDeclared ?? ReadOnlyDeclared,
             McpReadOnlyHint = mcpReadOnlyHint ?? McpReadOnlyHint,
             McpDestructiveHint = mcpDestructiveHint ?? McpDestructiveHint,

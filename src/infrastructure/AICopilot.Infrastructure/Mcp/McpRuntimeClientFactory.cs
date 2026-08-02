@@ -23,7 +23,12 @@ internal static class McpRuntimeClientFactory
             Command = command,
             Arguments = arguments,
             WorkingDirectory = ResolveWorkingDirectory(arguments),
-            StandardErrorLines = line => logger.LogWarning("MCP server {Name} stderr: {Line}", mcpServerInfo.Name, line)
+            InheritEnvironmentVariables = false,
+            EnvironmentVariables = StdioClientTransportOptions.GetDefaultEnvironmentVariables(),
+            StandardErrorLines = line => logger.LogWarning(
+                "MCP server {Name} stderr was suppressed. CharacterCount={CharacterCount}; OriginalLine=hidden_by_security_policy",
+                mcpServerInfo.Name,
+                line?.Length ?? 0)
         };
 
         var transport = new StdioClientTransport(transportOptions);
@@ -42,7 +47,7 @@ internal static class McpRuntimeClientFactory
         var transportOptions = new HttpClientTransportOptions
         {
             Endpoint = endpoint!,
-            TransportMode = HttpTransportMode.Sse,
+            TransportMode = HttpTransportMode.AutoDetect,
             ConnectionTimeout = SseConnectionTimeout
         };
 

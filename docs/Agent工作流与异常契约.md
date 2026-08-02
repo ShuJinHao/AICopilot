@@ -33,6 +33,9 @@
 - 本地插件与 MCP 工具必须统一经过 `MainChatToolGate`。缺少精确注册、登记与运行时身份不一致或任一检查失败时，工具不得进入模型目录。
 - 门禁逐项校验 `IsEnabled`、`IsExecutableByAgent`、当前用户 `RequiredPermission`、`RiskLevel`、`RequiresApproval`、`AuditLevel`、`DataBoundary`、`SchemaVersion`、输入/输出 schema 与 `AiToolSafetyPolicy`。
 - 运行时不得用工具名 alias、描述、endpoint、hostname 或调用方自报值替代规范身份和治理元数据。动态 MCP 只有 server 与 tool 都满足 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true`，并携带独立 canonical `ToolName` 时才可继续检查。
+- MCP 运行时固定为稳定版 `ModelContextProtocol 2.0.0` typed API。HTTP 保留存量 `Sse` 配置值但内部执行 discovery-first `AutoDetect` 并由 SDK 回退旧握手；Stdio 禁止继承任意父进程环境，只传递 SDK 安全默认集，stderr 不记录原文。
+- MCP discovery 的 canonical identity 固定为 `serverName + ProtocolTool.Name`。每个 server 的连接与 `ListTools` discovery 使用独立 30 秒 deadline；超时先撤下旧插件并隔离登记，再继续后续 server，迟到结果只允许被观察和释放。`inputSchema` / `outputSchema` / typed annotation 任一缺失、非法或与本地治理元数据冲突时，登记标记不可执行且运行时工具撤下。每轮 refresh 必须同时比较数据库 `RowVersion` 与远端 schema/hint、有效权限/审批/审计/数据边界/schema version/timeout 组成的指纹；删除、漂移或 discovery 失败不得保留旧插件。
+- MCP 调用前再次执行同一 `AiToolSafetyPolicy` 并验证 canonical 参数，调用 deadline 固定来自受保护登记的 `TimeoutSeconds`；只有该 deadline 到期才映射为 `tool_execution_timeout`，caller cancellation 与宿主停止不得误判。调用后只允许通过 MCP 专用封闭 output schema 的 bounded structured content 进入模型。全局 v1 输出契约仍只接受 object；MCP 专用契约才允许 scalar、array、object 等原生 JSON 类型，且不生成 `{ result: ... }` 兼容包装；文本替代、未知 shape 和远端 error 全部 fail-closed。
 - `DiagnosticAdvisorPlugin/GenerateDiagnosticChecklist` 必须有唯一、精确、版本化登记；不得依赖宽泛插件放行。
 - 主 Harness 必须设置 `DisableToolAutoApproval=true` 与 `ChatOptions.AllowMultipleToolCalls=false`，且不得配置 `ToolApprovalAgentOptions` / `AutoApprovalRules`。需要批准的工具继续使用官方 `ApprovalRequiredAIFunction` 逐次询问；关闭的是支持 standing rules 和多批准排队的 `ToolApprovalAgent` 中间件。禁止“不再询问”及 `AlwaysApproveToolApprovalResponseContent` 等永久批准信号。单工具限制只属于主聊天；Text-to-SQL、分类和结构化生成等轻量内部 Agent 保持各自现行调用策略。
 
