@@ -302,7 +302,7 @@ public sealed class McpRuntimeRegistrySynchronizer(
         McpRuntimeServerState server,
         CancellationToken cancellationToken)
     {
-        await RemoveRegistrationAsync(server.Name);
+        WithdrawRegistrationWithoutWaiting(server.Name);
 
         try
         {
@@ -322,6 +322,23 @@ public sealed class McpRuntimeRegistrySynchronizer(
         logger.LogWarning(
             "MCP runtime discovery exceeded the independent {DiscoveryDeadlineSeconds}s deadline; the stale plugin was withdrawn and processing continued.",
             DiscoveryDeadline.TotalSeconds);
+    }
+
+    private void WithdrawRegistrationWithoutWaiting(string name)
+    {
+        pluginRegistry.UnregisterAgentPlugin(name);
+        if (!activeRegistrations.Remove(name, out var registration))
+        {
+            return;
+        }
+
+        // Withdrawal must not wait for a pre-existing invocation or an
+        // unresponsive transport to finish disposing before later servers are
+        // reconciled. DisposeRegistrationAsync observes and contains failures.
+        _ = DisposeRegistrationAsync(registration);
+        logger.LogInformation(
+            "Unregistered timed-out MCP runtime plugin {Name}; client disposal continues independently.",
+            name);
     }
 
     private void ObserveLateRegistration(

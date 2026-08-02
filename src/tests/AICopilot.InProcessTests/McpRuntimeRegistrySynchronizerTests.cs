@@ -157,11 +157,12 @@ public sealed class McpRuntimeRegistrySynchronizerTests
         var lateClient = new TrackingAsyncDisposable();
         var lateCompletion = new TaskCompletionSource<McpRuntimeRegistration?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        McpRuntimeRegistration? slowExistingRegistration = null;
         var provider = new FakeRuntimeRegistrationProvider
         {
             CandidateServers = [slowState, healthyState],
             Create = state => state.Name == slowState.Name
-                ? CreateRegistration(state, slowExistingClient, "schema-a")
+                ? slowExistingRegistration = CreateRegistration(state, slowExistingClient, "schema-a")
                 : CreateRegistration(state, healthyExistingClient, "schema-a")
         };
         var loader = CreateLoader();
@@ -170,6 +171,7 @@ public sealed class McpRuntimeRegistrySynchronizerTests
             TimeSpan.FromMilliseconds(50));
 
         await synchronizer.ReconcileAsync(provider, CancellationToken.None);
+        using var activeSlowInvocation = slowExistingRegistration!.ClientHandle.AcquireInvocation();
 
         provider.CreateAsync = (state, _) => state.Name == slowState.Name
             ? lateCompletion.Task
@@ -182,7 +184,8 @@ public sealed class McpRuntimeRegistrySynchronizerTests
         stopwatch.Stop();
         stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
         loader.GetPlugin(slowState.Name).Should().BeNull();
-        slowExistingClient.DisposeCount.Should().Be(1);
+        slowExistingClient.DisposeCount.Should().Be(0,
+            "withdrawal must continue while an existing invocation delays client disposal");
         provider.QuarantinedServers.Should().ContainSingle().Which.Should().Be(slowState.Name);
         loader.GetPlugin(healthyState.Name).Should().NotBeNull(
             "one unresponsive server must not block later discovery");
@@ -195,6 +198,10 @@ public sealed class McpRuntimeRegistrySynchronizerTests
         lateClient.DisposeCount.Should().Be(1);
         loader.GetPlugin(slowState.Name).Should().BeNull(
             "a late registration must only be observed and disposed, never registered");
+
+        activeSlowInvocation.Dispose();
+        await slowExistingClient.Disposed.WaitAsync(TimeSpan.FromSeconds(2));
+        slowExistingClient.DisposeCount.Should().Be(1);
     }
 
     [Fact]
