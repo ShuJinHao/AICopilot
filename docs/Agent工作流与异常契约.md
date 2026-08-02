@@ -14,15 +14,15 @@
 ### 1.1 Plan / Execute
 
 - `Plan` 与 `Execute` 是同一 Harness `AgentSession` 的服务端权威模式；新会话默认 `Plan`，不得映射为另一套任务状态机。
-- `Plan` 只允许 Harness Todo 与 `mode_get`，不得向模型公开 Cloud、RAG、MCP、`BusinessQuery`、`KnowledgeQuery` 或其它外部/业务工具，也不得执行真实业务动作。
+- `Plan` 始终只读，只允许 Harness Todo 与 `mode_get`，不得向模型公开 Cloud、RAG、MCP、`BusinessQuery`、`KnowledgeQuery` 或其它外部/业务工具，也不得执行真实业务动作。
 - `Execute` 可以直接回答，或调用经过当前用户、当前会话和实时安全门禁筛选的工具。模式切换不能扩大注册表、权限、风险、批准或数据边界。
-- 模式切换唯一入口是认证的 `PUT /api/aigateway/session/{sessionId}/agent-mode`，请求携带 `plan|execute` 与 `expectedVersion`，仅 owner 可调用，并通过 Harness 官方 `SetModeAsync` 修改。活跃 turn、待批准、Interrupted 或版本冲突必须拒绝。
+- 模式切换唯一入口是当前认证 owner 显式调用 `PUT /api/aigateway/session/{sessionId}/agent-mode`，请求携带 `plan|execute` 与 `expectedVersion`，并通过 Harness 官方 `SetModeAsync` 修改。模型永远不能自行切换模式，`mode_set` 永不进入模型工具面；活跃 turn、待批准、Interrupted 或版本冲突必须拒绝。
 
 ### 1.2 AgentSession 持久化
 
 - 每个新 Session 同步创建一条 `agent_session_states` 一对一记录，绑定 `session_id + user_id + tenant_id`，保存 schema version、受保护的完整 AgentSession、`Ready|Running|Interrupted`、active turn、乐观并发版本和创建/更新/过期时间。
-- AgentSession 明文上限 2 MiB，采用 30 天滑动 TTL。运行前在会话锁内写 `Running + turn id`；每次真实模型调用后 checkpoint。正常完成、等待批准和模式切换都要保存完整状态。
-- 取得锁后发现遗留 `Running` 时只允许转为 `Interrupted`，不得自动恢复、重放模型或重放工具。状态缺失、schema 不匹配、损坏、超限或过期统一返回 `agent_session_reset_required` 并要求新建会话。
+- AgentSession 明文上限 2 MiB，采用 30 天滑动 TTL。运行前在会话锁内写 `Running + turn id`；每次真实模型调用后写会话连续性 checkpoint。正常完成、等待批准和模式切换都要保存完整状态。
+- AgentSession checkpoint 只用于会话连续性，不是 durable Tool checkpoint、任务队列、lease/fencing 或工具恢复点，也不证明远端工具已经完成。取得锁后发现遗留 `Running` 时只允许转为 `Interrupted`；Interrupted 后不得恢复或重放模型、工具及旧批准。状态缺失、schema 不匹配、损坏、超限或过期统一返回 `agent_session_reset_required` 并要求新建会话。
 - 状态使用 ASP.NET Core Data Protection 固定用途字符串认证加密，`ApplicationName` 固定为 `AICopilot.AgentSessions`。生产 key ring 固定持久化到 `/var/lib/aicopilot/data-protection-keys`；目录必须预先存在、归属运行用户、owner 可读写执行，且 group/other 不可写。密钥、状态明文和解密错误不得写入日志。
 - 当前部署拓扑只支持 `SingleInstance`。HTTP API 启动时必须拒绝其它拓扑、错误路径、符号链接、错误 owner 或不安全权限；多实例必须先另立共享 key provider 契约，不得复用本地目录假装共享。
 
@@ -42,7 +42,7 @@
 ### 2.2 BusinessQuery
 
 - `BusinessQuery` 是服务端固定 Execute-only 工具，先校验 `AiGateway.Chat` 权限；Text-to-SQL 只可作为内部 fallback，绝不直接暴露给模型。
-- Cloud typed provider 是首选路径。只有同一 Cloud profile 返回 `Unsupported` 或 `Unavailable` 才可进入受控 Text-to-SQL；`Success`、`Empty`、`NeedClarification`、`Unauthorized` 均不得 fallback。禁止跨源、Simulation、MCP 或隐藏 adapter fallback。
+- Cloud typed provider 是首选路径。`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner；只有同一 Cloud profile 返回 `Unsupported` 或 `Unavailable` 且全部服务端治理条件通过时，`BusinessQueryExecutor` 才自动进入受控 Text-to-SQL。模型既看不到 Text-to-SQL 工具，也不得决定或触发 fallback；`Success`、`Empty`、`NeedClarification`、`Unauthorized` 均不得 fallback。禁止跨源、Simulation、MCP 或隐藏 adapter fallback。
 - `Analysis.Recipe.*` 具体配方数据在语义规划器、provider、数据库和 fallback 之前即被拒绝。SQL 最终统一经过 profile-aware AST 只读门禁和只读数据库账号。
 - 模型只接收 bounded、脱敏的业务摘要和治理证据，不得接收 SQL、原始行、连接信息、内部 schema、provider raw output 或未授权字段。
 

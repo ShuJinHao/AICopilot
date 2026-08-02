@@ -47,6 +47,7 @@
 - `AiCopilotDbContext` 是 `outbox.outbox_messages` 与 `persistence.commit_markers` 的唯一 migration owner；运行时专用 context 使用 `ExcludeFromMigrations`。
 - AiGateway 只从 `Session` 领域事件物化 Outbox；RAG 使用 delayed integration-event factory。DataAnalysis 和 MCP 没有领域事件生产者，不得恢复通用扫描。
 - 业务行、Outbox、审计和 commit marker 只能由 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 通过 EF execution strategy 原子提交。每个 attempt 对业务 context 只执行一次 `SaveChangesAsync(false)`。
+- 数据库 durable commit marker 只用于事务提交结果验证和 commit-ACK 丢失对账，不是 Agent durable 编排、Tool checkpoint、任务恢复点或工具重放依据。
 - COMMIT 成功但 ACK 丢失只能使用同事务 marker 的 fresh context 验证；无法确认时返回 `persistence_commit_outcome_unknown`，调用方不得自动重放业务。
 - `OutboxDispatcher` 统一领取和发布，必须保留 `FOR UPDATE SKIP LOCKED` 和 dead-letter 上限。`PersistenceMaintenanceWorker` 只维护 commit marker、RAG 文件对账和 Outbox 等当前责任。
 - RAG 文档上传继续先写 durable reconciliation journal、再写物理文件，并与 repository marker 共用 commit id；其它会话文件入口不属于当前 AiGateway 持久化面。

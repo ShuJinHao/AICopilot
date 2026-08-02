@@ -20,7 +20,7 @@
 - 当前唯一真实外部业务数据源是 Cloud；MES/ERP 以后只通过统一 provider/profile 插件扩展。AICopilot 不得通过 SQL、MCP、Tool、workflow、后台任务或隐藏适配器写 Cloud。
 - 每个分析任务先确认来源、数据类型、对象、时间和过滤条件；业务插件优先，只有同源 `Unsupported`/`Unavailable` 可尝试 Text-to-SQL，空集、询问、未授权和凭据失败不得绕过，Simulation 必须显式选择。
 - SQL 安全只由执行咽喉的共享 AST guard、所选 source profile 和只读数据库账号共同负责；Prompt 不维护写操作动词黑名单。
-- Plan 模式在用户确认前只生成草案，不执行查询、工具或 Worker；最终回答、图表和产物只能基于本轮或用户显式引用的封存证据，不得伪造事实。
+- Plan 模式始终只读，只允许 Harness Todo 与 `mode_get`，不执行查询、外部工具或 Worker；只有当前认证 owner 显式调用带 `expectedVersion` 的会话 API 才能切换到 Execute，模型不得自行切换。最终回答、图表和产物只能基于本轮或用户显式引用的封存证据，不得伪造事实。
 
 ## 任务与部署
 
