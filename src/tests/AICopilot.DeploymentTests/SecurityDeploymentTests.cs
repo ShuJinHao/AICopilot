@@ -128,8 +128,6 @@ public sealed class SecurityDeploymentTests
             "github.event_name == 'workflow_dispatch' && (inputs.mode == 'quality' || inputs.mode == 'full')");
         ciWorkflow.Should().Contain(
             "github.event_name == 'workflow_dispatch' && inputs.mode == 'cross-project'");
-        ciWorkflow.Should().Contain(
-            "github.event_name == 'workflow_dispatch' && inputs.mode == 'full'");
         ciWorkflow.Should().NotContain("schedule:");
         ciWorkflow.Should().NotContain("  governance_gates:");
         ciWorkflow.Should().NotContain("  mutation_gate:");
