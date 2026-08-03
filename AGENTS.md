@@ -9,7 +9,7 @@
 - Agent workflow、Plan/Chat、MCP/Tool、审批、异常或前端错误：再读唯一技术正文 [Agent 工作流与异常契约](docs/Agent工作流与异常契约.md) 的相关章节。
 - 聚合、repository、DbContext、迁移、审计、Outbox、事务、commit marker 或 RAG 文件持久化：再读唯一技术正文 [DDD 聚合根边界](docs/DDD聚合根边界.md) 的相关章节。
 - Analyzer、测试物理归口或 `AIARCH`/`AI-SEC` Rule ID：再读业务规则工程章节、对应 Analyzer 账本和受影响测试。
-- AI 架构阶段、剩余门禁或退出条件：再读 `docs/AI架构路线图.md` 的对应章节；路线图只描述当前候选状态，不是生产验收记录。
+- AI 架构当前状态或下一退出门：再读 [AI 架构路线图](docs/AI架构路线图.md)；路线图是状态与退出门入口，不承载实现、候选验证算法或部署操作正文，也不是生产验收记录。
 - 部署或生产配置：再读 `docs/AICopilot安全部署契约.md`、`deploy/enterprise-ai/README.md` 和工作区部署总览的对应章节。
 - 只有修改 `src/vues/AICopilot.Web` 时才读取该目录的 `AGENTS.md`。
 - 历史事实只从 Git、发布目录和部署记录追溯；不得新建滚动复盘、历史核心类文档、日期式治理快照或第二份部署指南。真实事故统一写入工作区 `docs/事故/生产事故.md` 或 `docs/事故/部署事故.md`。

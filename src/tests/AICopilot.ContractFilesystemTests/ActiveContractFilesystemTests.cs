@@ -42,9 +42,6 @@ public sealed class ActiveContractFilesystemTests
             Path.Combine(root, "docs", "Agent工作流与异常契约.md"));
         var cloudContract = File.ReadAllText(
             Path.Combine(root, "docs", "Cloud只读数据分析契约.md"));
-        var roadmap = File.ReadAllText(
-            Path.Combine(root, "docs", "AI架构路线图.md"));
-
         businessRules.Should().Contain("JIT 首次身份绑定并发");
         businessRules.Should().Contain("逐次工具批准产品边界");
         cloudContract.Should().Contain("查询确认键固定为 `SessionId`");
@@ -67,12 +64,307 @@ public sealed class ActiveContractFilesystemTests
         agentContract.Should().Contain("ModelContextProtocol 2.0.0");
         agentContract.Should().Contain("tool_execution_timeout");
 
-        roadmap.Should().Contain(
-            "| 能力 | 源码状态 | 候选验证退出门 | 生产状态 |");
-        roadmap.Should().Contain("AI-01");
-        roadmap.Should().Contain("AI-02");
-        roadmap.Should().Contain("Harness 主聊天");
-        roadmap.Should().Contain("MCP 2.0 受治理通道");
+    }
+
+    [Fact]
+    public void ArchitectureRoadmap_ShouldRemainADynamicCurrentStatusRegistry()
+    {
+        var root = FindRepositoryRoot();
+        var agentInstructions = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
+        var businessRules = File.ReadAllText(
+            Path.Combine(root, "docs", "AICopilot业务规则.md"));
+        var roadmap = File.ReadAllText(
+            Path.Combine(root, "docs", "AI架构路线图.md"));
+
+        const string expectedRoutingParagraph =
+            "本文档只登记当前能力状态和下一退出门，不承载实现正文、验证算法、部署操作或历史过程。MAF / Harness 细节见 [Agent 工作流与异常契约](./Agent工作流与异常契约.md)，Cloud 查询与数据安全见 [Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)，聚合与持久化见 [DDD 聚合根边界](./DDD聚合根边界.md)，候选与生产退出规则见 [AICopilot 安全部署契约](./AICopilot安全部署契约.md)。战略性“不做”边界只见 [AICopilot 业务规则](./AICopilot业务规则.md)。";
+        const string tableHeader =
+            "| 能力 | 源码状态 | 候选状态 | 生产状态 | 下一退出门 |";
+        Regex.Matches(
+                roadmap,
+                Regex.Escape(tableHeader),
+                RegexOptions.CultureInvariant)
+            .Should()
+            .HaveCount(1, "the roadmap must expose exactly one current status registry");
+        AssertActiveFragment(
+            roadmap,
+            tableHeader,
+            "the current status registry must remain active Markdown prose");
+
+        var roadmapLines = roadmap
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n');
+        var headerLineIndex = Array.FindIndex(
+            roadmapLines,
+            line => string.Equals(line.Trim(), tableHeader, StringComparison.Ordinal));
+        headerLineIndex.Should().BeGreaterThanOrEqualTo(0);
+        headerLineIndex.Should().BeLessThan(roadmapLines.Length - 2);
+        roadmapLines
+            .Take(headerLineIndex)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Should()
+            .SatisfyRespectively(
+                title => title.Trim().Should().Be("# AICopilot AI 架构路线图"),
+                routing => routing.Trim().Should().Be(
+                    expectedRoutingParagraph,
+                    "the single routing paragraph is a canonical owner map, not free-form prose"));
+
+        var headerCells = ParseMarkdownTableRow(roadmapLines[headerLineIndex]);
+        headerCells.Should().Equal(
+            "能力",
+            "源码状态",
+            "候选状态",
+            "生产状态",
+            "下一退出门");
+        var separatorCells = ParseMarkdownTableRow(roadmapLines[headerLineIndex + 1]);
+        separatorCells.Should().HaveCount(headerCells.Length);
+        foreach (var separatorCell in separatorCells)
+        {
+            Regex.IsMatch(
+                    separatorCell,
+                    @"^:?-{3,}:?$",
+                    RegexOptions.CultureInvariant)
+                .Should()
+                .BeTrue("each status table column must have a Markdown separator");
+        }
+
+        var statusRows = roadmapLines
+            .Skip(headerLineIndex + 2)
+            .TakeWhile(line => line.TrimStart().StartsWith('|'))
+            .Select(ParseMarkdownTableRow)
+            .ToArray();
+        statusRows.Should().NotBeEmpty("the current registry cannot be an empty shell");
+        roadmapLines
+            .Skip(headerLineIndex + 2 + statusRows.Length)
+            .Should()
+            .OnlyContain(
+                line => string.IsNullOrWhiteSpace(line),
+                "the roadmap may contain only its title, routing paragraph and current status table");
+        foreach (var statusRow in statusRows)
+        {
+            statusRow.Should().HaveCount(headerCells.Length);
+            foreach (var cell in statusRow)
+            {
+                cell.Should().NotBeNullOrWhiteSpace(
+                    "every current status field must be explicitly registered");
+            }
+        }
+
+        statusRows
+            .Select(row => row[0])
+            .Should()
+            .OnlyHaveUniqueItems("capability names are the dynamic row identity");
+        foreach (var capabilityName in statusRows.Select(row => row[0]))
+        {
+            capabilityName.Length.Should().BeLessThanOrEqualTo(
+                64,
+                "capability names must remain labels rather than implementation prose");
+            Regex.IsMatch(
+                    capabilityName,
+                    @"[。；;！!]",
+                    RegexOptions.CultureInvariant)
+                .Should()
+                .BeFalse("capability names cannot carry sentence-like implementation prose");
+            var bareHexTokens = Regex.Matches(
+                    capabilityName,
+                    @"(?i)(?<![A-Za-z0-9])[0-9a-f]{7,40}(?![A-Za-z0-9])",
+                    RegexOptions.CultureInvariant)
+                .Cast<Match>()
+                .Select(match => match.Value)
+                .Where(token =>
+                    token.Any(char.IsDigit) &&
+                    token.Any(character => character is >= 'a' and <= 'f' or >= 'A' and <= 'F'))
+                .ToArray();
+            bareHexTokens.Should().BeEmpty(
+                "capability labels cannot hide bare abbreviated or full commit SHAs");
+        }
+
+        string[] controlledSourceStates =
+        [
+            "未开始",
+            "设计中",
+            "实现中",
+            "已建立",
+            "已收口",
+        ];
+        string[] controlledCandidateStates =
+        [
+            "待验证",
+            "验证中",
+            "已通过",
+            "验证失败",
+            "不适用",
+        ];
+        string[] controlledProductionStates =
+        [
+            "未验收",
+            "验收中",
+            "已验收",
+            "验收暂停",
+        ];
+        string[] controlledExitGates =
+        [
+            "完成该能力源码实现",
+            "取得该能力候选证据",
+            "取得该能力产物证据",
+            "完成该能力生产验收",
+            "无后续退出门",
+        ];
+        foreach (var statusRow in statusRows)
+        {
+            controlledSourceStates.Should().Contain(
+                statusRow[1],
+                "source state must use the controlled vocabulary");
+            controlledCandidateStates.Should().Contain(
+                statusRow[2],
+                "candidate state must use the controlled vocabulary");
+            controlledProductionStates.Should().Contain(
+                statusRow[3],
+                "production state must use the controlled vocabulary");
+            statusRow[3].Should().Be(
+                "未验收",
+                "production acceptance has not been authorized for any current capability");
+            controlledExitGates.Should().Contain(
+                statusRow[4],
+                "next exits must remain state-transition labels rather than validation procedures");
+        }
+
+        (string Source, string Candidate, string Production, string Exit)[]
+            allowedStatusTransitions =
+            [
+                ("未开始", "不适用", "未验收", "完成该能力源码实现"),
+                ("设计中", "不适用", "未验收", "完成该能力源码实现"),
+                ("实现中", "不适用", "未验收", "完成该能力源码实现"),
+                ("已建立", "待验证", "未验收", "取得该能力候选证据"),
+                ("已收口", "待验证", "未验收", "取得该能力候选证据"),
+                ("已建立", "验证中", "未验收", "取得该能力候选证据"),
+                ("已收口", "验证中", "未验收", "取得该能力候选证据"),
+                ("已建立", "验证失败", "未验收", "取得该能力候选证据"),
+                ("已收口", "验证失败", "未验收", "取得该能力候选证据"),
+                ("已建立", "已通过", "未验收", "取得该能力产物证据"),
+                ("已收口", "已通过", "未验收", "取得该能力产物证据"),
+                ("已建立", "已通过", "验收中", "完成该能力生产验收"),
+                ("已收口", "已通过", "验收中", "完成该能力生产验收"),
+                ("已建立", "已通过", "验收暂停", "完成该能力生产验收"),
+                ("已收口", "已通过", "验收暂停", "完成该能力生产验收"),
+                ("已建立", "已通过", "已验收", "无后续退出门"),
+                ("已收口", "已通过", "已验收", "无后续退出门"),
+            ];
+        foreach (var statusRow in statusRows)
+        {
+            allowedStatusTransitions.Should().Contain(
+                (statusRow[1], statusRow[2], statusRow[3], statusRow[4]),
+                "source, candidate, production and next-exit states must form a coherent transition");
+        }
+
+        AssertActiveFragment(
+            roadmap,
+            "[Agent 工作流与异常契约](./Agent工作流与异常契约.md)",
+            "the roadmap must route MAF/Harness detail to its owner contract");
+        AssertActiveFragment(
+            roadmap,
+            "[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)",
+            "the roadmap must route Cloud detail to its owner contract");
+        AssertActiveFragment(
+            roadmap,
+            "[DDD 聚合根边界](./DDD聚合根边界.md)",
+            "the roadmap must route persistence detail to its owner contract");
+        AssertActiveFragment(
+            roadmap,
+            "[AICopilot 安全部署契约](./AICopilot安全部署契约.md)",
+            "the roadmap must route candidate and deployment detail to its owner contract");
+        AssertActiveFragment(
+            roadmap,
+            "[AICopilot 业务规则](./AICopilot业务规则.md)",
+            "the roadmap must route strategic exclusions to the business rule owner");
+        AssertActiveFragment(
+            agentInstructions,
+            "路线图是状态与退出门入口，不承载实现、候选验证算法或部署操作正文",
+            "AGENTS must keep the roadmap route narrow");
+        AssertActiveFragment(
+            businessRules,
+            "[AI 架构路线图](./AI架构路线图.md) 只作为当前状态与下一退出门登记表",
+            "business rules must route current status to the roadmap");
+
+        string[] strategicExclusions =
+        [
+            "不建设任意用户上传 Agent 定义后直接执行的平台",
+            "不允许模型扩大 Tool、MCP、知识库、数据源或证据权限",
+            "不以通用 SQL、MCP 或 Direct DB 替代已覆盖的 Cloud typed GET",
+            "不以 Simulation、LLM 推断或当前健康评分冒充生产事实或预测模型结果",
+        ];
+        foreach (var exclusion in strategicExclusions)
+        {
+            AssertActiveFragment(
+                businessRules,
+                exclusion,
+                "strategic exclusions belong to the business rule owner");
+            roadmap.Should().NotContain(
+                exclusion,
+                "the roadmap must link strategic exclusions instead of copying them");
+        }
+
+        string[] forbiddenImplementationMarkers =
+        [
+            "AgentModeProvider",
+            "mode_get",
+            "mode_set",
+            "SetModeAsync",
+            "ToolInvocationGuardChatClient",
+            "HarnessAgentOptions",
+            "ChatOptions.Tools",
+            "BusinessQueryFallbackPolicy",
+            "BusinessQueryExecutor",
+            "McpToolOutputSchemaContractV1",
+            "AiGatewayDbContext",
+            "Validate-Candidate",
+            "Prepare-Release",
+            "Deploy-Changed",
+        ];
+        foreach (var marker in forbiddenImplementationMarkers)
+        {
+            roadmap.Should().NotContain(
+                marker,
+                "runtime and validation implementation prose belongs to owner contracts");
+        }
+
+        roadmap.Should().NotContain("固定测试数");
+        Regex.IsMatch(
+                roadmap,
+                @"(?i)(?<![A-Za-z])(?:PR|Pull\s+Request)\s*#?\s*\d+(?![A-Za-z0-9])|/pull/\d+",
+                RegexOptions.CultureInvariant)
+            .Should()
+            .BeFalse("pull request history cannot enter the current status registry");
+        Regex.IsMatch(
+                roadmap,
+                @"(?i)(?<![A-Za-z0-9])B[-\s]?\d+(?![A-Za-z0-9])",
+                RegexOptions.CultureInvariant)
+            .Should()
+            .BeFalse("batch identifiers cannot enter the current status registry");
+        Regex.IsMatch(
+                roadmap,
+                @"第?\s*\d+\s*批(?:开发|实施|收口|规则|架构)",
+                RegexOptions.CultureInvariant)
+            .Should()
+            .BeFalse("numbered development batches cannot enter the current status registry");
+        Regex.IsMatch(
+                roadmap,
+                @"(?i)(?:\b(?:commit|sha|head)\b|main@)\s*[:=@]?\s*[0-9a-f]{7,40}\b|/commit/[0-9a-f]{7,40}\b",
+                RegexOptions.CultureInvariant)
+            .Should()
+            .BeFalse("historical commit SHAs cannot enter the current status registry");
+        Regex.IsMatch(
+                roadmap,
+                @"(?<!\d)\d+\s*(?:项|个|条)?\s*(?:测试|用例)",
+                RegexOptions.CultureInvariant)
+            .Should()
+            .BeFalse("fixed test counts cannot enter the current status registry");
+        Regex.IsMatch(
+                roadmap,
+                @"(?:测试|用例|通过)\s*(?:共|合计|总计|为|[:：])?\s*\d+\s*/\s*\d+|\d+\s*/\s*\d+\s*(?:项|个|条)?\s*(?:测试|用例|通过)",
+                RegexOptions.CultureInvariant)
+            .Should()
+            .BeFalse("fixed test result counts cannot enter the current status registry");
     }
 
     [Fact]
@@ -189,10 +481,6 @@ public sealed class ActiveContractFilesystemTests
         agentContract.Should().Contain("模式不是安全隔离或授权边界，模式与授权正交");
         agentContract.Should().Contain(
             "不得删除、重排或按 Plan / Execute 过滤 MAF 与应用传入的工具");
-        roadmap.Should().Contain("MAF 原生模式运行时");
-        roadmap.Should().Contain("源码架构已收口");
-        roadmap.Should().Contain("生产状态继续保持“未验收”");
-        roadmap.Should().Contain("## 3. 候选验证退出门");
     }
 
     [Fact]
@@ -1080,6 +1368,20 @@ public sealed class ActiveContractFilesystemTests
 
         throw new DirectoryNotFoundException(
             "Could not locate AICopilot.slnx from the contract test output directory.");
+    }
+
+    private static string[] ParseMarkdownTableRow(string line)
+    {
+        var trimmed = line.Trim();
+        if (trimmed.Length < 2 || trimmed[0] != '|' || trimmed[^1] != '|')
+        {
+            return [];
+        }
+
+        return trimmed[1..^1]
+            .Split('|')
+            .Select(cell => cell.Trim())
+            .ToArray();
     }
 
     private static string NormalizeContractText(string text)
