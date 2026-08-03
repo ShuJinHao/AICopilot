@@ -656,6 +656,57 @@ public sealed class CloudAiReadClientContractTests
     }
 
     [Fact]
+    public async Task Client_ShouldResolveDeviceCodeAndPreservePlcCodeForSemanticCapacityQuery()
+    {
+        var requestUris = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            requestUris.Add(request.RequestUri!);
+            if (request.RequestUri!.AbsolutePath == "/api/v1/ai/read/devices")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(CreateEnvelope(
+                        new[]
+                        {
+                            new
+                            {
+                                id = DeviceId,
+                                deviceCode = "DEV-001",
+                                deviceName = "正极模切客户端",
+                                processId = ProcessId
+                            }
+                        },
+                        rowCount: 1,
+                        source: "devices"))
+                };
+            }
+
+            return CreateOkItemsResponse();
+        }));
+        var client = CreateClient(httpClient);
+        var planner = new SemanticQueryPlanner(
+            new SemanticQuerySchemaRegistry(new SemanticDefinitionCatalog()),
+            new SemanticDefinitionCatalog());
+        var planning = planner.Plan(
+            "Analysis.Capacity.Range",
+            """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"},{"field":"plcCode","operator":"eq","value":"P2-CP05"}],"timeRange":{"field":"occurredAt","start":"2026-04-20T00:00:00Z","end":"2026-04-21T00:00:00Z"}}""");
+
+        planning.IsSuccess.Should().BeTrue(planning.ErrorMessage);
+        await client.QuerySemanticAsync(planning.Plan!);
+
+        requestUris.Should().HaveCount(2);
+        requestUris[0].AbsolutePath.Should().Be("/api/v1/ai/read/devices");
+        ParseQuery(requestUris[0]).Should().Contain("deviceCode", "DEV-001");
+        requestUris[1].AbsolutePath.Should().Be("/api/v1/ai/read/capacity/summary");
+        var query = ParseQuery(requestUris[1]);
+        query.Should().Contain("deviceId", DeviceId);
+        query.Should().Contain("plcCode", "P2-CP05");
+        query.Should().NotContainKey("deviceCode");
+        AssertNoLegacyParameters(query);
+    }
+
+    [Fact]
     public async Task Client_ShouldPreserveCapacitySummaryNullableQualityFacts()
     {
         using var httpClient = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

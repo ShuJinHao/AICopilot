@@ -148,6 +148,13 @@ public sealed class BusinessQueryExecutor(
                     $"{DeviceStatusSourceUnavailableMarker}；当前问题尚未形成可执行的结构化查询，请补充或确认查询条件。");
             }
 
+            if (planningResult.FailureKind == SemanticPlanningFailureKind.NeedClarification)
+            {
+                return BusinessQueryExecutionResult.ConfirmationRequired(
+                    CloudAiReadProblemCodes.MissingRequiredParameter,
+                    $"[系统提示]: {failedTargetLabel}查询缺少必要条件，请补充设备身份或业务对象标识后重试。");
+            }
+
             var message = IsCloudOnlySemanticIntent(semanticIntent)
                 ? $"{failedTargetLabel}查询尚未形成可执行的结构化上下文，请补充或确认查询条件。"
                 : $"{failedTargetLabel}语义查询规划失败。";

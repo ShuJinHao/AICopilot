@@ -257,10 +257,17 @@ public sealed record SemanticQueryPlan(
     SemanticSort? Sort,
     int Limit);
 
+public enum SemanticPlanningFailureKind
+{
+    Invalid = 0,
+    NeedClarification = 1
+}
+
 public sealed record SemanticPlanningResult(
     bool IsSuccess,
     SemanticQueryPlan? Plan,
-    string? ErrorMessage)
+    string? ErrorMessage,
+    SemanticPlanningFailureKind FailureKind = SemanticPlanningFailureKind.Invalid)
 {
     public static SemanticPlanningResult Success(SemanticQueryPlan plan)
     {
@@ -270,6 +277,15 @@ public sealed record SemanticPlanningResult(
     public static SemanticPlanningResult Failure(string errorMessage)
     {
         return new SemanticPlanningResult(false, null, errorMessage);
+    }
+
+    public static SemanticPlanningResult ClarificationRequired(string errorMessage)
+    {
+        return new SemanticPlanningResult(
+            false,
+            null,
+            errorMessage,
+            SemanticPlanningFailureKind.NeedClarification);
     }
 }
 
