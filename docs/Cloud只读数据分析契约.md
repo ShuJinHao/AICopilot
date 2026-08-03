@@ -93,7 +93,7 @@ Cloud AiRead transport 只允许以上八个固定 GET。AICopilot 不提供任�
 | `/device-logs` | `id: Guid`、`deviceId: Guid`、`deviceName: string`、`level: string`、`message: string`、`logTime: DateTime`、`receivedAt: DateTime` |
 | `/production-records` | `recordId: Guid`、`typeKey: string`、`typeName: string`、`deviceId: Guid`、`deviceName: string`、`barcode: string?`、`result: string?`、`completedAt: DateTime?`、`receivedAt: DateTime?`、`fields: scalar object`、`fieldSchema: exact object[]` |
 
-表中的 `?` 表示“key 必须存在、value 可以为 JSON null”，不表示可省略 key。该 required-present nullable 规则覆盖 client release 的 `releaseNotes/publishedAtUtc/deletedAtUtc`、device state 的全部 nullable 字段、capacity summary 的 `okCount/ngCount`、capacity hourly 的 `okCount/ngCount/okRate/plcName`、production record 的 `barcode/result/completedAt/receivedAt`，以及每个 `fieldSchema` entry 的 `unit/precision`。固定 item 的 `DateTime/DateTime?` 与 Cloud DTO 对齐；只有 envelope `asOfUtc` 使用 `DateTimeOffset`。consumer adapter 必须原样保留未知质量事实的 `null`，不得补零或据此伪造良率。
+表中的 `?` 表示“key 必须存在、value 可以为 JSON null”，不表示可省略 key。该 required-present nullable 规则覆盖 client release 的 `releaseNotes/publishedAtUtc/deletedAtUtc`、device state 的全部 nullable 字段、capacity summary 的 `okCount/ngCount`、capacity hourly 的 `okCount/ngCount/okRate/plcName`、production record 的 `barcode/result/completedAt/receivedAt`，以及每个 `fieldSchema` entry 的 `unit/precision`。固定 item 的 `DateTime/DateTime?` 与 Cloud DTO 对齐；只有 envelope `asOfUtc` 使用 `DateTimeOffset`。consumer adapter 必须原样保留未知质量事实的 `null`，不得补零或据此伪造良率；小时行的 `okRate` 独立为 `null` 时，即使 `okCount` 已知，摘要也不得从计数反推良率。
 
 ### 3.3 Envelope 与全量验证顺序
 

@@ -38,7 +38,11 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
         decimal? totalQualifiedQty = qualifiedQuantities.All(value => value.HasValue)
             ? qualifiedQuantities.Sum(value => value!.Value)
             : null;
-        decimal? qualifiedRate = totalQualifiedQty.HasValue
+        var containsHourlyRows = rows.Any(row =>
+            row.ContainsKey("okRate") || row.ContainsKey("plcCode"));
+        var hourlyRateFactsAreComplete = !containsHourlyRows || rows.All(row =>
+            SemanticSummaryFormatting.GetNullableDecimal(row, "okRate").HasValue);
+        decimal? qualifiedRate = totalQualifiedQty.HasValue && hourlyRateFactsAreComplete
             ? totalOutputQty <= 0
                 ? 0m
                 : Math.Round(
