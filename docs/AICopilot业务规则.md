@@ -29,6 +29,13 @@
 
 系统已进入生产模式。当前正式生产工序只有 `cp / 正极模切` 与 `ap / 负极模切`；Cloud 是 AI 唯一真实生产数据源，AICopilot 全程只读。测试/示例工序、Simulation 数据和模型推断不得冒充生产事实。
 
+### 1.1 战略性不做
+
+- 不建设任意用户上传 Agent 定义后直接执行的平台。
+- 不允许模型扩大 Tool、MCP、知识库、数据源或证据权限。
+- 不以通用 SQL、MCP 或 Direct DB 替代已覆盖的 Cloud typed GET。
+- 不以 Simulation、LLM 推断或当前健康评分冒充生产事实或预测模型结果。
+
 ## 2. Cloud 只读边界
 
 允许：
@@ -201,7 +208,7 @@ Cloud AiRead 设备契约：
 ## 9. 文档入口
 
 - 当前规则入口只保留 `AGENTS.md`、本文档和按边界触发的专题契约；项目复盘与工作区历史记录只供命中追溯条件时定向检索，不是规则入口。
-- `AI架构路线图.md` 只记录当前未完成架构方向、阶段状态和退出门，不保存历史测试数量、任务流水或 Rule ID 账本；历史实现通过 Git 追溯。
+- [AI 架构路线图](./AI架构路线图.md) 只作为当前状态与下一退出门登记表，不承载实现正文、验证算法、部署操作或历史过程；战略性“不做”边界只由本文维护。
 - 当前长期专题契约包括 `docs/AICopilot安全部署契约.md`、`docs/Cloud只读数据分析契约.md`、`docs/Agent工作流与异常契约.md` 和 `docs/DDD聚合根边界.md`；触碰部署、Cloud 只读、Text-to-SQL、Harness、MCP/Tool、异常、前端错误、聚合/repository 或 DB owner 时必须先读对应契约。
 - 只有修改 `src/vues/AICopilot.Web` 时才读取该目录的 `AGENTS.md`；后端、部署和数据查询任务不得顺带加载前端会话/UI 规则。
 - 部署说明只保留 `../deploy/enterprise-ai/README.md`；工作区 `../../deploy/Deploy-Changed.ps1` 和 `../../deploy/Deploy-FromZero.ps1` 是操作入口，`deploy/enterprise-ai` 仅是被统一入口调用的 AI 内部实现与支持目录。
