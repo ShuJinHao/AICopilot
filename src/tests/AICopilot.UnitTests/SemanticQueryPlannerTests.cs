@@ -53,6 +53,21 @@ public sealed class SemanticQueryPlannerTests
         result.Plan.Projection.Fields.Should().NotBeEmpty();
     }
 
+    [Fact]
+    public void Planner_ShouldAcceptStablePlcCodeForCapacityScope()
+    {
+        var result = _planner.Plan(
+            "Analysis.Capacity.ByDevice",
+            """{"filters":[{"field":"plcCode","operator":"eq","value":"P2-CP05"}]}""");
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan.Should().NotBeNull();
+        result.Plan!.Filters.Should().ContainSingle(filter =>
+            filter.Field == "plcCode" &&
+            filter.Operator == SemanticFilterOperator.Equal &&
+            filter.Value == "P2-CP05");
+    }
+
     [Theory]
     [InlineData("Analysis.Device.List", "{\"fields\":[\"password\"]}", "projection whitelist")]
     [InlineData("Analysis.DeviceLog.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", "timeRange")]

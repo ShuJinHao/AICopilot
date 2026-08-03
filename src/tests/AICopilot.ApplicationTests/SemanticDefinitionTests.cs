@@ -37,7 +37,7 @@ public sealed class SemanticDefinitionTests
         capacity.AllowedProjectionFields.Should().BeEquivalentTo(
             ["shiftDate", "outputQty", "qualifiedQty", "totalCount", "okCount", "ngCount", "occurredAt"]);
         capacity.AllowedFilterFields.Should().BeEquivalentTo(
-            ["deviceId", "deviceCode", "plcName", "shiftDate"]);
+            ["deviceId", "deviceCode", "plcCode", "plcName", "shiftDate"]);
         capacity.AllowedSortFields.Should().BeEquivalentTo(
             ["shiftDate", "occurredAt", "outputQty", "qualifiedQty"]);
 
