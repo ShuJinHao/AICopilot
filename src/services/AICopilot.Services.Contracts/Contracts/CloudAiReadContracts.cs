@@ -290,6 +290,7 @@ public static class CloudAiReadSemanticSchemaRegistry
                 KeywordRule("deviceName")),
             SchemaWithTimeRange(CloudAiReadOperation.CapacitySummary, "/api/v1/ai/read/capacity/summary",
                 Rule("deviceId", CloudAiReadFilterValueKind.Guid),
+                Rule("plcCode"),
                 Rule("plcName"),
                 Rule("shiftDate", CloudAiReadFilterValueKind.Date)),
             SchemaWithTimeRange(CloudAiReadOperation.CapacityHourly, "/api/v1/ai/read/capacity/hourly",
@@ -297,6 +298,7 @@ public static class CloudAiReadSemanticSchemaRegistry
                 Rule("date", CloudAiReadFilterValueKind.Date),
                 Rule("shiftDate", CloudAiReadFilterValueKind.Date),
                 Rule("preset", CloudAiReadFilterValueKind.HourlyPreset),
+                Rule("plcCode"),
                 Rule("plcName")),
             SchemaWithTimeRange(CloudAiReadOperation.DeviceLog, "/api/v1/ai/read/device-logs",
                 Rule("deviceId", CloudAiReadFilterValueKind.Guid),
@@ -684,8 +686,8 @@ public sealed record CloudAiReadDeviceClientStateDto(
 public sealed record CloudAiReadCapacitySummaryDto(
     DateOnly Date,
     int TotalCount,
-    int OkCount,
-    int NgCount,
+    int? OkCount,
+    int? NgCount,
     int DayShiftTotal,
     int NightShiftTotal,
     IReadOnlyDictionary<string, object?> AdditionalFields);
@@ -698,9 +700,10 @@ public sealed record CloudAiReadCapacityHourlyDto(
     string TimeLabel,
     string ShiftCode,
     int TotalCount,
-    int OkCount,
-    int NgCount,
-    decimal OkRate,
+    int? OkCount,
+    int? NgCount,
+    decimal? OkRate,
+    string PlcCode,
     string? PlcName,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 

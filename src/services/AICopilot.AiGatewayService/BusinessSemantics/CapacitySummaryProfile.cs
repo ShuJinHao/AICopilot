@@ -10,6 +10,7 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
     {
         ["shiftDate"] = "时间",
         ["occurredAt"] = "时间",
+        ["plcCode"] = "PLC 编码",
         ["plcName"] = "PLC 名称",
         ["outputQty"] = "完工弹夹数",
         ["qualifiedQty"] = "合格完工弹夹数",
@@ -32,21 +33,37 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
         string scope)
     {
         var totalOutputQty = rows.Sum(row => SemanticSummaryFormatting.GetDecimal(row, "outputQty"));
-        var totalQualifiedQty = rows.Sum(row => SemanticSummaryFormatting.GetDecimal(row, "qualifiedQty"));
-        var qualifiedRate = totalOutputQty <= 0
-            ? 0m
-            : Math.Round(totalQualifiedQty / totalOutputQty * 100m, 2, MidpointRounding.AwayFromZero);
-        var breakdownField = rows.Any(row =>
-            SemanticSummaryFormatting.GetString(row, "plcName") != "-")
-            ? "plcName"
-            : "shiftDate";
-        var groupBreakdown = SemanticSummaryFormatting.BuildBreakdown(rows, breakdownField, "条");
+        var qualifiedQuantities = rows
+            .Select(row => SemanticSummaryFormatting.GetNullableDecimal(row, "qualifiedQty"))
+            .ToArray();
+        decimal? totalQualifiedQty = qualifiedQuantities.All(value => value.HasValue)
+            ? qualifiedQuantities.Sum(value => value!.Value)
+            : null;
+        var allRowsAreHourly = rows.All(row =>
+            row.ContainsKey("okRate") && row.ContainsKey("plcCode"));
+        decimal? qualifiedRate = allRowsAreHourly
+            ? CalculateHourlyQualifiedRate(rows, totalOutputQty)
+            : totalQualifiedQty.HasValue
+                ? totalOutputQty <= 0
+                    ? 0m
+                    : Math.Round(
+                        totalQualifiedQty.Value / totalOutputQty * 100m,
+                        2,
+                        MidpointRounding.AwayFromZero)
+                : null;
+        var totalQualifiedQtyText = totalQualifiedQty.HasValue
+            ? $"{SemanticSummaryFormatting.FormatNumber(totalQualifiedQty.Value)} 个"
+            : "未知";
+        var qualifiedRateText = qualifiedRate.HasValue
+            ? $"{qualifiedRate.Value:F2}%"
+            : "未知";
+        var groupBreakdown = BuildGroupBreakdown(rows, allRowsAreHourly);
 
         var metrics = new List<SemanticMetricItemDto>
         {
             Metric("totalOutputQty", "完工弹夹数", $"{SemanticSummaryFormatting.FormatNumber(totalOutputQty)} 个"),
-            Metric("totalQualifiedQty", "合格完工弹夹数", $"{SemanticSummaryFormatting.FormatNumber(totalQualifiedQty)} 个"),
-            Metric("qualifiedRate", "合格率", $"{qualifiedRate:F2}%")
+            Metric("totalQualifiedQty", "合格完工弹夹数", totalQualifiedQtyText),
+            Metric("qualifiedRate", "合格率", qualifiedRateText)
         };
 
         if (!string.IsNullOrWhiteSpace(groupBreakdown))
@@ -54,13 +71,95 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
             metrics.Add(Metric("groupBreakdown", "分组摘要", groupBreakdown));
         }
 
-        var conclusion = $"当前命中 {rows.Count} 条产能记录，完工弹夹数 {SemanticSummaryFormatting.FormatNumber(totalOutputQty)} 个，合格完工弹夹数 {SemanticSummaryFormatting.FormatNumber(totalQualifiedQty)} 个，合格率 {qualifiedRate:F2}%。";
+        var conclusion = $"当前命中 {rows.Count} 条产能记录，完工弹夹数 {SemanticSummaryFormatting.FormatNumber(totalOutputQty)} 个，合格完工弹夹数 {totalQualifiedQtyText}，合格率 {qualifiedRateText}。";
         var highlights = rows.Take(3).Select(Describe).ToArray();
         return new SemanticSummaryDto(plan.Target.ToString(), conclusion, metrics, highlights, scope);
     }
 
     private static string Describe(Dictionary<string, object?> row)
     {
-        return $"时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "occurredAt"))}，PLC {SemanticSummaryFormatting.GetString(row, "plcName")}，完工弹夹数 {SemanticSummaryFormatting.FormatNumber(SemanticSummaryFormatting.GetDecimal(row, "outputQty"))} 个，合格完工弹夹数 {SemanticSummaryFormatting.FormatNumber(SemanticSummaryFormatting.GetDecimal(row, "qualifiedQty"))} 个";
+        var qualifiedQty = SemanticSummaryFormatting.GetNullableDecimal(row, "qualifiedQty");
+        var qualifiedQtyText = qualifiedQty.HasValue
+            ? $"{SemanticSummaryFormatting.FormatNumber(qualifiedQty.Value)} 个"
+            : "未知";
+        return $"时间 {SemanticSummaryFormatting.FormatTimestamp(SemanticSummaryFormatting.GetString(row, "occurredAt"))}，PLC {GetPlcIdentity(row)}，完工弹夹数 {SemanticSummaryFormatting.FormatNumber(SemanticSummaryFormatting.GetDecimal(row, "outputQty"))} 个，合格完工弹夹数 {qualifiedQtyText}";
+    }
+
+    private static decimal? CalculateHourlyQualifiedRate(
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        decimal totalOutputQty)
+    {
+        var rates = rows
+            .Select(row => SemanticSummaryFormatting.GetNullableDecimal(row, "okRate"))
+            .ToArray();
+        if (rates.Any(rate => !rate.HasValue))
+        {
+            return null;
+        }
+
+        if (rows.Count == 1)
+        {
+            return Math.Round(rates[0]!.Value, 2, MidpointRounding.AwayFromZero);
+        }
+
+        if (totalOutputQty <= 0)
+        {
+            return null;
+        }
+
+        var weightedRate = rows
+            .Select((row, index) =>
+                SemanticSummaryFormatting.GetDecimal(row, "outputQty") * rates[index]!.Value)
+            .Sum() / totalOutputQty;
+        return Math.Round(weightedRate, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static string BuildGroupBreakdown(
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        bool allRowsAreHourly)
+    {
+        if (allRowsAreHourly)
+        {
+            return string.Join("，", rows
+                .GroupBy(
+                    row => SemanticSummaryFormatting.GetString(row, "plcCode"),
+                    StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var displayName = group
+                        .Select(row => SemanticSummaryFormatting.GetString(row, "plcName"))
+                        .FirstOrDefault(value =>
+                            !string.IsNullOrWhiteSpace(value) && value != "-");
+                    var label = string.IsNullOrWhiteSpace(displayName)
+                        ? group.Key
+                        : $"{displayName}（{group.Key}）";
+                    return $"{label} {group.Count()}条";
+                }));
+        }
+
+        var plcIdentities = rows
+            .Select(GetPlcIdentity)
+            .Where(value => value != "-")
+            .ToArray();
+        if (plcIdentities.Length == 0)
+        {
+            return SemanticSummaryFormatting.BuildBreakdown(rows, "shiftDate", "条");
+        }
+
+        return string.Join("，", plcIdentities
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => $"{group.Key} {group.Count()}条"));
+    }
+
+    private static string GetPlcIdentity(Dictionary<string, object?> row)
+    {
+        var plcName = SemanticSummaryFormatting.GetString(row, "plcName");
+        return !string.IsNullOrWhiteSpace(plcName) && plcName != "-"
+            ? plcName
+            : SemanticSummaryFormatting.GetString(row, "plcCode");
     }
 }

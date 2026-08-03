@@ -115,6 +115,16 @@ public sealed class CloudAiReadLiveContractTests
             range,
             limit: 20));
         AssertNonEmpty(capacity, "capacity.summary");
+        var nullableCapacity = await client.GetCapacitySummaryAsync(Query(
+            [
+                Filter("deviceId", environment.DeviceId),
+                Filter("plcCode", environment.NullablePlcCode)
+            ],
+            range,
+            limit: 20));
+        nullableCapacity.Items.Should().ContainSingle();
+        nullableCapacity.Items[0].OkCount.Should().BeNull();
+        nullableCapacity.Items[0].NgCount.Should().BeNull();
         await AssertEmptyAsync(client.GetCapacitySummaryAsync(Query(
             [Filter("deviceId", environment.DeviceId)],
             futureRange)));
@@ -127,6 +137,19 @@ public sealed class CloudAiReadLiveContractTests
             [Filter("deviceId", environment.DeviceId), Filter("date", environment.HourlyDate)],
             limit: 20));
         AssertNonEmpty(hourly, "capacity.hourly");
+        hourly.Items.Should().OnlyContain(item => !string.IsNullOrWhiteSpace(item.PlcCode));
+        var nullableHourly = await client.GetCapacityHourlyAsync(Query(
+            [
+                Filter("deviceId", environment.DeviceId),
+                Filter("date", environment.HourlyDate),
+                Filter("plcCode", environment.NullablePlcCode)
+            ],
+            limit: 20));
+        nullableHourly.Items.Should().ContainSingle();
+        nullableHourly.Items[0].OkCount.Should().BeNull();
+        nullableHourly.Items[0].NgCount.Should().BeNull();
+        nullableHourly.Items[0].OkRate.Should().BeNull();
+        nullableHourly.Items[0].PlcCode.Should().Be(environment.NullablePlcCode);
         await AssertEmptyAsync(client.GetCapacityHourlyAsync(Query(
             [Filter("deviceId", environment.DeviceId), Filter("date", "2099-01-01")])));
         AssertTruncated(await client.GetCapacityHourlyAsync(Query(
@@ -151,6 +174,11 @@ public sealed class CloudAiReadLiveContractTests
             range,
             limit: 20));
         AssertNonEmpty(production, "production_records");
+        production.Items.Should().OnlyContain(item => item.Fields.ContainsKey("clipSlot"));
+        production.Items.Select(item => item.Fields["clipSlot"]).Should().OnlyContain(clipSlot =>
+            object.Equals(clipSlot, "MG1") || object.Equals(clipSlot, "MG2"));
+        production.Items.Should().OnlyContain(item =>
+            item.FieldSchema.Any(field => field.Key == "clipSlot" && field.Required));
         production.Rows.Should().OnlyContain(row =>
             !row.ContainsKey("processName") &&
             !row.ContainsKey("stationName") &&
@@ -180,12 +208,21 @@ public sealed class CloudAiReadLiveContractTests
         AssertRedacted(await client.GetCapacitySummaryAsync(Query(
             [Filter("deviceId", environment.DeviceId), Filter("plcName", sentinel)],
             range)), "plcName", sentinel);
+        AssertRedacted(await client.GetCapacitySummaryAsync(Query(
+            [Filter("deviceId", environment.DeviceId), Filter("plcCode", sentinel)],
+            range)), "plcCode", sentinel);
         AssertRedacted(await client.GetCapacityHourlyAsync(Query(
             [
                 Filter("deviceId", environment.DeviceId),
                 Filter("date", environment.HourlyDate),
                 Filter("plcName", sentinel)
             ])), "plcName", sentinel);
+        AssertRedacted(await client.GetCapacityHourlyAsync(Query(
+            [
+                Filter("deviceId", environment.DeviceId),
+                Filter("date", environment.HourlyDate),
+                Filter("plcCode", sentinel)
+            ])), "plcCode", sentinel);
         AssertRedacted(await client.GetDeviceLogsAsync(Query(
             [Filter("deviceId", environment.DeviceId), Filter("keyword", sentinel)],
             range)), "keyword", sentinel);
@@ -225,7 +262,10 @@ public sealed class CloudAiReadLiveContractTests
             ["date", "totalCount", "okCount", "ngCount", "dayShiftTotal", "nightShiftTotal"]);
         await AssertRawShapeAsync(httpClient,
             $"/api/v1/ai/read/capacity/hourly?deviceId={environment.DeviceId}&date={environment.HourlyDate}&maxRows=1",
-            ["time", "date", "hour", "minute", "timeLabel", "shiftCode", "totalCount", "okCount", "ngCount", "okRate"]);
+            [
+                "time", "date", "hour", "minute", "timeLabel", "shiftCode", "totalCount",
+                "okCount", "ngCount", "okRate", "plcCode", "plcName"
+            ]);
         await AssertRawShapeAsync(httpClient,
             $"/api/v1/ai/read/device-logs?deviceId={environment.DeviceId}&startTime={start}&endTime={end}&maxRows=1",
             ["id", "deviceId", "deviceName", "level", "message", "logTime", "receivedAt"]);
@@ -320,6 +360,7 @@ public sealed class CloudAiReadLiveContractTests
         string Channel,
         string TargetRuntime,
         string HourlyDate,
+        string NullablePlcCode,
         DateTimeOffset StartTime,
         DateTimeOffset EndTime,
         string Sentinel)
@@ -339,6 +380,7 @@ public sealed class CloudAiReadLiveContractTests
                 Require("CLOUD_AI_READ_LIVE_CHANNEL"),
                 Require("CLOUD_AI_READ_LIVE_TARGET_RUNTIME"),
                 RequireDate("CLOUD_AI_READ_LIVE_HOURLY_DATE"),
+                Require("CLOUD_AI_READ_LIVE_NULLABLE_PLC_CODE"),
                 RequireDateTimeOffset("CLOUD_AI_READ_LIVE_START_TIME"),
                 RequireDateTimeOffset("CLOUD_AI_READ_LIVE_END_TIME"),
                 Require("CLOUD_AI_READ_LIVE_SENTINEL"));

@@ -81,6 +81,7 @@ internal static class CloudAiReadQueryParameterBuilder
             ["deviceId"] = deviceId,
             ["startDate"] = FormatCloudDate(start),
             ["endDate"] = FormatCloudDate(end),
+            ["plcCode"] = GetFilterValue(query, "plcCode"),
             ["plcName"] = GetFilterValue(query, "plcName"),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };
@@ -152,6 +153,7 @@ internal static class CloudAiReadQueryParameterBuilder
             ["deviceId"] = deviceId,
             ["date"] = string.IsNullOrWhiteSpace(preset) ? date : null,
             ["preset"] = preset,
+            ["plcCode"] = GetFilterValue(query, "plcCode"),
             ["plcName"] = GetFilterValue(query, "plcName"),
             ["maxRows"] = FormatMaxRows(query.Limit)
         };

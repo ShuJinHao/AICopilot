@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AICopilot.AiGatewayService.BusinessQueries;
+using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -7,6 +8,36 @@ namespace AICopilot.UnitTests;
 
 public sealed class BusinessQueryExecutorTests
 {
+    [Fact]
+    public async Task ExecuteAsync_CapacityWithOnlyPlcCode_ShouldNeedClarificationBeforeTypedProvider()
+    {
+        var calls = new List<string>();
+        var context = CreateConfirmedContext(BusinessDataCapability.Device);
+        var provider = new RecordingProvider(
+            context,
+            BusinessQueryOutcome.Success,
+            calls);
+        var definitions = new SemanticDefinitionCatalog();
+        var executor = CreateExecutor(
+            provider,
+            new RecordingFallbackRunner(calls),
+            new SemanticQueryPlanner(
+                new SemanticQuerySchemaRegistry(definitions),
+                definitions));
+
+        var result = await executor.ExecuteAsync(
+            Guid.NewGuid(),
+            "Analysis.Capacity.ByDevice",
+            """{"filters":[{"field":"plcCode","operator":"eq","value":"P2-CP05"}]}""",
+            confirmedQuery: null,
+            CancellationToken.None);
+
+        result.Status.Should().Be(BusinessQueryExecutionStatus.NeedsConfirmation);
+        result.FailureCode.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        result.SafeMessage.Should().Contain("设备身份");
+        calls.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ExecuteAsync_TypedSuccess_ShouldSkipFallbackAndReturnTrustedCanonicalWidgets()
     {
@@ -131,10 +162,11 @@ public sealed class BusinessQueryExecutorTests
 
     private static BusinessQueryExecutor CreateExecutor(
         IBusinessQueryProvider provider,
-        IBusinessTextToSqlFallbackRunner fallbackRunner)
+        IBusinessTextToSqlFallbackRunner fallbackRunner,
+        ISemanticQueryPlanner? planner = null)
     {
         return new BusinessQueryExecutor(
-            new UnexpectedPlanner(),
+            planner ?? new UnexpectedPlanner(),
             NullLogger<BusinessQueryExecutor>.Instance,
             new FixedProviderRegistry(provider),
             new FixedProfileRegistry(),

@@ -53,6 +53,38 @@ public sealed class SemanticQueryPlannerTests
         result.Plan.Projection.Fields.Should().NotBeEmpty();
     }
 
+    [Fact]
+    public void Planner_ShouldRequireDeviceIdentityWhenCapacityScopeContainsOnlyPlcCode()
+    {
+        var result = _planner.Plan(
+            "Analysis.Capacity.ByDevice",
+            """{"filters":[{"field":"plcCode","operator":"eq","value":"P2-CP05"}]}""");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Plan.Should().BeNull();
+        result.FailureKind.Should().Be(SemanticPlanningFailureKind.NeedClarification);
+        result.ErrorMessage.Should().Contain("deviceId, deviceCode");
+    }
+
+    [Theory]
+    [InlineData("deviceId", "11111111-1111-1111-1111-111111111111")]
+    [InlineData("deviceCode", "DEV-01")]
+    public void Planner_ShouldAcceptPlcCodeAsAdditionalCapacityFilter(
+        string identityField,
+        string identityValue)
+    {
+        var result = _planner.Plan(
+            "Analysis.Capacity.ByDevice",
+            $$"""{"filters":[{"field":"{{identityField}}","operator":"eq","value":"{{identityValue}}"},{"field":"plcCode","operator":"eq","value":"P2-CP05"}]}""");
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan.Should().NotBeNull();
+        result.Plan!.Filters.Should().Contain(filter =>
+            filter.Field == identityField && filter.Value == identityValue);
+        result.Plan.Filters.Should().Contain(filter =>
+            filter.Field == "plcCode" && filter.Value == "P2-CP05");
+    }
+
     [Theory]
     [InlineData("Analysis.Device.List", "{\"fields\":[\"password\"]}", "projection whitelist")]
     [InlineData("Analysis.DeviceLog.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", "timeRange")]

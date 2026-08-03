@@ -95,14 +95,16 @@ public sealed class CloudAiReadClientContractTests
         AssertRequiredValueProperties<CloudAiReadCapacitySummaryDto>(
             nameof(CloudAiReadCapacitySummaryDto.Date),
             nameof(CloudAiReadCapacitySummaryDto.TotalCount),
-            nameof(CloudAiReadCapacitySummaryDto.OkCount),
-            nameof(CloudAiReadCapacitySummaryDto.NgCount),
             nameof(CloudAiReadCapacitySummaryDto.DayShiftTotal),
             nameof(CloudAiReadCapacitySummaryDto.NightShiftTotal));
+        AssertOptionalValueProperties<CloudAiReadCapacitySummaryDto>(
+            nameof(CloudAiReadCapacitySummaryDto.OkCount),
+            nameof(CloudAiReadCapacitySummaryDto.NgCount));
 
         AssertRequiredReferenceProperties<CloudAiReadCapacityHourlyDto>(
             nameof(CloudAiReadCapacityHourlyDto.TimeLabel),
             nameof(CloudAiReadCapacityHourlyDto.ShiftCode),
+            nameof(CloudAiReadCapacityHourlyDto.PlcCode),
             nameof(CloudAiReadCapacityHourlyDto.AdditionalFields));
         AssertOptionalReferenceProperties<CloudAiReadCapacityHourlyDto>(
             nameof(CloudAiReadCapacityHourlyDto.PlcName));
@@ -111,7 +113,8 @@ public sealed class CloudAiReadClientContractTests
             nameof(CloudAiReadCapacityHourlyDto.Date),
             nameof(CloudAiReadCapacityHourlyDto.Hour),
             nameof(CloudAiReadCapacityHourlyDto.Minute),
-            nameof(CloudAiReadCapacityHourlyDto.TotalCount),
+            nameof(CloudAiReadCapacityHourlyDto.TotalCount));
+        AssertOptionalValueProperties<CloudAiReadCapacityHourlyDto>(
             nameof(CloudAiReadCapacityHourlyDto.OkCount),
             nameof(CloudAiReadCapacityHourlyDto.NgCount),
             nameof(CloudAiReadCapacityHourlyDto.OkRate));
@@ -176,8 +179,8 @@ public sealed class CloudAiReadClientContractTests
         AssertPropertyTypes<CloudAiReadCapacitySummaryDto>(
             (nameof(CloudAiReadCapacitySummaryDto.Date), typeof(DateOnly)),
             (nameof(CloudAiReadCapacitySummaryDto.TotalCount), typeof(int)),
-            (nameof(CloudAiReadCapacitySummaryDto.OkCount), typeof(int)),
-            (nameof(CloudAiReadCapacitySummaryDto.NgCount), typeof(int)),
+            (nameof(CloudAiReadCapacitySummaryDto.OkCount), typeof(int?)),
+            (nameof(CloudAiReadCapacitySummaryDto.NgCount), typeof(int?)),
             (nameof(CloudAiReadCapacitySummaryDto.DayShiftTotal), typeof(int)),
             (nameof(CloudAiReadCapacitySummaryDto.NightShiftTotal), typeof(int)));
         AssertPropertyTypes<CloudAiReadCapacityHourlyDto>(
@@ -186,9 +189,9 @@ public sealed class CloudAiReadClientContractTests
             (nameof(CloudAiReadCapacityHourlyDto.Hour), typeof(int)),
             (nameof(CloudAiReadCapacityHourlyDto.Minute), typeof(int)),
             (nameof(CloudAiReadCapacityHourlyDto.TotalCount), typeof(int)),
-            (nameof(CloudAiReadCapacityHourlyDto.OkCount), typeof(int)),
-            (nameof(CloudAiReadCapacityHourlyDto.NgCount), typeof(int)),
-            (nameof(CloudAiReadCapacityHourlyDto.OkRate), typeof(decimal)));
+            (nameof(CloudAiReadCapacityHourlyDto.OkCount), typeof(int?)),
+            (nameof(CloudAiReadCapacityHourlyDto.NgCount), typeof(int?)),
+            (nameof(CloudAiReadCapacityHourlyDto.OkRate), typeof(decimal?)));
         AssertPropertyTypes<CloudAiReadDeviceLogDto>(
             (nameof(CloudAiReadDeviceLogDto.LogId), typeof(Guid)),
             (nameof(CloudAiReadDeviceLogDto.DeviceId), typeof(Guid)),
@@ -631,6 +634,7 @@ public sealed class CloudAiReadClientContractTests
             "不要作为 queryText 发送",
             [
                 new CloudAiReadFilter("deviceId", "eq", DeviceId),
+                new CloudAiReadFilter("plcCode", "eq", "P2-CP05"),
                 new CloudAiReadFilter("plcName", "eq", "PLC-A")
             ],
             CreateRange("2026-04-20T01:02:03Z", "2026-04-21T04:05:06Z"),
@@ -644,10 +648,101 @@ public sealed class CloudAiReadClientContractTests
         query.Should().Contain("deviceId", DeviceId);
         query.Should().Contain("startDate", "2026-04-20");
         query.Should().Contain("endDate", "2026-04-21");
+        query.Should().Contain("plcCode", "P2-CP05");
         query.Should().Contain("plcName", "PLC-A");
         query.Should().Contain("maxRows", "100");
         result.Limit.Should().Be(100);
         AssertNoLegacyParameters(query);
+    }
+
+    [Fact]
+    public async Task Client_ShouldResolveDeviceCodeAndPreservePlcCodeForSemanticCapacityQuery()
+    {
+        var requestUris = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            requestUris.Add(request.RequestUri!);
+            if (request.RequestUri!.AbsolutePath == "/api/v1/ai/read/devices")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(CreateEnvelope(
+                        new[]
+                        {
+                            new
+                            {
+                                id = DeviceId,
+                                deviceCode = "DEV-001",
+                                deviceName = "正极模切客户端",
+                                processId = ProcessId
+                            }
+                        },
+                        rowCount: 1,
+                        source: "devices"))
+                };
+            }
+
+            return CreateOkItemsResponse();
+        }));
+        var client = CreateClient(httpClient);
+        var planner = new SemanticQueryPlanner(
+            new SemanticQuerySchemaRegistry(new SemanticDefinitionCatalog()),
+            new SemanticDefinitionCatalog());
+        var planning = planner.Plan(
+            "Analysis.Capacity.Range",
+            """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"},{"field":"plcCode","operator":"eq","value":"P2-CP05"}],"timeRange":{"field":"occurredAt","start":"2026-04-20T00:00:00Z","end":"2026-04-21T00:00:00Z"}}""");
+
+        planning.IsSuccess.Should().BeTrue(planning.ErrorMessage);
+        await client.QuerySemanticAsync(planning.Plan!);
+
+        requestUris.Should().HaveCount(2);
+        requestUris[0].AbsolutePath.Should().Be("/api/v1/ai/read/devices");
+        ParseQuery(requestUris[0]).Should().Contain("deviceCode", "DEV-001");
+        requestUris[1].AbsolutePath.Should().Be("/api/v1/ai/read/capacity/summary");
+        var query = ParseQuery(requestUris[1]);
+        query.Should().Contain("deviceId", DeviceId);
+        query.Should().Contain("plcCode", "P2-CP05");
+        query.Should().NotContainKey("deviceCode");
+        AssertNoLegacyParameters(query);
+    }
+
+    [Fact]
+    public async Task Client_ShouldPreserveCapacitySummaryNullableQualityFacts()
+    {
+        using var httpClient = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(CreateEnvelope(
+                new[]
+                {
+                    new
+                    {
+                        date = "2026-07-24",
+                        totalCount = 12,
+                        okCount = (int?)null,
+                        ngCount = (int?)null,
+                        dayShiftTotal = 12,
+                        nightShiftTotal = 0
+                    }
+                },
+                rowCount: 1,
+                source: "capacity.summary"))
+        }));
+        var client = CreateClient(httpClient);
+
+        var result = await client.GetCapacitySummaryAsync(new CloudAiReadQuery(
+            null,
+            [new CloudAiReadFilter("deviceId", "eq", DeviceId)],
+            CreateRange("2026-07-24T00:00:00Z", "2026-07-24T23:59:59Z"),
+            null,
+            false,
+            20));
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].OkCount.Should().BeNull();
+        result.Items[0].NgCount.Should().BeNull();
+        result.Rows[0]["okCount"].Should().BeNull();
+        result.Rows[0]["ngCount"].Should().BeNull();
+        result.Rows[0]["qualifiedQty"].Should().BeNull();
     }
 
     [Fact]
@@ -1034,6 +1129,7 @@ public sealed class CloudAiReadClientContractTests
             [
                 new CloudAiReadFilter("deviceId", "eq", DeviceId),
                 new CloudAiReadFilter("date", "eq", "2026-04-20"),
+                new CloudAiReadFilter("plcCode", "eq", "P2-CP05"),
                 new CloudAiReadFilter("plcName", "eq", "PLC-A")
             ],
             null,
@@ -1046,13 +1142,14 @@ public sealed class CloudAiReadClientContractTests
         var query = ParseQuery(capturedRequest.RequestUri);
         query.Should().Contain("deviceId", DeviceId);
         query.Should().Contain("date", "2026-04-20");
+        query.Should().Contain("plcCode", "P2-CP05");
         query.Should().Contain("plcName", "PLC-A");
         query.Should().Contain("maxRows", "40");
         AssertNoLegacyParameters(query);
     }
 
     [Fact]
-    public async Task Client_ShouldPreserveCapacityHourlyPlcName()
+    public async Task Client_ShouldPreserveCapacityHourlyNullableQualityAndPlcIdentity()
     {
         using var httpClient = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -1068,9 +1165,10 @@ public sealed class CloudAiReadClientContractTests
                         timeLabel = "08:00",
                         shiftCode = "day",
                         totalCount = 12,
-                        okCount = 11,
-                        ngCount = 1,
-                        okRate = 91.67m,
+                        okCount = (int?)null,
+                        ngCount = (int?)null,
+                        okRate = (decimal?)null,
+                        plcCode = "P2-CP05",
                         plcName = "正极模切05"
                     }
                 },
@@ -1091,8 +1189,17 @@ public sealed class CloudAiReadClientContractTests
             20));
 
         result.Items.Should().ContainSingle();
+        result.Items[0].OkCount.Should().BeNull();
+        result.Items[0].NgCount.Should().BeNull();
+        result.Items[0].OkRate.Should().BeNull();
+        result.Items[0].PlcCode.Should().Be("P2-CP05");
         result.Items[0].PlcName.Should().Be("正极模切05");
+        result.Rows[0]["okCount"].Should().BeNull();
+        result.Rows[0]["ngCount"].Should().BeNull();
+        result.Rows[0]["okRate"].Should().BeNull();
+        result.Rows[0]["plcCode"].Should().Be("P2-CP05");
         result.Rows[0]["plcName"].Should().Be("正极模切05");
+        result.Rows[0]["qualifiedQty"].Should().BeNull();
     }
 
     [Fact]
@@ -1585,8 +1692,8 @@ public sealed class CloudAiReadClientContractTests
                 }),
             new MalformedEndpointCase(
                 "capacity-summary",
-                """{"date":"2026-07-10","totalCount":10,"okCount":9,"ngCount":1,"dayShiftTotal":6,"nightShiftTotal":4}""",
-                "ngCount",
+                """{"date":"2026-07-10","totalCount":10,"okCount":null,"ngCount":null,"dayShiftTotal":6,"nightShiftTotal":4}""",
+                "dayShiftTotal",
                 "totalCount",
                 "\"opaque-provider-item-secret-number\"",
                 static async client =>
@@ -1595,7 +1702,7 @@ public sealed class CloudAiReadClientContractTests
                 }),
             new MalformedEndpointCase(
                 "capacity-hourly",
-                """{"time":"2026-07-10T01:00:00Z","date":"2026-07-10","hour":1,"minute":0,"timeLabel":"01:00","shiftCode":"DAY","totalCount":10,"okCount":9,"ngCount":1,"okRate":0.9,"plcName":null}""",
+                """{"time":"2026-07-10T01:00:00Z","date":"2026-07-10","hour":1,"minute":0,"timeLabel":"01:00","shiftCode":"DAY","totalCount":10,"okCount":null,"ngCount":null,"okRate":null,"plcCode":"P2-CP05","plcName":null}""",
                 "shiftCode",
                 "hour",
                 "\"opaque-provider-item-secret-integer\"",
@@ -1679,11 +1786,38 @@ public sealed class CloudAiReadClientContractTests
         await AssertInvalidProviderItemAsync(
             capacitySummary.Invoke,
             ReplaceProperty(capacitySummary.ValidItemJson, "totalCount", "2147483648"));
+        foreach (var nullableQualityField in new[] { "okCount", "ngCount" })
+        {
+            await AssertInvalidProviderItemAsync(
+                capacitySummary.Invoke,
+                RemoveProperty(capacitySummary.ValidItemJson, nullableQualityField));
+            await AssertInvalidProviderItemAsync(
+                capacitySummary.Invoke,
+                ReplaceProperty(capacitySummary.ValidItemJson, nullableQualityField, "{}"));
+        }
 
         var capacityHourly = cases.Single(endpoint => endpoint.Name == "capacity-hourly");
+        foreach (var nullableQualityField in new[] { "okCount", "ngCount", "okRate" })
+        {
+            await AssertInvalidProviderItemAsync(
+                capacityHourly.Invoke,
+                RemoveProperty(capacityHourly.ValidItemJson, nullableQualityField));
+            await AssertInvalidProviderItemAsync(
+                capacityHourly.Invoke,
+                ReplaceProperty(capacityHourly.ValidItemJson, nullableQualityField, "{}"));
+        }
         await AssertInvalidProviderItemAsync(
             capacityHourly.Invoke,
             ReplaceProperty(capacityHourly.ValidItemJson, "okRate", "1e1000"));
+        await AssertInvalidProviderItemAsync(
+            capacityHourly.Invoke,
+            RemoveProperty(capacityHourly.ValidItemJson, "plcCode"));
+        await AssertInvalidProviderItemAsync(
+            capacityHourly.Invoke,
+            ReplaceProperty(capacityHourly.ValidItemJson, "plcCode", "null"));
+        await AssertInvalidProviderItemAsync(
+            capacityHourly.Invoke,
+            ReplaceProperty(capacityHourly.ValidItemJson, "plcCode", "\"   \""));
         await AssertInvalidProviderItemAsync(
             capacityHourly.Invoke,
             RemoveProperty(capacityHourly.ValidItemJson, "plcName"));

@@ -99,6 +99,107 @@ public sealed class SemanticSummaryBuilderTests
     }
 
     [Fact]
+    public void Builder_ShouldPreserveUnknownCapacityQualityFacts()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(("outputQty", 118), ("qualifiedQty", null), ("plcName", "正极模切05"), ("occurredAt", "2026-04-20T08:00:00Z"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Metrics.Should().Contain(item => item.Name == "totalOutputQty" && item.Value == "118 个");
+        summary.Metrics.Should().Contain(item => item.Name == "totalQualifiedQty" && item.Value == "未知");
+        summary.Metrics.Should().Contain(item => item.Name == "qualifiedRate" && item.Value == "未知");
+        summary.Conclusion.Should().Contain("合格完工弹夹数 未知，合格率 未知");
+        summary.Conclusion.Should().NotContain("0.00%");
+        summary.Highlights.Should().ContainSingle().Which.Should().Contain("合格完工弹夹数 未知");
+    }
+
+    [Fact]
+    public void Builder_ShouldPreserveUnknownHourlyCapacityRateWhenCountsAreKnown()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(
+                ("outputQty", 100),
+                ("qualifiedQty", 95),
+                ("okRate", null),
+                ("plcCode", "P2-CP05"),
+                ("plcName", "正极模切05"),
+                ("occurredAt", "2026-04-20T08:00:00Z"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Metrics.Should().Contain(item => item.Name == "totalQualifiedQty" && item.Value == "95 个");
+        summary.Metrics.Should().Contain(item => item.Name == "qualifiedRate" && item.Value == "未知");
+        summary.Conclusion.Should().Contain("合格完工弹夹数 95 个，合格率 未知");
+        summary.Conclusion.Should().NotContain("95.00%");
+    }
+
+    [Fact]
+    public void Builder_ShouldPreserveReportedHourlyCapacityRateWhenCountsAreUnknown()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(
+                ("outputQty", 100),
+                ("qualifiedQty", null),
+                ("okRate", 92.5m),
+                ("plcCode", "P2-CP05"),
+                ("plcName", null),
+                ("occurredAt", "2026-04-20T08:00:00Z"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Metrics.Should().Contain(item => item.Name == "totalQualifiedQty" && item.Value == "未知");
+        summary.Metrics.Should().Contain(item => item.Name == "qualifiedRate" && item.Value == "92.50%");
+        summary.Metrics.Should().Contain(item => item.Name == "groupBreakdown" && item.Value == "P2-CP05 1条");
+        summary.Conclusion.Should().Contain("合格完工弹夹数 未知，合格率 92.50%");
+        summary.Highlights.Should().ContainSingle().Which.Should().Contain("PLC P2-CP05");
+    }
+
+    [Fact]
+    public void Builder_ShouldOutputWeightReportedHourlyCapacityRates()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(("outputQty", 100), ("qualifiedQty", null), ("okRate", 90m), ("plcCode", "P2-CP05")),
+            CreateRow(("outputQty", 50), ("qualifiedQty", null), ("okRate", 80m), ("plcCode", "P2-CP05"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Metrics.Should().Contain(item => item.Name == "totalQualifiedQty" && item.Value == "未知");
+        summary.Metrics.Should().Contain(item => item.Name == "qualifiedRate" && item.Value == "86.67%");
+    }
+
+    [Fact]
+    public void Builder_ShouldGroupHourlyCapacityByStablePlcCode()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(("outputQty", 10), ("qualifiedQty", 9), ("okRate", 90m), ("plcCode", "P2-CP05"), ("plcName", "模切机")),
+            CreateRow(("outputQty", 20), ("qualifiedQty", 18), ("okRate", 90m), ("plcCode", "P2-CP05"), ("plcName", null)),
+            CreateRow(("outputQty", 30), ("qualifiedQty", 27), ("okRate", 90m), ("plcCode", "P2-CP06"), ("plcName", "模切机"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Metrics.Should().Contain(item =>
+            item.Name == "groupBreakdown" &&
+            item.Value.Contains("模切机（P2-CP05） 2条") &&
+            item.Value.Contains("模切机（P2-CP06） 1条"));
+    }
+
+    [Fact]
     public void Builder_ShouldSummarizeDeviceLogs()
     {
         var plan = CreatePlan(SemanticQueryTarget.DeviceLog, SemanticQueryKind.ByLevel, ("deviceId", "11111111-1111-1111-1111-111111111111"), ("level", "ERROR"));

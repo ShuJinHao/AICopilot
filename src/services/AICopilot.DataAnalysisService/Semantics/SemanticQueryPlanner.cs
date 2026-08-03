@@ -88,7 +88,7 @@ public sealed class SemanticQueryPlanner(
         if (descriptor.RequiredAnyFilterFields?.Any() == true &&
             !filters.Any(filter => descriptor.RequiredAnyFilterFields.Contains(filter.Field, StringComparer.OrdinalIgnoreCase)))
         {
-            return SemanticPlanningResult.Failure(
+            return SemanticPlanningResult.ClarificationRequired(
                 $"Intent {descriptor.Intent} requires at least one of these filter fields: {string.Join(", ", descriptor.RequiredAnyFilterFields)}.");
         }
 

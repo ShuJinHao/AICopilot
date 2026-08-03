@@ -72,7 +72,7 @@ public sealed class CapacitySemanticDefinition : SemanticEntityDefinition
             SemanticQueryTarget.Capacity,
             ["产能", "产量", "良率", "capacity", "output"],
             ["shiftDate", "outputQty", "qualifiedQty", "totalCount", "okCount", "ngCount", "occurredAt"],
-            ["deviceId", "deviceCode", "plcName", "shiftDate"],
+            ["deviceId", "deviceCode", "plcCode", "plcName", "shiftDate"],
             ["shiftDate", "occurredAt", "outputQty", "qualifiedQty"],
             new Dictionary<SemanticQueryKind, SemanticProjection>
             {
