@@ -1,6 +1,6 @@
 # Cloud 只读数据分析契约
 
-本文档约束统一业务数据源插件、当前 Cloud 读取、受控 Text-to-SQL 和共享 SQL 安全边界。
+本文档是 AICopilot 业务查询 typed-first、结构化结果矩阵、查询确认、受控 Text-to-SQL、Simulation 边界和 fallback 决策的唯一技术正文，并约束统一业务数据源插件、当前 Cloud 读取与共享 SQL 安全边界。其它活动规则只保留产品/安全摘要并链接本文，不复制 policy、状态矩阵、重试或治理实现细节。
 
 ## 1. 总边界
 
@@ -10,7 +10,7 @@
 - Human-in-the-loop 只控制 AICopilot 自身高风险动作，不授权 Cloud 业务写入。
 - Cloud 只读失败、为空或未配置时，不得 fallback 到 Simulation 冒充真实数据。
 - 当前唯一真实外部业务数据源是 Cloud。MES、ERP 只允许以后通过统一 provider/profile registry 扩展，不得复制 Runner、Guard、RepairLoop 或 Prompt。
-- 分析任务必须先确认来源、`Device|DeviceLog|Capacity|ProductionRecord|Process|ClientRelease` 数据类型、业务对象、时间范围和过滤条件；信息不足、来源不唯一或低置信度时先询问，同任务后续沿用已确认上下文。
+- 分析任务必须先确认来源、`Device|DeviceLog|Capacity|ProductionRecord|Process|ClientRelease` 数据类型、业务对象、时间范围和过滤条件；信息不足、来源不唯一或低置信度时先询问。同一 `SessionId` 内只按已确认 scope 复用上下文，时间、过滤或来源等 scope 变化时继续按本文查询确认规则处理。
 
 ## 2. 源码归属
 
@@ -20,7 +20,8 @@
 - 统一上下文、确认字段、领域能力、结构化结果、provider/profile/context 接口：`src/services/AICopilot.Services.Contracts/Contracts/BusinessQueryPipelineContracts.cs`。
 - profile registry 与上下文 TTL owner：`src/services/AICopilot.DataAnalysisService/BusinessDatabases/BusinessDataSourceProfileRegistry.cs`。
 - Cloud provider 与 provider registry：`src/services/AICopilot.AiGatewayService/BusinessQueries/BusinessQueryProviderRegistry.cs`。
-- 中性业务查询入口：`src/services/AICopilot.AiGatewayService/BusinessQueries/BusinessQueryExecutor.cs`；结果只表达成功、空结果、待确认、失败、安全上下文、来源和可信 inline Widget。
+- 中性业务查询入口与确认上下文：`src/services/AICopilot.AiGatewayService/BusinessQueries/BusinessQueryExecutor.cs`、`BusinessQueryContext`；结果只表达成功、空结果、待确认、失败、安全上下文、来源和可信 inline Widget。
+- fallback 决策唯一 owner：`BusinessQueryFallbackPolicy`；`BusinessQueryExecutor` 只消费其服务端决策，不把决定权交给模型、provider 或客户端。
 - Harness 模型可见的唯一业务查询工具：`src/services/AICopilot.AiGatewayService/Agents/MainChatBusinessQueryTool.cs`。
 - 同源 Text-to-SQL runner 与 prompt adapter：`src/services/AICopilot.AiGatewayService/BusinessQueries/CloudReadOnlyTextToSqlFallbackRunner.cs`、`CloudReadOnlyLlmTextToSqlGenerator.cs`；Text-to-SQL 不得单独进入模型工具目录。
 - 唯一数据库执行接口、共享 AST guard 和 governed column inspector：`src/services/AICopilot.Services.Contracts/Contracts/IDatabaseConnector.cs`、`src/infrastructure/AICopilot.Dapper/DapperDatabaseConnector.cs`、`src/infrastructure/AICopilot.Dapper/Security/AstSqlGuardrail.cs`、`src/services/AICopilot.Services.CrossCutting/Sql/SqlAllowlistColumnInspector.cs`。
@@ -50,13 +51,15 @@ Cloud 当前正式 AI Read 只读表面必须在 AICopilot 客户端 allowlist �
 
 Cloud AiRead transport 只允许以上八个固定 GET。AICopilot 不提供任意 method/path 公共传输入口，不接受可配置 POST allowlist；POST、PUT、PATCH、DELETE 必须在发出 HTTP 请求前拒绝。Cloud identity status 是独立的只读身份 GET 表面，只复用安全路径校验，不扩展 Cloud AiRead 业务端点。
 
-六类 Cloud business plugin 优先走上述 typed GET，并统一返回 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable` 或 `Unauthorized`。Harness 主聊天的模型可见业务查询表面只能有一个 `BusinessQuery`；`BusinessQueryExecutor` 在工具内部固定执行 typed-first，并只在同一 Cloud 来源的 `Unsupported` 或 `Unavailable` 时自动进入受控 Text-to-SQL。`Empty` 直接作为真实空结果，`NeedClarification` 继续询问，`Unauthorized`/凭据失败不得绕过。查询确认与复用只按 `SessionId` 绑定，不存在任务级选择或重试语义。Simulation、MCP 或其他数据源 fallback 禁止。
+<!-- AICOPILOT_FALLBACK_POLICY_V1_BEGIN -->
+六类 Cloud business plugin 必须优先走上述 typed GET，并统一返回 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable` 或 `Unauthorized`。Harness 主聊天的模型可见业务查询表面只能有一个 `BusinessQuery`，Text-to-SQL 不作为独立工具进入模型目录。`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner；只有同一 Cloud 来源返回 `Unsupported` 或 `Unavailable` 且查询上下文、数据源 profile 与 capability profile 全部允许时，该 policy 才允许 `BusinessQueryExecutor` 在服务端自动进入受控 Text-to-SQL，模型不得决定、触发或绕过 fallback。`Success`、`Empty`、`NeedClarification`、`Unauthorized`、权限或凭据失败、跨源、MCP 与 Simulation 均不得 fallback。查询确认键固定为 `SessionId`；确认与复用只按该 Session 绑定，不存在任务级选择或重试语义。
+<!-- AICOPILOT_FALLBACK_POLICY_V1_END -->
 
 每个 provider 必须为其声明的每个 capability 同时声明非空结果字段契约和敏感字段片段；registry 必须与同一 `SourceKey/SourceType` 的 profile 联合校验 capability，并确保结果契约覆盖 capability profile 的全部敏感字段片段。运行时逐行校验顶层字段，递归检查 dictionary、sequence、`JsonElement`、`JsonDocument` 和可安全序列化 DTO，未知或序列化失败的复杂对象 fail-closed；校验通过后才能进入通用最终上下文 formatter。formatter 不持有 Cloud 专用 schema；MES/ERP 的输出边界由各自 provider capability 结果契约负责。业务数据源绑定必须同时匹配 `SourceKey`、`SourceType`，已确认 `DataSourceId` 时还必须精确匹配该 ID。
 
 查询上下文的来源、能力、业务对象、时间范围和过滤条件只能来自服务端记录的用户确认；Session 存在、模型高置信度、`Device`/`Process`/`ClientRelease` 目录型 target 或空/非空 filters 都不能自动代表用户已确认。同一 Session 先固定已确认 source/sourceId；完全相同 scope 可复用完整确认，改变时间或过滤时只复用未改变的来源、能力和业务对象字段，并对变化字段继续返回 `NeedClarification`。过期、跨 Session 或显式切换来源必须形成新的完整确认。
 
-`Analysis.Recipe.*` 具体数据问题必须在语义规划器、数据提供方、数据库、SQL 生成器和 fallback 之前返回固定禁读边界。fallback 决策由 `BusinessQueryExecutor` 基于结构化结果完成，typed plugin 自身不得直接切换数据源或调用 Simulation。
+`Analysis.Recipe.*` 具体数据问题必须在语义规划器、数据提供方、数据库、SQL 生成器和 fallback 之前返回固定禁读边界。`BusinessQueryFallbackPolicy` 基于结构化结果完成 fallback 决策，`BusinessQueryExecutor` 只消费并执行该决策；typed plugin 自身不得直接切换数据源或调用 Simulation。
 
 既有 physical mapping / semantic source status 属于 Direct DB 治理和运维诊断表面，不是正式语义执行授权；其配置、状态 API 或独立测试存在，不得被解释为六类 Cloud-only intent 可以转入 Direct DB。
 
@@ -139,6 +142,10 @@ Text-to-SQL prompt 只负责澄清、PostgreSQL 方言、profile schema 和结�
 - 非白名单表字段、系统字段或敏感字段。
 - 用户 prompt 原文、SQL 原文、连接串或 endpoint。
 
+- Direct DB 语义映射中的工序名只能来自只读 `mfg_processes.process_name`。新增 join 表必须同步进入 `CloudReadOnlyGovernedSchema` 的表/列/类型/join hint、所选 source profile 的 security schema、唯一共享 AST guard、只读 role 授权 SQL、授权探针、部署 preflight、RealSource 模板、架构测试和部署文档；缺任一闭环不得读取。
+- 创建或轮换 Cloud PostgreSQL 只读账号只能通过用户显式确认的受控自动化执行；只能创建或更新专用 readonly role，并且只授予治理白名单表的 `SELECT`。禁止授予写权限、schema create、superuser、createdb、createrole 或 replication。
+- Cloud PostgreSQL readonly role 的权威载体是 `deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 与 `check-readonly-grants.sql`。生产不得使用 `GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径；启用 CloudReadOnly 直连数据库前必须通过 readonly grant preflight。
+
 ## 6. 修复重试和审计
 
 - Text-to-SQL 修复重试默认最多 3 次，硬上限 5 次。
@@ -151,9 +158,11 @@ Text-to-SQL prompt 只负责澄清、PostgreSQL 方言、profile schema 和结�
 
 - DeviceLog 日志级别必须使用 Cloud PostgreSQL 真实枚举 `ERROR`、`WARN`、`INFO`。
 - “错误+警告”“异常分析”等场景必须显式查询多级别，不能只查 `ERROR` 后推断 `WARN` 没有。
+- DeviceLog 自然语言中的工序或设备范围必须落到只读 `devices` / `mfg_processes` join 暴露的业务字段过滤；最终回答模型不得按文字自行猜测设备、工序或范围。
 - 追问其他日志级别、设备、工序或时间窗口时，必须重新生成并执行本轮 `Analysis.DeviceLog.*` 查询。
 - 最终回答只能总结本轮 `query_execution`、`semantic_summary`、返回行数、过滤条件和证据边界；不能基于上一轮回答文本推断未查询数据。
 - Widget 和 display blocks 只能重排本轮只读查询事实，不能前端编造指标、Markdown 解析补数据或把建议写成已执行动作。
+- DeviceLog 的 `display_blocks` 必须按“结论、关键指标、关键记录、可能原因、建议动作、不能直接执行的动作、查询范围”组织；可能原因必须明确标注为 AI 推断分析，建议动作只能是人工排查建议，不得表达为已执行的控制、下发、写入或修复动作。
 - DataAnalysis 最终上下文是独立的不可信消费边界：表结构注释、Text-to-SQL alias 和返回行 key 均不能直接成为最终 JSON 属性名。formatter 必须使用唯一字段标签映射，过滤共享 governed-schema 敏感标识，并让 metadata name/description 与 preview key 保持一致。
 - `business_data_preview` 只是扁平业务标量预览；除 string、bool/数值、date、Guid、enum 与等价 JSON 标量外，其余 object/array/collection 不得递归输出、串行化或调用自定义 `ToString()` 透出 nested key/secret，统一用既有脱敏占位表达不可展开值。
 

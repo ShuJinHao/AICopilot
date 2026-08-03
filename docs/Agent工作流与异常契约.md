@@ -45,19 +45,9 @@
 
 ### 2.2 BusinessQuery
 
-- `BusinessQuery` 是服务端受治理工具，每次调用先校验 `AiGateway.Chat` 权限；模式不能授予或撤销该工具，Text-to-SQL 只可作为内部 fallback，绝不直接暴露给模型。
-- Cloud typed provider 是首选路径。`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner；只有同一 Cloud profile 返回 `Unsupported` 或 `Unavailable` 且全部服务端治理条件通过时，`BusinessQueryExecutor` 才自动进入受控 Text-to-SQL。模型既看不到 Text-to-SQL 工具，也不得决定或触发 fallback；`Success`、`Empty`、`NeedClarification`、`Unauthorized` 均不得 fallback。禁止跨源、Simulation、MCP 或隐藏 adapter fallback。
-- `Analysis.Recipe.*` 具体配方数据在语义规划器、provider、数据库和 fallback 之前即被拒绝。SQL 最终统一经过 profile-aware AST 只读门禁和只读数据库账号。
+- `BusinessQuery` 是服务端受治理工具，每次调用先校验 `AiGateway.Chat` 权限；模式不能授予或撤销该工具。模型可见的业务查询工具只有 `BusinessQuery`，Text-to-SQL 只作为工具内部能力，绝不以独立工具暴露给模型。
+- typed-first、结构化结果矩阵、查询确认、Text-to-SQL、Simulation 与 fallback 决策只由 [Cloud 只读数据分析契约](./Cloud只读数据分析契约.md) 定义，本 Agent 契约不复制其 policy 或实现矩阵。
 - 模型只接收 bounded、脱敏的业务摘要和治理证据，不得接收 SQL、原始行、连接信息、内部 schema、provider raw output 或未授权字段。
-
-Cloud 只读正式能力为：
-
-- `Analysis.Device.List/Detail/Status`
-- `Analysis.DeviceLog.Latest/Range/ByLevel`
-- `Analysis.Capacity.Range/ByDevice`
-- `Analysis.ProductionData.Latest/Range/ByDevice`
-- `Analysis.Process.List/Detail`
-- `Analysis.ClientRelease.List`
 
 ### 2.3 KnowledgeQuery
 
