@@ -57,8 +57,8 @@ internal static class CloudAiReadProviderItemContractValidator
             [CloudAiReadOperation.CapacitySummary] = new(
                 Required("date", ProviderItemValueKind.Date),
                 Required("totalCount", ProviderItemValueKind.Integer),
-                Required("okCount", ProviderItemValueKind.Integer),
-                Required("ngCount", ProviderItemValueKind.Integer),
+                RequiredNullable("okCount", ProviderItemValueKind.Integer),
+                RequiredNullable("ngCount", ProviderItemValueKind.Integer),
                 Required("dayShiftTotal", ProviderItemValueKind.Integer),
                 Required("nightShiftTotal", ProviderItemValueKind.Integer)),
             [CloudAiReadOperation.CapacityHourly] = new(
@@ -69,9 +69,10 @@ internal static class CloudAiReadProviderItemContractValidator
                 Required("timeLabel", ProviderItemValueKind.String),
                 Required("shiftCode", ProviderItemValueKind.String),
                 Required("totalCount", ProviderItemValueKind.Integer),
-                Required("okCount", ProviderItemValueKind.Integer),
-                Required("ngCount", ProviderItemValueKind.Integer),
-                Required("okRate", ProviderItemValueKind.Number),
+                RequiredNullable("okCount", ProviderItemValueKind.Integer),
+                RequiredNullable("ngCount", ProviderItemValueKind.Integer),
+                RequiredNullable("okRate", ProviderItemValueKind.Number),
+                Required("plcCode", ProviderItemValueKind.String),
                 RequiredNullable("plcName", ProviderItemValueKind.String)),
             [CloudAiReadOperation.DeviceLog] = new(
                 Required("id", ProviderItemValueKind.Guid),
@@ -108,6 +109,11 @@ internal static class CloudAiReadProviderItemContractValidator
         foreach (var record in records)
         {
             ValidateObject(record, contract);
+            if (operation == CloudAiReadOperation.CapacityHourly &&
+                string.IsNullOrWhiteSpace(record.GetProperty("plcCode").GetString()))
+            {
+                throw CloudAiReadJsonValueReader.InvalidProviderContract();
+            }
             if (operation == CloudAiReadOperation.ProductionRecord)
             {
                 ValidateProductionRecord(record);

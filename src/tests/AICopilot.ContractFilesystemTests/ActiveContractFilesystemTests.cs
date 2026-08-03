@@ -668,7 +668,7 @@ public sealed class ActiveContractFilesystemTests
             policyStartMarker,
             policyEndMarker);
         ComputeSha256(NormalizeContractText(canonicalPolicy)).Should().Be(
-            "85a96c6a69a35e467c3bbb9b681f64b7ebe27e09fd6102c81bf6f9c48cc076c5",
+            "c3998e3797727ce14924aa66bbae5087630b96ff4d4da5e4d49aefd8e7a638a4",
             "the reviewed fallback decision matrix is a closed contract block");
 
         cloudContract.Should().Contain(

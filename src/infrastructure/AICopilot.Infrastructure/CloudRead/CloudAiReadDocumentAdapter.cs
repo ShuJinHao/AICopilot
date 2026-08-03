@@ -150,8 +150,8 @@ internal static class CloudAiReadDocumentAdapter
         var items = records.Select(record => new CloudAiReadCapacitySummaryDto(
             CloudAiReadJsonValueReader.GetRequiredDateOnly(record, "date"),
             CloudAiReadJsonValueReader.GetRequiredInt(record, "totalCount"),
-            CloudAiReadJsonValueReader.GetRequiredInt(record, "okCount"),
-            CloudAiReadJsonValueReader.GetRequiredInt(record, "ngCount"),
+            CloudAiReadJsonValueReader.GetInt(record, "okCount"),
+            CloudAiReadJsonValueReader.GetInt(record, "ngCount"),
             CloudAiReadJsonValueReader.GetRequiredInt(record, "dayShiftTotal"),
             CloudAiReadJsonValueReader.GetRequiredInt(record, "nightShiftTotal"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
@@ -190,9 +190,10 @@ internal static class CloudAiReadDocumentAdapter
             CloudAiReadJsonValueReader.GetRequiredString(record, "timeLabel"),
             CloudAiReadJsonValueReader.GetRequiredString(record, "shiftCode"),
             CloudAiReadJsonValueReader.GetRequiredInt(record, "totalCount"),
-            CloudAiReadJsonValueReader.GetRequiredInt(record, "okCount"),
-            CloudAiReadJsonValueReader.GetRequiredInt(record, "ngCount"),
-            CloudAiReadJsonValueReader.GetRequiredDecimal(record, "okRate"),
+            CloudAiReadJsonValueReader.GetInt(record, "okCount"),
+            CloudAiReadJsonValueReader.GetInt(record, "ngCount"),
+            CloudAiReadJsonValueReader.GetDecimal(record, "okRate"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "plcCode"),
             CloudAiReadJsonValueReader.GetString(record, "plcName"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
 
@@ -209,6 +210,7 @@ internal static class CloudAiReadDocumentAdapter
             ["okCount"] = item.OkCount,
             ["ngCount"] = item.NgCount,
             ["okRate"] = item.OkRate,
+            ["plcCode"] = item.PlcCode,
             ["plcName"] = item.PlcName,
             ["outputQty"] = item.TotalCount,
             ["qualifiedQty"] = item.OkCount
