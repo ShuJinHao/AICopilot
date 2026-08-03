@@ -160,6 +160,55 @@ public sealed class ActiveContractFilesystemTests
     }
 
     [Fact]
+    public void DataSourcePermissionGrant_ShouldKeepFormalIndependentAggregateOwnership()
+    {
+        var root = FindRepositoryRoot();
+        var businessRules = File.ReadAllText(
+            Path.Combine(root, "docs", "AICopilot业务规则.md"));
+        var aggregateContract = File.ReadAllText(
+            Path.Combine(root, "docs", "DDD聚合根边界.md"));
+        var ownershipLines = string.Join(
+            '\n',
+            new[] { businessRules, aggregateContract }
+                .SelectMany(text => text.Split('\n'))
+                .Where(line => line.Contains("DataSourcePermissionGrant", StringComparison.Ordinal)));
+
+        businessRules.Should().Contain(
+            "`DataSourcePermissionGrant` 正式冻结为 DataAnalysis bounded context 的独立聚合根");
+        aggregateContract.Should().Contain(
+            "`DataSourcePermissionGrant` 是 DataAnalysis bounded context 的正式独立聚合根");
+        aggregateContract.Should().Contain("独立 `DataSourcePermissionGrantId`");
+        aggregateContract.Should().Contain("`RowVersion`");
+        aggregateContract.Should().Contain("授权/撤销生命周期");
+        aggregateContract.Should().Contain("repository");
+        aggregateContract.Should().Contain("审计写入");
+        aggregateContract.Should().Contain(
+            "`(BusinessDatabaseId, TargetType, TargetValue)` 唯一目标约束");
+        aggregateContract.Should().Contain("跨聚合仅由 Grant 引用 `BusinessDatabaseId`");
+        aggregateContract.Should().Contain("`BusinessDatabase` 不持有 Grant 子实体集合");
+
+        string[] unresolvedOwnershipMarkers =
+        [
+            "AggregatePendingReview",
+            "PendingReview",
+            "归属未决",
+            "归属待定",
+            "归属待确认",
+            "尚待决定",
+            "尚未定稿",
+            "暂未确定",
+            "暂作为",
+            "暂定",
+            "待评估",
+            "下沉",
+        ];
+        foreach (var marker in unresolvedOwnershipMarkers)
+        {
+            ownershipLines.Should().NotContain(marker);
+        }
+    }
+
+    [Fact]
     public void MainHarnessSource_ShouldKeepNativeMafModeRuntimeAlignment()
     {
         var root = FindRepositoryRoot();
