@@ -189,12 +189,18 @@ public sealed class ActiveContractFilesystemTests
 
         string[] unresolvedOwnershipMarkers =
         [
+            "AggregatePendingReview",
+            "PendingReview",
+            "归属未决",
+            "归属待定",
+            "归属待确认",
+            "尚待决定",
+            "尚未定稿",
+            "暂未确定",
             "暂作为",
             "暂定",
             "待评估",
-            "未来下沉",
-            "后续下沉",
-            "下沉为子实体",
+            "下沉",
         ];
         foreach (var marker in unresolvedOwnershipMarkers)
         {
