@@ -250,7 +250,7 @@ Cloud AiRead 设备契约：
 - compatibility baseline 只记录真实兼容/迁移项，bootstrap 后只能删除或收紧 deadline/call-site 上限，禁止新增 ID、扩大调用方或换名回避。普通 abstraction 不进 baseline；inventory 必须证明唯一活跃声明、至少一个真实可执行调用点、`AI-ORDINARY-*` 身份且不含兼容生命周期字段，注释、字符串和声明不算调用方。
 - 用户显式 `Quality` 模式下的重复度门禁只治理生产源码，不扫描或冻结 `src/tests`、`src/testing` 与前端测试。生产重复以 `path+line` 计数每个出现实例，同文件重复不得被去重；同时锁定汇总指标和每个 signature 的实例数/重复行/重复 token。base 尚无重复度 baseline 时只允许一次 candidate-exact bootstrap；base 已有 baseline 后只能在真实重复先减少时收紧，不得用总量持平、signature swap、放宽或重生成 baseline 换绿。
 - `IAggregateRoot<>` 只用于独立维护业务不变量和生命周期的领域根；`AgentSessionState`、`ModelQuotaReservation`、Outbox、审计和 worker 状态都不得作为新聚合根。
-- `DataSourcePermissionGrant` 当前保留为独立聚合根但标记待评估；后续如果授权生命周期可归入 `BusinessDatabase`，应下沉为子实体或专用权限记录并移出聚合根白名单。
+- `DataSourcePermissionGrant` 正式冻结为 DataAnalysis bounded context 的独立聚合根：它拥有独立 `DataSourcePermissionGrantId`、`RowVersion`、授权/撤销生命周期、repository、审计写入和 `(BusinessDatabaseId, TargetType, TargetValue)` 唯一目标约束。它与 `BusinessDatabase` 跨聚合仅引用 `BusinessDatabaseId`，`BusinessDatabase` 不持有授权子实体集合；该归属是正式长期边界。
 - `AiCopilotDbContext` 是主基础设施迁移上下文，也是 Outbox 与 persistence commit marker 的唯一 migration owner；`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 与 `PersistenceCommitMarkerDbContext` 只作为运行时短生命周期参与者，不拥有 migration。
 - 没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；DataAnalysis/MCP 不写 Outbox，AiGateway `Session` 领域事件和 RAG delayed integration-event factory 只能在 repository commit participant 内物化到短生命周期 `OutboxDbContext`，业务 Context 不映射共享 Outbox。
 - 审计写入必须遵守 Audit writer decision tree：有业务保存点的命令应把业务变更和审计行放在同一事务；`auditLogWriter.SaveChangesAsync` 只允许出现在没有业务保存点且已被白名单记录的执行路径。

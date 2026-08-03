@@ -16,7 +16,9 @@
 - McpServer：`McpServerInfo`。
 - Rag：`KnowledgeBase`、`EmbeddingModel`、`KnowledgeCategory`、`KnowledgeSupplement`。
 
-`DataSourcePermissionGrant` 暂作为独立聚合根；若其授权生命周期收回 `BusinessDatabase`，必须在同批从白名单移除。
+`DataSourcePermissionGrant` 是 DataAnalysis bounded context 的正式独立聚合根。独立 `DataSourcePermissionGrantId`、`RowVersion`、授权/撤销生命周期、repository、审计写入和 `(BusinessDatabaseId, TargetType, TargetValue)` 唯一目标约束共同构成其独立不变量边界。
+
+`DataSourcePermissionGrant` 与 `BusinessDatabase` 是两个聚合；跨聚合仅由 Grant 引用 `BusinessDatabaseId`，`BusinessDatabase` 不持有 Grant 子实体集合。该归属是正式长期边界。
 
 ## AiGateway 持久化分类
 

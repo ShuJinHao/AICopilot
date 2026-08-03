@@ -7,6 +7,7 @@ using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
 using AICopilot.Core.AiGateway.Aggregates.Tools;
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
+using AICopilot.Core.DataAnalysis.Ids;
 using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
@@ -45,7 +46,7 @@ public sealed class DddAggregateBoundaryTests
         {
             ["BusinessDatabase"] = "Aggregate",
             ["ConversationTemplate"] = "Aggregate",
-            ["DataSourcePermissionGrant"] = "AggregatePendingReview",
+            ["DataSourcePermissionGrant"] = "Aggregate",
             ["EmbeddingModel"] = "Aggregate",
             ["KnowledgeBase"] = "Aggregate",
             ["KnowledgeCategory"] = "Aggregate",
@@ -167,6 +168,41 @@ public sealed class DddAggregateBoundaryTests
 
         debtClassifiedAsAggregate.Should().BeEmpty(
             "known debt types are tables, but they are no longer accepted as aggregate-root direction");
+    }
+
+    [Fact]
+    public void DataSourcePermissionGrant_ShouldRemainAnIndependentAggregateWithIdOnlyCrossReference()
+    {
+        typeof(IAggregateRoot<DataSourcePermissionGrantId>)
+            .IsAssignableFrom(typeof(DataSourcePermissionGrant))
+            .Should().BeTrue();
+        typeof(DataSourcePermissionGrant)
+            .GetProperty(nameof(DataSourcePermissionGrant.Id))!
+            .PropertyType.Should().Be(typeof(DataSourcePermissionGrantId));
+        typeof(DataSourcePermissionGrant)
+            .GetProperty(nameof(DataSourcePermissionGrant.DataSourceId))!
+            .PropertyType.Should().Be(typeof(BusinessDatabaseId));
+        DbSetTypeClassifications[nameof(DataSourcePermissionGrant)]
+            .Should().Be("Aggregate");
+
+        var businessDatabaseMemberTypes = typeof(BusinessDatabase)
+            .GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Select(member => member switch
+            {
+                PropertyInfo property => property.PropertyType,
+                FieldInfo field => field.FieldType,
+                _ => null
+            })
+            .Where(type => type is not null)
+            .Cast<Type>();
+        var grantOwnedByBusinessDatabase = businessDatabaseMemberTypes
+            .Where(type => type == typeof(DataSourcePermissionGrant) ||
+                           type.IsGenericType &&
+                           type.GetGenericArguments().Contains(typeof(DataSourcePermissionGrant)))
+            .ToArray();
+
+        grantOwnedByBusinessDatabase.Should().BeEmpty(
+            "BusinessDatabase and DataSourcePermissionGrant are separate aggregates and may cross-reference only by BusinessDatabaseId");
     }
 
     private static IReadOnlyCollection<Type> GetConcreteAggregateRoots()
