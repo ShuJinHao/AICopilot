@@ -1,6 +1,6 @@
 # Agent 工作流与异常契约
 
-本文档是 AICopilot 主聊天运行时、工具、批准、异常和前端展示的活动契约。主聊天只有 Microsoft Agent Framework Harness 一条运行主链；历史实现只通过 Git 追溯，未完成方向见 `docs/AI架构路线图.md`。
+本文档是 AICopilot 主聊天 MAF / Harness 技术契约的唯一正文；该唯一性专指 `AgentModeProvider` 与模式 API、AgentSession / SSE、工具批准、`ToolInvocationGuardChatClient`、Harness 裁剪扩展点和 BOM 升级流程，不取代 Cloud、MCP、DDD 等专题的业务与治理规则。其它活动规则只保留这些主题的产品语义、消费端硬边界或状态并链接本文，不复制实现约束。主聊天只有 Microsoft Agent Framework Harness 一条运行主链；历史实现只通过 Git 追溯，未完成方向见 `docs/AI架构路线图.md`。
 
 ## 1. 唯一运行主链
 
@@ -9,6 +9,7 @@
 - 对话运行时公开入口只保留 Session、消息历史、Chat、Agent mode 与 Harness tool approval。`/agent/task/**`、`/agent/approval/**`、`/workspace/**`、`/artifact/**`、`/upload/**`、`/approval-policy/**`、`session/timeline` 和 `session/safety-attestation` 当前必须不可达。
 - Harness 主聊天固定使用 `Microsoft.Agents.AI.Harness` / `Microsoft.Agents.AI` `1.16.0`，每轮最多 8 次模型调用。必须关闭 FileMemory、WebSearch、AgentSkills、BackgroundAgents、LoopEvaluators 与 compaction，不注册 FileAccessStore、Shell 或文件 Artifact；聊天只允许文本和服务端可信 inline Widget。
 - 模型端点、认证、配额、熔断和遥测由轻量 `IChatClient` 工厂负责，且作用于每一次真实模型调用。Text-to-SQL、分类和结构化生成直接使用轻量客户端，禁止嵌套 Harness；主聊天不得恢复 `Microsoft.Agents.AI.Workflows` 依赖。
+- `ConversationTemplate.ModelId` 决定主回答模型；Harness 创建后只从 `ScopedRuntimeAgent.ConfigurationSnapshot` 记录实际最终模型 provenance，请求不得临时覆盖。
 - Harness 裁剪只允许使用官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。MAF / Harness 升级必须作为独立 BOM 批次，核心包保持同版本；先核对官方 release notes 与公开 API，再运行真实框架合同测试，上游语义变化时跟随框架。
 - `ToolInvocationGuardChatClient` 只在每次实际 provider 请求上，以 Harness 产生的有效 `ChatOptions.Tools` 建立精确允许集合；不得删除、重排或按 Plan / Execute 过滤 MAF 与应用传入的工具，官方 `mode_get` / `mode_set` 保持可见。provider 返回未公开工具、多工具违约或 standing approval 信号时继续 fail-closed；这些校验与模式完全无关。
 
@@ -32,6 +33,7 @@
 
 ### 2.1 统一注册表门禁
 
+- Plan / Execute 必须使用同一份 `MainChatToolCatalog`；模式不是业务工具目录的筛选输入，目录始终由当前身份、Session、注册、安全元数据和批准边界生成。
 - 本地插件与 MCP 工具必须统一经过 `MainChatToolGate`。缺少精确注册、登记与运行时身份不一致或任一检查失败时，工具不得进入模型目录。
 - 门禁逐项校验 `IsEnabled`、`IsExecutableByAgent`、当前用户 `RequiredPermission`、`RiskLevel`、`RequiresApproval`、`AuditLevel`、`DataBoundary`、`SchemaVersion`、输入/输出 schema 与 `AiToolSafetyPolicy`。
 - 运行时不得用工具名 alias、描述、endpoint、hostname 或调用方自报值替代规范身份和治理元数据。动态 MCP 只有 server 与 tool 都满足 `CloudReadOnly + ReadOnlyQuery + readOnlyDeclared=true`，并携带独立 canonical `ToolName` 时才可继续检查。
@@ -73,6 +75,7 @@ Cloud 只读正式能力为：
 ## 3. Harness tool approval
 
 - Tool 从注册表到 Harness wrapper 必须完整保留规范身份、`RequiresApproval`、风险、权限、审计、数据边界、schema version 和 canonical 参数摘要。
+- 批准身份只能来自受保护的服务端 `AgentSessionState` 绑定。`POST /api/aigateway/approval/decision` 请求固定为 `{ sessionId, callId, decision }`；客户端不得回传或覆盖 target、tool identity、schema version、参数摘要及其它治理字段。
 - 每次批准绑定用户、租户、session、request id、toolCallId、规范工具身份、schema version 与 canonical 参数 SHA-256。续流前重新验证全部绑定；漂移、跨 owner/session、重复或外来 call、Interrupted 后旧批准全部 fail-closed。
 - 本版批准协议每个 governed turn 只允许一个不同的工具调用。provider 即使忽略 `AllowMultipleToolCalls=false` 返回第二个不同的待批调用，也不得执行任一工具、不得续批或保存部分绑定；服务端必须清空批准绑定，将 AgentSession 标记为 `Interrupted`，返回既有 `agent_session_interrupted` 并要求用户新建会话。
 - 主聊天只允许批准 AICopilot 自身、可逆、幂等或结果可查询的动作。Cloud/MES/ERP 写入、设备启停、生产控制、不可逆或结果不可查询动作即使用户批准也继续硬阻断。

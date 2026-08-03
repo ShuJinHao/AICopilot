@@ -145,11 +145,11 @@ Cloud AiRead 设备契约：
 - 它不能覆盖 Cloud 业务只读规则。
 - 若未来允许调用 Cloud AI-facing API，审批规则必须与 Cloud 权限、Cloud 审计和接口契约一起设计。
 
-### 7.1 Harness 逐次批准
+### 7.1 逐次工具批准产品边界
 
-- 主 Harness 使用官方 `ApprovalRequiredAIFunction`，关闭 standing rules 与自动批准；每个 governed turn 只允许一个不同的待批工具调用。
-- 批准绑定的工具身份、schema version 和参数摘要全部来自服务端 `AgentSessionState`；客户端只提交 `{ sessionId, callId, decision }`。
-- owner、tenant、session、权限、schema 或参数摘要漂移、重复决定和外来 call 全部 fail-closed。provider 返回第二个不同待批调用时不执行任何工具，清空绑定并将会话标记为 `Interrupted`。
+- 需要批准的受治理工具必须逐次向用户说明规范工具身份和安全参数摘要，不提供永久批准或“不再询问”。
+- 批准只允许当前身份和会话执行当次已展示动作；身份、权限、工具或参数发生变化时必须重新判断并 fail-closed。
+- 人工批准不能覆盖 Cloud/MES/ERP 写入、生产控制、越权访问或其它永久硬阻断。Harness 批准协议、受保护绑定和异常时序只由 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) 定义。
 
 ## 8. 对话产品规则
 
@@ -170,17 +170,13 @@ Cloud AiRead 设备契约：
 - 历史消息按 `Message.Sequence` 分页；`FunctionCall`、`FunctionResult`、`ApprovalRequest` 或 `Metadata` chunk 不得作为普通文本消息重新摊开。
 - 开发阶段已物理删除 Trial/Pilot/Production Readiness 运营线；后续不得把旧试点运营能力重新接回普通产品导航。
 
-### 8.1 Harness Plan / Execute 语义
+### 8.1 Plan / Execute 产品语义
 
-- `Plan` 与 `Execute` 完全由官方 `AgentModeProvider` 持有并持久化在同一 `AgentSession`；新会话使用框架默认 `Plan`。模式是行为状态，不是安全隔离或授权边界，模式与授权正交。
-- `Plan` 用于交互式澄清、调查、调用受治理工具和形成 Todo；`Execute` 用于自主、连续地完成 Todo。两种模式看到的工具都必须先经过当前用户、Session、权限、注册、安全元数据和批准边界实时筛选，切换模式不得扩大或缩小用户权限、工具注册、数据边界或批准策略。
-- 两种模式使用同一份 `MainChatToolCatalog`；模式不是工具目录的筛选输入。provider 前的 `ToolInvocationGuardChatClient` 只校验本次有效 `ChatOptions.Tools`，不得删除、重排或按模式过滤官方与应用工具。
-- 模型保留官方 `mode_get` / `mode_set`。当前认证 owner 也可显式调用带 `expectedVersion` 的会话 API，并由该 API 调用官方 `SetModeAsync`；公开 API 是并列切换入口，不是唯一切换入口。
+- `Plan` 用于帮助用户交互式澄清、调查并形成 Todo；`Execute` 用于自主、连续地完成 Todo。
+- Plan / Execute 是行为状态，不是安全隔离或授权边界；模式与授权正交，切换模式不得扩大或缩小用户权限、可用工具、数据边界或批准策略。
 - 空态文案和建议必须使用当前行为模式：`Plan` 建议澄清、调查和形成待办，`Execute` 建议连续完成待办；建议操作不得伪造权限变化或替用户隐式切换模式。
-- Harness 裁剪只允许使用官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。
-- MAF / Harness 升级必须作为独立 BOM 批次，核心包保持同版本；先核对官方 release notes 与公开 API，再运行真实框架合同测试。上游模式语义变化时跟随框架，不重造旧行为。
+- MAF / Harness 的模式持有、模型工具、会话持久化、公开模式接口、裁剪扩展点和升级流程只由 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) 定义，本产品规则不复制实现正文。
 - `BusinessQuery` 的查询确认键是 `SessionId`；追问改变设备、工序、日志级别、时间或数据源时必须重新确认，不得从旧回答文本反推事实。
-- 主回答的模型 provenance 只来自 Harness 实际创建的 `ConfigurationSnapshot`；请求不得临时指定最终模型。
 
 ### 8.2 当前内网 HTTP 部署红线
 

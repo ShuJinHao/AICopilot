@@ -21,7 +21,7 @@
 - Chat、Mode、Approval 和 History 必须使用 resolved session，UI guard 与 Pinia action 都必须 fail-closed。
 - 会话激活、流式请求、批准续流和历史分页期间必须保持统一 `isSessionTransitionBlocked` 临界区。
 - 批准权威只来自持久化 AgentSession 绑定和 `/approval/pending`。未知期间不得发起新 Chat 或批准。
-- 批准提交请求固定为 `{ sessionId, callId, decision }`；不得回传 target、tool、schema、参数摘要或其它客户端可篡改身份。
+- 批准提交不得回传 target、tool、schema、参数摘要或其它客户端可篡改身份；精确请求形状和服务端绑定规则以 [Agent 工作流与异常契约](../../../docs/Agent工作流与异常契约.md) 为唯一技术正文。
 - 主聊天请求固定为 `{ sessionId, message }`；不得临时指定回答模型或携带任务引用。
 - `Interrupted` / `ResetRequired` 会话不得继续发言或批准，必须引导用户新建会话。
 - SSE mutation 无幂等键，禁止自动重连或将断链解释为服务端一定未提交。
@@ -56,11 +56,10 @@ Widget 是后端结构化展示契约，不是任意 ECharts 配置。前端只�
 
 `<mm:think>...</mm:think>`、`<think>...</think>` 及残缺标签不得出现在用户可见消息正文里。后端 `AgentStreamRuntime` 是主清洗层，前端 `chunkReducer.ts` 是防漏兜底层。
 
-## 5. Harness Plan / Execute Discipline
+## 5. Plan / Execute Product And Safety Boundary
 
-- Plan / Execute 模式是持久化 AgentSession 状态，切换必须提交 `expectedVersion`，冲突后重读 Session。
 - Plan / Execute 是 MAF 行为模式，不是前端权限或安全边界；两种模式使用同一份服务端受治理工具目录，前端不得按模式推断、隐藏或放大工具权限。
-- 模型可通过官方 `mode_set` 切换模式；前端必须以持久化后的 `agent_session_state` mode/version 为权威，现有带 `expectedVersion` 的用户切换 API 是并列入口。
+- 模式持久化、模型与用户切换入口、SSE 投影和版本冲突协议以 [Agent 工作流与异常契约](../../../docs/Agent工作流与异常契约.md) 为唯一技术正文；本文件只约束前端消费边界。
 - 两种模式下的工具面都必须经 Tool Gate、身份、权限、schema 和批准绑定；模式切换不得扩大 Cloud/MES/ERP 写权限。
 - 主聊天一轮只支持一个待批工具调用；前端不得尝试排队、部分保留或自动批准多个调用。
 
