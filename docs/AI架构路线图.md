@@ -1,36 +1,28 @@
 # AICopilot AI 架构路线图
 
-本文只记录当前目标架构、能力状态和后续退出门。业务和安全规则以 [AICopilot 业务规则](./AICopilot业务规则.md)、[Agent 工作流与异常契约](./Agent工作流与异常契约.md)、[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md) 和 [DDD 聚合根边界](./DDD聚合根边界.md) 为准；历史方案和阶段执行过程只通过 Git 追溯。
+本文只记录源码状态、生产状态和后续退出门，不重复运行时实现正文。业务和安全规则以 [AICopilot 业务规则](./AICopilot业务规则.md)、MAF / Harness 唯一技术正文 [Agent 工作流与异常契约](./Agent工作流与异常契约.md)、[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md) 和 [DDD 聚合根边界](./DDD聚合根边界.md) 为准；历史方案和阶段执行过程只通过 Git 追溯。
 
-## 1. 当前源码架构
+## 1. 当前源码状态
 
-- 主聊天只有 Microsoft Agent Framework Harness 一条执行主链，并已接入官方 `AgentModeProvider`；`Plan` / `Execute` 由该 provider 持有并持久化在同一 `AgentSession`。
-- 目标语义跟随 MAF：Plan 是交互式澄清、调查、调用受治理工具和形成 Todo 的行为模式，Execute 是自主连续完成 Todo 的行为模式；官方 `mode_get` / `mode_set` 均保留。模式与授权正交，不是安全隔离机制。
-- MAF 原生模式运行时已对齐：Harness 使用框架默认 `AgentModeProviderOptions` 与官方模式指令，保留 `mode_get` / `mode_set`；`ToolInvocationGuardChatClient` 只按每次请求的有效工具集合校验 provider 返回，不删除、不重排，也不按模式过滤工具。
-- Harness 裁剪只允许官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。MAF / Harness 升级使用独立 BOM 批次，核心包保持同版本，并以官方 release notes、公开 API 和真实框架合同测试为准。
-- 主 Harness 保留 Todo、受治理工具、逐次批准、会话连续性 checkpoint 与中断语义；AgentSession checkpoint 不是 durable Tool checkpoint，Interrupted 后不恢复、不重放。系统不维护第二套任务编排或文件产物运行时。
-- `ConversationTemplate.ModelId` 决定主回答模型。Harness 创建后从 `ScopedRuntimeAgent.ConfigurationSnapshot` 记录实际最终模型 provenance，请求不得临时覆盖。
-- `BusinessQuery` 和 `KnowledgeQuery` 是服务端受治理工具，能否调用只取决于当前身份、Session、注册、安全元数据和批准边界，不由模式授予；前者由 `BusinessQueryFallbackPolicy` 固定执行 typed provider 优先，并仅在同源 `Unsupported` / `Unavailable` 时由服务端自动进入受控 Text-to-SQL，后者只检索当前用户授权知识库。
-- `MainChatToolGate` 统一筛选本地与 MCP 工具；Cloud/MES/ERP 写入、生产控制和越权访问由身份、Tool Gate、`AiToolSafetyPolicy`、SQL AST guard、只读账号与 MCP 治理阻断，不依赖 Plan / Execute，模型、模式切换和人工批准都不能授予写权限。
-- MCP 使用稳定版 `ModelContextProtocol 2.0.0`：HTTP discovery-first/AutoDetect、官方 Stdio transport、typed schema/annotation、每 server 30 秒 discovery deadline、登记驱动的调用 timeout、MCP 专用原生 structured-result 契约，以及 `RowVersion + schema/hint/governance fingerprint` 双重刷新；既有 MCP HTTP API、数据库结构和 `McpTransportType.Sse` 存量值保持不变。
-- 模型端点池、限额、熔断、使用结算和审计以每次真实模型调用为粒度；进程内选择不代替 PostgreSQL 配额预约。
-- 对话前端只使用当前 Session、Chat、Mode、Harness approval、history 与 Interrupted/ResetRequired 协议；不再调用已退出的任务、业务审批、Artifact、routing/runtime settings 或文件工作台接口。
-- 消息历史直接按 `Message.Sequence` 分页。可持久的 AiGateway 面只包含 LanguageModel、ConversationTemplate、Session、Message、AgentSessionState、ToolRegistration 和 ModelQuotaReservation。
+- Harness 主聊天、MAF 原生模式运行时、AgentSession、逐次批准、对话前端与 MCP 2.0 受治理通道的源码架构已收口；MAF / Harness 技术状态以 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) 为唯一正文。
+- Cloud OIDC/JIT 身份、Cloud 真实只读、BusinessQuery、KnowledgeQuery、模型调用治理与工具安全边界的源码已建立；长期规则由对应活动契约维护。
+- 旧 Workflow、AgentTask、durable run、业务审批、Artifact、routing/runtime settings 和第二条活动编排链已物理退出；历史只通过 Git 追溯。
+- 上述源码状态均不代表候选、产物或生产验收完成。
 
 ## 2. 能力状态
 
 | 能力 | 源码状态 | 候选验证退出门 | 生产状态 |
 |---|---|---|---|
-| Harness 主聊天 | 已收口：单主链、官方 AgentModeProvider、原生 mode 工具、模式无关工具目录、stream/history 已接入 | 真实 MAF 合同及 exact-SHA Harness、HTTP/SSE、版本冲突与安全边界证据有效 | 未验收 |
-| AgentSession 持久化 | 已收口：认证加密、TTL、版本、会话 checkpoint、Interrupted | exact-SHA 空库 baseline、并发、超限、损坏和重启边界有效 | 未验收 |
-| 逐次工具批准 | 已收口：受保护绑定、单工具、所有权/权限/schema/摘要复验 | exact-SHA 批准、拒绝、重复决定、漂移和双待批违约全部 fail-closed | 未验收 |
-| 对话前端 | 已收口：当前 Session/Approval/Interrupted 协议与安全展示 | exact-SHA lint、typecheck、受影响 Vitest 与 production build 有效 | 未验收 |
-| AI-01 OIDC/JIT 身份 | 已建立：Cloud 身份与本地 AI 权限分离 | 首次并发、唯一冲突、SecurityStamp 与审计证据有效 | 未验收 |
-| AI-02 Cloud 真实只读 | 已建立：八个 typed GET、服务端同源 fallback、AST guard | `CloudAiReadClientContractTests`、真实非生产 provider 和发布顺序验收 | 未验收 |
-| MCP 2.0 受治理通道 | 已收口：discovery-first、独立 deadline、typed contract、MCP 专用 structured result、timeout/漂移撤下 | exact-SHA Stdio/HTTP conformance、Architecture/Security、Tool Gate、批准与 Interrupted 证据有效 | 未验收 |
-| 工具与数据安全 | 已建立：权限、身份、注册元数据、脱敏和只读边界 | AIARCH001–007、Architecture/Security、`AgentSafetyApplicationTests` 与 Tool Gate 证据有效 | 未验收 |
+| Harness 主聊天 | 源码已收口；技术正文见 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) | exact-SHA MAF 合同、HTTP/SSE 与安全边界证据有效 | 未验收 |
+| AgentSession 持久化 | 源码已收口；技术正文见 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) | exact-SHA 持久化、并发和重启边界证据有效 | 未验收 |
+| 逐次工具批准 | 源码已收口；技术正文见 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) | exact-SHA 批准与 fail-closed 证据有效 | 未验收 |
+| 对话前端 | 源码已收口；产品与技术规则均链接活动契约 | exact-SHA 前端受影响验证有效 | 未验收 |
+| AI-01 OIDC/JIT 身份 | 源码已建立；规则见活动契约 | exact-SHA 身份、安全与审计证据有效 | 未验收 |
+| AI-02 Cloud 真实只读 | 源码已建立；规则见活动契约 | exact-SHA provider、只读和发布顺序证据有效 | 未验收 |
+| MCP 2.0 受治理通道 | 源码已收口；技术正文见 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) | exact-SHA MCP conformance 与安全证据有效 | 未验收 |
+| 工具与数据安全 | 源码已建立；规则见活动契约 | exact-SHA Architecture/Security 与 Tool Gate 证据有效 | 未验收 |
 
-Harness 原生模式运行时、AgentSession、逐次批准、对话前端和 MCP 2.0 的源码架构已收口。“源码已收口”只说明对应能力当前活动树应维持的结构，不等于 exact SHA 已通过候选验证、产物准备或生产验收。所有能力的生产状态继续保持“未验收”；旧分支、旧 CI run 和固定测试数不能证明当前候选完成。
+Harness 原生模式运行时、AgentSession、逐次批准、对话前端和 MCP 2.0 的源码架构已收口。“源码已收口”只表示当前源码状态，不等于 exact SHA 已通过候选验证、产物准备或生产验收。所有能力的生产状态继续保持“未验收”；旧分支、旧 CI run 和固定测试数不能证明当前候选完成。
 
 ## 3. 候选验证退出门
 
