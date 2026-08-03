@@ -181,6 +181,25 @@ public sealed class SemanticSummaryBuilderTests
     }
 
     [Fact]
+    public void Builder_ShouldGroupHourlyCapacityByStablePlcCode()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(("outputQty", 10), ("qualifiedQty", 9), ("okRate", 90m), ("plcCode", "P2-CP05"), ("plcName", "模切机")),
+            CreateRow(("outputQty", 20), ("qualifiedQty", 18), ("okRate", 90m), ("plcCode", "P2-CP05"), ("plcName", null)),
+            CreateRow(("outputQty", 30), ("qualifiedQty", 27), ("okRate", 90m), ("plcCode", "P2-CP06"), ("plcName", "模切机"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Metrics.Should().Contain(item =>
+            item.Name == "groupBreakdown" &&
+            item.Value.Contains("模切机（P2-CP05） 2条") &&
+            item.Value.Contains("模切机（P2-CP06） 1条"));
+    }
+
+    [Fact]
     public void Builder_ShouldSummarizeDeviceLogs()
     {
         var plan = CreatePlan(SemanticQueryTarget.DeviceLog, SemanticQueryKind.ByLevel, ("deviceId", "11111111-1111-1111-1111-111111111111"), ("level", "ERROR"));

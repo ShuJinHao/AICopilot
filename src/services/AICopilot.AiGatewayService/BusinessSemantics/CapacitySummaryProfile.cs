@@ -57,7 +57,7 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
         var qualifiedRateText = qualifiedRate.HasValue
             ? $"{qualifiedRate.Value:F2}%"
             : "未知";
-        var groupBreakdown = BuildGroupBreakdown(rows);
+        var groupBreakdown = BuildGroupBreakdown(rows, allRowsAreHourly);
 
         var metrics = new List<SemanticMetricItemDto>
         {
@@ -114,8 +114,31 @@ internal sealed class CapacitySummaryProfile : SemanticSummaryProfileBase
         return Math.Round(weightedRate, 2, MidpointRounding.AwayFromZero);
     }
 
-    private static string BuildGroupBreakdown(IReadOnlyList<Dictionary<string, object?>> rows)
+    private static string BuildGroupBreakdown(
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        bool allRowsAreHourly)
     {
+        if (allRowsAreHourly)
+        {
+            return string.Join("，", rows
+                .GroupBy(
+                    row => SemanticSummaryFormatting.GetString(row, "plcCode"),
+                    StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var displayName = group
+                        .Select(row => SemanticSummaryFormatting.GetString(row, "plcName"))
+                        .FirstOrDefault(value =>
+                            !string.IsNullOrWhiteSpace(value) && value != "-");
+                    var label = string.IsNullOrWhiteSpace(displayName)
+                        ? group.Key
+                        : $"{displayName}（{group.Key}）";
+                    return $"{label} {group.Count()}条";
+                }));
+        }
+
         var plcIdentities = rows
             .Select(GetPlcIdentity)
             .Where(value => value != "-")
