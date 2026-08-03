@@ -33,7 +33,7 @@
 
 - `AIARCH006` 以 Roslyn symbol/operation 对所有源码方法判定 Cloud root：当前可信身份只包含完全限定的 Cloud AiRead client、`BusinessQueryExecutor`、provider/profile/context/connector/guard 与同源 fallback 类型。命中后追踪完整 call graph、具体实现、interface dispatch、泛型 helper、lambda 和 field/property delegate；同名 fake、DTO 或字符串不得扩大入口。
 - Cloud root 可达图中的写边包含完全限定 repository mutation、`SaveChanges*`、`ExecuteNonQuery*`、EF raw/bulk write、`Dapper.SqlMapper.Execute/ExecuteAsync` 以及参数实现完全限定 `ICommand` 的 dispatch。这些边全部是 compiler error；同名 fake 和 SQL 字符串不能代替 symbol identity。
-- 只读路径只允许两个精确的内部持久化例外：`IAuditLogWriter` 只记录只读审计；`IModelQuotaReservationStore` 只执行 `TryReserveAsync`、`SettleAsync`、`ReclaimExpiredAsync`。每次真实 `IChatClient` 请求都必须独立预约、结算并记录熔断结果；唯一生产实现是 `PostgresModelQuotaReservationStore`，只能依赖 `AiGatewayTransactionRunner` 与 `AiGatewayDbContext`。两者都不是 Cloud 业务写权限。
+- 只读路径只允许两个精确的内部持久化例外：`IAuditLogWriter` 只记录只读审计；`IModelQuotaReservationStore` 只执行 `TryReserveAsync`、`SettleAsync`、`ReclaimExpiredAsync`。每次真实 `IChatClient` 请求都必须独立预约、结算并记录熔断结果；具体 store、事务 runner 与 Context owner 只由 [DDD 聚合根边界](./DDD聚合根边界.md) 定义。两者都不是 Cloud 业务写权限。
 - `AIARCH007` 只接受完全限定符号上的 CloudReadOnly tool safety descriptor，且安全元数据必须同时为 `boundary=CloudReadOnly`、`capability=ReadOnlyQuery`、`readOnlyDeclared=true`；`Diagnostics`、`LocalSuggestion`、`SideEffecting`、缺失值、同名伪类型或其他无法静态证明的动态声明都必须 compiler-error fail-closed。动态 MCP 配置不能因 Analyzer 无法展开就绕过安全契约；注册和每次执行都必须通过同一 `AiToolSafetyPolicy.EvaluateConfigured` 运行时门禁。
 
 ## 3. Cloud business plugin 正式路径

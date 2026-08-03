@@ -211,13 +211,13 @@ Cloud AiRead 设备契约：
 
 ## 10. 工程边界
 
-- AICopilot DDD 聚合根、审计、Outbox 和运行时记录的长期技术契约见 `../docs/DDD聚合根边界.md`；新增或调整聚合根、仓储注册、EF `DbSet`、AgentSession 或配额记录时必须同步更新架构测试。
+- 聚合、持久化集合分类、DbContext/迁移所有权、审计、Outbox、事务提交和 RAG 文件持久化的唯一技术正文是 [DDD 聚合根边界](./DDD聚合根边界.md)；本文只保留业务原则，不复制类型清单、Context 矩阵或持久化算法。
 - 生产分层固定为：`src/core` 领域核心，`src/services` 命令、查询与应用编排，`src/infrastructure` EF/Dapper/embedding/event bus/provider/MCP 技术实现，`src/hosts` 只做组合根和启动 wiring，`src/shared` 只放真正共享抽象，`src/vues` 只放前端逻辑；不得跨层回填实现。
 - HTTP Controller 必须默认授权，或对确需公开的 action 显式声明匿名。MediatR 普通与 stream 横切行为只允许由 `AddAICopilotMediatRPipeline` 统一注册，顺序固定为 Telemetry → Validation → Authorization；service 模块不得复制注册。stream 授权必须在进入 handler 前完成并逐项透传，禁止预读或缓冲；telemetry 只记录类型、阶段、耗时、结果和异常类型，不得记录 prompt、SQL、token、连接串、API key 或业务明细。
 - `ProblemDetails.extensions` 的 `code`、`traceId` 是大小写不敏感的保留键；复制 descriptor extensions 时必须丢弃全部大小写变体，再分别以 descriptor code 和当前请求 trace 写入唯一 canonical 小写键，禁止调用方覆盖或制造歧义键。
 - 架构 Analyzer/ArchitectureTests 严格保护分层、聚合、owner 和 Cloud 只读边界；领域、Application、Contract、Persistence、HTTP、UI 与 Eval 业务测试随功能同批正常增删改移。测试清单只描述当前提交实际发现和执行的结果，不提交固定 case 数、required runner roster 或业务覆盖率 baseline。
 - `AICopilot.Architecture.Analyzers` 是生产编译的架构 owner；`AIARCH001`–`AIARCH007` 必须保持 `Error + IsEnabledByDefault + NotConfigurable`，CompilationEnd 规则同时保留 `CompilationEnd` tag。Analyzer/Architecture 夹具必须拒绝 `NoWarn`、外部 severity 降级、pragma/suppression 和 Analyzer 关闭。`AIARCH004` 继续证明 enabled Admin 减员在 transaction delegate 内且 invariant guard 先行支配；`AIARCH006` 以当前 `BusinessQueries` 的完全限定 client/provider/profile/context/connector/guard 判定 Cloud root 并检查完整 reachable graph。同名 fake、alias、DTO 或字符串不得扩大例外。
-- 跨项目 Analyzer 调用图必须由源生成器输出版本化、定长上限、精确 `producer assembly + contract assembly + documentation method id` 摘要；消费方必须校验数量、producer 身份和全量内容一致。正式 `IAuditLogWriter` 只允许按完全限定 contract identity 截断审计边；`IModelQuotaReservationStore` 只允许 `TryReserveAsync`、`SettleAsync`、`ReclaimExpiredAsync` 三个契约方法截断配额边，且唯一生产实现是 `PostgresModelQuotaReservationStore`，只能经 `AiGatewayTransactionRunner` 写唯一 `AiGatewayDbContext`。
+- 跨项目 Analyzer 调用图必须由源生成器输出版本化、定长上限、精确 `producer assembly + contract assembly + documentation method id` 摘要；消费方必须校验数量、producer 身份和全量内容一致。正式审计与模型配额 contract 只允许按完全限定身份和明确方法集合截断调用边；具体 store、Context 与事务 owner 只由 DDD 唯一技术正文定义。
 - `AIARCH001` 必须对当前真实的 `AICopilot.*` 生产项目使用显式分类；任何未分类生产项目无论出现在引用源或目标都必须 fail-closed。
 - Aggregate runner 只能是 Pure 且只直接依赖 core/shared；Application runner 只能是 Pure 且不得直接依赖 host、EF/Dapper、Aspire/Persistence fixture；文件持久化测试必须进入 `PersistenceFilesystemTests`。五个 TestKit 不得依赖 test SDK、xUnit/NUnit/MSTest 或断言 package，生命周期适配和断言 helper 留在 runner。
 - Runner/TestKit 依赖边界只认指定 Configuration 下 MSBuild evaluated `ProjectReference` / `PackageReference` 图，必须包含隐式 `Directory.Build.*`、递归 import、生效复合条件、逐 TargetFramework item 和 TestKit 传递闭包；raw XML 扫描不能作为证据，评估异常或缺失规范化 identity 必须 fail-closed。Direct kind boundary、Pure closure、TestKit consumers 和 production→TestKit 禁令必须复用同一图。
@@ -226,22 +226,11 @@ Cloud AiRead 设备契约：
 - Coverage、duplication、mutation 和 compatibility 统一属于用户显式 `Quality` 模式，不进入 push/PR、nightly 或普通部署默认链。运行时必须绑定 clean committed HEAD、当前生产源码/程序集/PDB 和真实 ancestor；报告数量从本次实际执行动态得出，不固定历史 runner/case 数，也不得阻止业务测试随业务同批增删改。
 - compatibility baseline 只记录真实兼容/迁移项，bootstrap 后只能删除或收紧 deadline/call-site 上限，禁止新增 ID、扩大调用方或换名回避。普通 abstraction 不进 baseline；inventory 必须证明唯一活跃声明、至少一个真实可执行调用点、`AI-ORDINARY-*` 身份且不含兼容生命周期字段，注释、字符串和声明不算调用方。
 - 用户显式 `Quality` 模式下的重复度门禁只治理生产源码，不扫描或冻结 `src/tests`、`src/testing` 与前端测试。生产重复以 `path+line` 计数每个出现实例，同文件重复不得被去重；同时锁定汇总指标和每个 signature 的实例数/重复行/重复 token。base 尚无重复度 baseline 时只允许一次 candidate-exact bootstrap；base 已有 baseline 后只能在真实重复先减少时收紧，不得用总量持平、signature swap、放宽或重生成 baseline 换绿。
-- `IAggregateRoot<>` 只用于独立维护业务不变量和生命周期的领域根；`AgentSessionState`、`ModelQuotaReservation`、Outbox、审计和 worker 状态都不得作为新聚合根。
-- `DataSourcePermissionGrant` 正式冻结为 DataAnalysis bounded context 的独立聚合根：它拥有独立 `DataSourcePermissionGrantId`、`RowVersion`、授权/撤销生命周期、repository、审计写入和 `(BusinessDatabaseId, TargetType, TargetValue)` 唯一目标约束。它与 `BusinessDatabase` 跨聚合仅引用 `BusinessDatabaseId`，`BusinessDatabase` 不持有授权子实体集合；该归属是正式长期边界。
-- `AiCopilotDbContext` 是主基础设施迁移上下文，也是 Outbox 与 persistence commit marker 的唯一 migration owner；`AuditDbContext` 负责审计查询和运行时审计写入，`DataAnalysisDbContext` 只承载数据分析配置，`OutboxDbContext` 与 `PersistenceCommitMarkerDbContext` 只作为运行时短生命周期参与者，不拥有 migration。
-- 没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描；DataAnalysis/MCP 不写 Outbox，AiGateway `Session` 领域事件和 RAG delayed integration-event factory 只能在 repository commit participant 内物化到短生命周期 `OutboxDbContext`，业务 Context 不映射共享 Outbox。
-- 审计写入必须遵守 Audit writer decision tree：有业务保存点的命令应把业务变更和审计行放在同一事务；`auditLogWriter.SaveChangesAsync` 只允许出现在没有业务保存点且已被白名单记录的执行路径。
-- Outbox 多实例调度必须使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略，不能让多 worker 重复发布同一消息。
-- 普通 repository 的业务、Outbox、审计和数据库 durable commit marker 必须由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交；commit marker 只保障数据库事务结果验证，不是 Agent durable 编排或 Tool checkpoint。每个 execution-strategy attempt 对业务 Context 只允许一次 `SaveChangesAsync(false)`，事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。Identity 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine；非成功 `Result` 必须回滚 UserManager/RoleManager 已触发的所有中间保存，拒绝审计只能在回滚后另行提交，禁止恢复 `EfTransactionalExecutionService` 或复制第二套 transaction/retry。
-- EF execution-strategy 必须使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，禁止手写业务重试循环。commit-unknown 不能用 `SaveChanges(false)`、Outbox 或 audit 是否存在推断成功；必须写入同事务 durable marker，并由 fresh context 在独立超时与 execution strategy 下验证，真实 PostgreSQL 必须覆盖 commit-ACK 丢失、verification transient/persistent failure、caller cancellation 和数据库生成 identity 重放。
-- marker 写入后不得再让 caller cancellation 中断 commit/verification；fresh verification 无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id，不自动重放业务。RAG `UploadDocument` 必须先写持久化对账日志再写物理文件，并复用同一 commit id；请求与 DataWorker 通过 PostgreSQL advisory lease 互斥。结果未知时保留文件和日志，后台看到 marker 才保留文件并清日志，看不到 marker 才删除文件。知识库文件唯一写入口是 RAG Document API。
-- RAG/AiGateway 数据库绑定上传调用方必须复用唯一 `PersistenceFileCommitProtocol`；repository 未消费预留 commit id 时，确认必须 fail-closed、回滚未提交文件并保留失败信号，不得因 callback 正常返回就清除 journal。
-- 标准容器共享卷只允许受信任的 AICopilot 后端写入。当前路径边界拒绝既有 symlink/reparse traversal，但不把同 UID 恶意进程在检查与打开之间替换目录的 TOCTOU 视为已解决；扩大威胁模型前必须增加容器权限隔离或 dirfd/`openat` 原子路径操作。
-- 容器必须把 RAG 可写 `FileStorage:RootPath` 固定在共享卷 `/var/lib/aicopilot/storage`，不得回退容器层、`/app`、`LocalApplicationData` 或共享卷外路径。当前 durable local file/journal backend 只支持 Linux/macOS，生产固定 Linux；Windows 必须明确拒绝该 backend。
-- HttpApi 与 DataWorker 必须共享 `/var/lib/aicopilot`；commit marker 默认保留 30 天并按 `created_at_utc` 索引，保留期必须长于对账延迟，有待处理日志的 marker 不得删除。对账日志不可读时必须停止 marker 清理。相关改动由 selector 选择真实 PostgreSQL、migration 和部署配置验证；全量仅在用户显式授权时运行。
+- 聚合必须按各自业务不变量和生命周期独立演进；数据源授权与业务数据源之间只通过稳定标识跨聚合引用，不能把独立授权生命周期重新下沉为父实体的可变子集合。正式聚合清单、持久化分类和不变量理由只见 DDD 唯一技术正文。
+- 业务变更、审计、待发布事件和数据库提交结果保障必须保持原子；提交结果未知时不得自动重放业务。事务参与者、重试/验证算法、Outbox 领取和 commit marker 细节只见 DDD 唯一技术正文。
+- 知识库上传必须通过持久化对账保护数据库与文件一致性，且只能使用正式 RAG 文档入口。journal、lease、存储路径、后台对账与保留实现只见 DDD 唯一技术正文。
 - MCP runtime 配置与远端 discovery 事实都必须进入 runtime registry refresh cycle；禁用、删除、配置变化、schema/hint 漂移或 discovery 失败后不能继续暴露旧工具解析。
 - 身份安全以 security stamp 驱动会话失效；Cloud role 不直接成为 AICopilot 本地 role。
-- 多 DbContext 迁移历史必须通过 `__EFMigrationsHistory` 的上下文隔离或迁移历史表拆分规则治理，不能让单一上下文回滚污染其他上下文状态。
 - 新增或接线 `IStreamPipelineBehavior` 后，必须核对所有公开 `IStreamRequest` 的 `AuthorizeRequirement`，测试种子角色必须覆盖对应权限；无权限场景应返回干净 401/403，不能表现为 SSE 已写 200 后断流。
 - 简单集合转换默认优先用 LINQ 表达意图，`IQueryable` 必须优先下推过滤、投影、排序和分页；热路径、状态机、流式枚举、数组/`Span<T>` 紧循环允许 `for`/`foreach`。
 - 工程质量门禁优先抓重复枚举、先物化再过滤、N+1 查询、O(n²) 嵌套、重复扫描和错误数据结构；CA1851 先作为 warning 运行，基线清理后再考虑升级为 error。
