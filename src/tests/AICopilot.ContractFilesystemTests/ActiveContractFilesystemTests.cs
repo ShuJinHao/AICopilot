@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml.Linq;
 
 namespace AICopilot.ContractFilesystemTests;
@@ -37,12 +39,14 @@ public sealed class ActiveContractFilesystemTests
             Path.Combine(root, "docs", "AICopilot业务规则.md"));
         var agentContract = File.ReadAllText(
             Path.Combine(root, "docs", "Agent工作流与异常契约.md"));
+        var cloudContract = File.ReadAllText(
+            Path.Combine(root, "docs", "Cloud只读数据分析契约.md"));
         var roadmap = File.ReadAllText(
             Path.Combine(root, "docs", "AI架构路线图.md"));
 
         businessRules.Should().Contain("JIT 首次身份绑定并发");
         businessRules.Should().Contain("逐次工具批准产品边界");
-        businessRules.Should().Contain("查询确认键是 `SessionId`");
+        cloudContract.Should().Contain("查询确认键固定为 `SessionId`");
         businessRules.Should().Contain("Cloud provider / AI consumer 跨版本发布顺序");
         businessRules.Should().Contain("完工弹夹数");
         businessRules.Should().Contain("ModelContextProtocol 2.0.0");
@@ -291,35 +295,191 @@ public sealed class ActiveContractFilesystemTests
     }
 
     [Fact]
-    public void ActiveContracts_ShouldKeepServerOwnedFallbackAndDurabilitySemantics()
+    public void CloudFallbackTechnicalContract_ShouldRemainTheSingleSourceOfTruth()
     {
         var root = FindRepositoryRoot();
+        var agentInstructions = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
         var businessRules = File.ReadAllText(
             Path.Combine(root, "docs", "AICopilot业务规则.md"));
         var agentContract = File.ReadAllText(
             Path.Combine(root, "docs", "Agent工作流与异常契约.md"));
-        var persistenceContract = File.ReadAllText(
-            Path.Combine(root, "docs", "DDD聚合根边界.md"));
+        var cloudContract = File.ReadAllText(
+            Path.Combine(root, "docs", "Cloud只读数据分析契约.md"));
+        var normalizedCloudContract = NormalizeContractText(cloudContract);
+
+        normalizedCloudContract.Should().Contain(
+            "typed-first、结构化结果矩阵、查询确认、受控 Text-to-SQL、Simulation 边界和 fallback 决策的唯一技术正文");
+        string[] technicalOwnerMarkers =
+        [
+            "AICOPILOT_FALLBACK_POLICY_V1_BEGIN",
+            "BusinessQueryFallbackPolicy",
+            "BusinessQueryContext",
+            "Success、Empty、NeedClarification、Unsupported、Unavailable 或 Unauthorized",
+            "查询确认键固定为 SessionId",
+            "Text-to-SQL 修复重试默认最多 3 次，硬上限 5 次",
+            "PreviousSqlForRepair",
+            "CloudReadOnlyGovernedSchema",
+            "SimulationBusiness DataSourceId",
+            "Simulation.Enabled=false",
+            "mfg_processes.process_name",
+            "DeviceLog 自然语言中的工序或设备范围",
+            "schema create、superuser、createdb、createrole 或 replication",
+            "可能原因必须明确标注为 AI 推断分析",
+        ];
+        foreach (var marker in technicalOwnerMarkers)
+        {
+            normalizedCloudContract.Should().Contain(
+                marker,
+                "the Cloud contract must own every fallback implementation marker");
+        }
+
+        var linkedAuthorityDocuments = ActiveContractPaths
+            .Where(path => path != "docs/Cloud只读数据分析契约.md")
+            .Select(path => (
+                Name: path,
+                Text: NormalizeContractText(File.ReadAllText(Path.Combine(root, path)))))
+            .ToArray();
+        foreach (var (name, text) in linkedAuthorityDocuments)
+        {
+            foreach (var marker in technicalOwnerMarkers)
+            {
+                text.Should().NotContain(
+                    marker,
+                    $"{name} must link the unique Cloud contract instead of copying {marker}");
+            }
+        }
+
+        agentInstructions.Should().Contain(
+            "[Cloud 只读数据分析契约](docs/Cloud只读数据分析契约.md)");
+        businessRules.Should().Contain(
+            "[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)");
+        agentContract.Should().Contain(
+            "[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)");
+        agentInstructions.Should().Contain("模型只看到 `BusinessQuery`");
+        businessRules.Should().Contain("模型只看到 `BusinessQuery`");
+        agentContract.Should().Contain(
+            "模型可见的业务查询工具只有 `BusinessQuery`");
+        agentContract.Should().Contain(
+            "Text-to-SQL 只作为工具内部能力，绝不以独立工具暴露给模型");
+
+        cloudContract.Should().Contain(
+            "`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner");
+        cloudContract.Should().Contain(
+            "只有同一 Cloud 来源返回 `Unsupported` 或 `Unavailable`");
+        cloudContract.Should().Contain(
+            "该 policy 才允许 `BusinessQueryExecutor` 在服务端自动进入受控 Text-to-SQL");
+        cloudContract.Should().Contain("模型不得决定、触发或绕过 fallback");
+        cloudContract.Should().Contain(
+            "权限或凭据失败、跨源、MCP 与 Simulation 均不得 fallback");
+
+        const string policyStartMarker = "<!-- AICOPILOT_FALLBACK_POLICY_V1_BEGIN -->";
+        const string policyEndMarker = "<!-- AICOPILOT_FALLBACK_POLICY_V1_END -->";
+        var canonicalPolicy = ExtractUniqueDelimitedSection(
+            cloudContract,
+            policyStartMarker,
+            policyEndMarker);
+        ComputeSha256(NormalizeContractText(canonicalPolicy)).Should().Be(
+            "85a96c6a69a35e467c3bbb9b681f64b7ebe27e09fd6102c81bf6f9c48cc076c5",
+            "the reviewed fallback decision matrix is a closed contract block");
+
+        var activeContractSurface = BuildActiveContractSurface(root);
+        var activeContractSurfaceSha256 = ComputeSha256(activeContractSurface);
+        activeContractSurfaceSha256.Should().Be(
+            "d66c0bb010450cad9cd5ebaa19937344b99741317adab77db4362c0d8189ac5d",
+            "all reviewed active contracts form an intentional break gate for fallback semantics");
+
         var activeContractText = string.Join(
             '\n',
             ActiveContractPaths.Select(path => File.ReadAllText(Path.Combine(root, path))));
-
-        string[] modelOwnedFallbackMarkers =
+        string[] retiredOrContradictoryMarkers =
         [
+            "同任务后续沿用已确认上下文",
             "可由模型决定是否尝试同源 Text-to-SQL",
             "模型决定是否进入 Text-to-SQL",
             "模型决定 Text-to-SQL fallback",
+            "Simulation 可以 fallback",
+            "权限失败后允许 fallback",
+            "Unavailable 可跨源 fallback",
         ];
-        foreach (var marker in modelOwnedFallbackMarkers)
+        foreach (var marker in retiredOrContradictoryMarkers)
         {
             activeContractText.Should().NotContain(marker);
         }
 
-        businessRules.Should().Contain(
-            "`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner");
-        businessRules.Should().Contain("服务端才自动进入受控 Text-to-SQL");
-        agentContract.Should().Contain(
-            "`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner");
+        cloudContract.Should().Contain(
+            "同一 `SessionId` 内只按已确认 scope 复用上下文");
+        string[] unsafeContractMutations =
+        [
+            "模型决定是否进入 Text-to-SQL fallback",
+            "可由模型触发同源 Text-to-SQL",
+            "模型可以绕过 fallback",
+            "不得暴露 SQL，但模型决定 fallback",
+            "服务端负责审计；允许 LLM 选择 Text-to-SQL",
+            "模型决定，随后进入 fallback",
+            "模型不是旁观者而是决定 Text-to-SQL fallback",
+            "模型不得决定 fallback 但在服务端允许时可以触发 fallback",
+            "模型不能查看原始 SQL 并可以触发 fallback",
+            "模型可以决定是否进入\nText-to-SQL fallback",
+            "- 模型可以决定是否进入\n  Text-to-SQL fallback",
+            "模型拥有业务查询控制权。遇到 provider 失败时，可决定是否进入 Text-to-SQL fallback。",
+            "Simulation 可以 fallback",
+            "Simulation fallback 不受限制",
+            "权限失败后允许 fallback",
+            "权限失败仍走 fallback",
+            "凭据失败时可以进入 Text-to-SQL",
+            "Unavailable 可跨源 fallback",
+            "Unavailable 可改用 MES Text-to-SQL",
+            "跨源 fallback 合法",
+            "## 5. Direct DB 和 Text-to-SQL\n\n- 权限失败：允许继续执行",
+        ];
+        foreach (var mutation in unsafeContractMutations)
+        {
+            var mutatedSurface = BuildActiveContractSurface(
+                root,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["docs/Cloud只读数据分析契约.md"] =
+                        cloudContract + Environment.NewLine + mutation,
+                });
+            ComputeSha256(mutatedSurface).Should().NotBe(
+                activeContractSurfaceSha256,
+                "any contradictory wording anywhere in the owner must break the reviewed surface");
+        }
+
+        string[] hiddenCanonicalMutations =
+        [
+            cloudContract
+                .Replace(policyStartMarker, "```text\n" + policyStartMarker, StringComparison.Ordinal)
+                .Replace(policyEndMarker, policyEndMarker + "\n```", StringComparison.Ordinal),
+            cloudContract
+                .Replace(policyStartMarker, "<!--\n" + policyStartMarker, StringComparison.Ordinal)
+                .Replace(policyEndMarker, policyEndMarker + "\n-->", StringComparison.Ordinal),
+            cloudContract
+                .Replace(policyStartMarker, "<template>\n" + policyStartMarker, StringComparison.Ordinal)
+                .Replace(policyEndMarker, policyEndMarker + "\n</template>", StringComparison.Ordinal),
+        ];
+        foreach (var hiddenCanonical in hiddenCanonicalMutations)
+        {
+            var mutatedSurface = BuildActiveContractSurface(
+                root,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["docs/Cloud只读数据分析契约.md"] = hiddenCanonical,
+                });
+            ComputeSha256(mutatedSurface).Should().NotBe(
+                activeContractSurfaceSha256,
+                "fenced, commented or raw-HTML-wrapped canonical policy text is not active prose");
+        }
+    }
+
+    [Fact]
+    public void ActiveContracts_ShouldKeepDurabilitySemantics()
+    {
+        var root = FindRepositoryRoot();
+        var agentContract = File.ReadAllText(
+            Path.Combine(root, "docs", "Agent工作流与异常契约.md"));
+        var persistenceContract = File.ReadAllText(
+            Path.Combine(root, "docs", "DDD聚合根边界.md"));
 
         agentContract.Should().Contain("AgentSession checkpoint 只用于会话连续性");
         agentContract.Should().Contain("不是 durable Tool checkpoint");
@@ -541,6 +701,56 @@ public sealed class ActiveContractFilesystemTests
         return NormalizeContractText(text)
             .TrimStart('-', '*', ' ')
             .TrimEnd('。', '；', ';', '.');
+    }
+
+    private static string ExtractUniqueDelimitedSection(
+        string text,
+        string startMarker,
+        string endMarker)
+    {
+        var start = text.IndexOf(startMarker, StringComparison.Ordinal);
+        var lastStart = text.LastIndexOf(startMarker, StringComparison.Ordinal);
+        var end = text.IndexOf(endMarker, StringComparison.Ordinal);
+        var lastEnd = text.LastIndexOf(endMarker, StringComparison.Ordinal);
+        if (start < 0 || end < 0 || start != lastStart || end != lastEnd || end <= start)
+        {
+            throw new InvalidDataException(
+                $"Expected exactly one ordered contract block: {startMarker} ... {endMarker}");
+        }
+
+        return text[(start + startMarker.Length)..end];
+    }
+
+    private static string BuildActiveContractSurface(
+        string root,
+        IReadOnlyDictionary<string, string>? overrides = null)
+    {
+        var surface = new StringBuilder();
+        foreach (var path in ActiveContractPaths)
+        {
+            var text = overrides is not null && overrides.TryGetValue(path, out var replacement)
+                ? replacement
+                : File.ReadAllText(Path.Combine(root, path));
+            var normalizedText = text
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+            surface.Append(path.Length)
+                .Append(':')
+                .Append(path)
+                .Append('\n')
+                .Append(normalizedText.Length)
+                .Append(':')
+                .Append(normalizedText)
+                .Append("\n---\n");
+        }
+
+        return surface.ToString();
+    }
+
+    private static string ComputeSha256(string text)
+    {
+        var bytes = Encoding.UTF8.GetBytes(text);
+        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
     private static bool ContainsUnnegatedRetiredAssertion(

@@ -60,7 +60,7 @@ Cloud AiRead 设备契约：
 - `deviceCode` 只用于设备查询或解析，`ClientCode` 只用于 Cloud 内部身份/寻址；二者不得作为 `deviceId` 发送，普通用户回答不得展示 Cloud ClientCode。
 - `Analysis.Device.List/Detail` 只表达 `/api/v1/ai/read/devices` 的设备主数据；`Analysis.Device.Status` 只读取 `/api/v1/ai/read/device-client-states` 的 Cloud 权威 `softwareStatus`、运行心跳原值和唯一 freshness 时间。无心跳设备返回 `MissingRuntimeHeartbeat` 行；只有超过 24 小时才是 `RuntimeHeartbeatStale`，恰好 24 小时不 stale，Stale 不得冒充 Offline/Stopped；空集只表示授权范围内无匹配设备。
 - `Analysis.Process.List/Detail` 只读取 `/api/v1/ai/read/processes`；支持 `processId` 精确过滤及 `keyword/processCode/processName` 搜索，详情必须唯一精确命中且搜索结果未截断，`processId` 必须作为正式 GUID 参数发送、不得塞入 keyword，不得回退其它数据源。
-- `Analysis.ClientRelease.List` 的 Cloud business plugin 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐。当前没有 `ClientRelease` 的 governed Text-to-SQL capability profile，因此该能力保持 typed plugin-only；任何结果都不得转入 Text-to-SQL、切换来源或进入 Simulation。
+- `Analysis.ClientRelease.List` 的 Cloud business plugin 只读取 `/api/v1/ai/read/client-releases`，只允许 `channel/targetRuntime/status/includeArchived`；版本、hash、下载地址、发布说明和发布状态只能来自 Cloud 返回，不得生成或补齐。其查询路径和 fallback 资格只由 Cloud 专题契约定义。
 - AICopilot 的 Cloud AiRead 客户端和 endpoint allowlist 必须逐项覆盖 Cloud `AI只读接口契约.md` 已批准的正式 `GET /api/v1/ai/read/*` 表面；高频 DeviceLog/Capacity/ProductionData 接通不等于全量接口对齐。
 - Cloud AiRead 客户端只保留八个正式 typed GET，不得暴露任意 method/path 传输、可配置 POST allowlist、legacy adapter 或双轨接口；非 GET 必须在发送 HTTP 请求前拒绝。
 - `production-records` 当前正式提供 `typeKey/typeName/deviceId/deviceName`、弹夹/结果/时间公共字段及 schema 化 `fields`；CP/AP 业务字段为 `plcCode`、`plcName`、`clipSlot`、`startTime`、`punchingQuantity`、`punchingSpeed`。`clipSlot` 只接受 Cloud 返回的 `MG1/MG2` 事实，不得由弹夹号或 PLC 名推断。它不提供 `processName/stationName/deviceCode/ClientCode`，缺失字段保持不存在或空，不得用其他显示字段代填或推断。
@@ -98,31 +98,13 @@ Cloud AiRead 设备契约：
 
 - DataAnalysis 只能连接只读业务数据源。
 - 当前唯一真实外部业务数据源是 Cloud；MES、ERP 后续只能通过统一 provider/profile registry 扩展。插件只注册 provider、dialect、schema、能力和执行 adapter，不复制 Runner、Guard、RepairLoop 或 Prompt。
-- 每个分析任务首次执行前必须确认数据源、数据类型、设备/业务对象、时间范围和过滤条件；来源不唯一、信息不足或置信度不足时先询问。同一任务后续追问复用已确认 `BusinessQueryContext`。
-- 数据能力统一为 `Device`、`DeviceLog`、`Capacity`、`ProductionRecord`、`Process`、`ClientRelease`，插件必须声明支持范围和结果契约。
-- 插件结果统一为 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable`、`Unauthorized`。`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner：只有同一来源的 `Unsupported` 或 `Unavailable` 且查询上下文、数据源 profile 与 capability profile 全部允许时，服务端才自动进入受控 Text-to-SQL；模型不得决定、触发或绕过 fallback。`Empty` 是真实空集，`NeedClarification` 继续询问，权限/凭据失败不得绕过，禁止跨源 fallback。
+- 业务查询对用户保持 typed provider 优先；fallback 是服务端内部受控能力，不是模型选择项。模型只看到 `BusinessQuery`，不得直接获得独立 Text-to-SQL 工具，也不得决定、触发或绕过 fallback。
+- fallback 不能削弱身份、权限、只读账号、数据源绑定或 SQL 安全边界；Simulation 数据不得冒充真实 Cloud 结果。
 - CP/AP 生产查询继续复用唯一 `ProductionRecord` 通用业务数据插件，不得按工序复制插件、端点、Runner 或结果语义。
 - SQL 安全唯一 owner 是执行咽喉的共享 AST guard + 已选择 source profile；只允许单条只读查询，拒绝 DML、DDL、管理语句和多语句，表列范围来自 profile，数据库账号保持只读。
 - 查询结果只用于分析展示，不产生业务写入。
 - 不能为了分析便利放宽 `MaxRows`、read-only session 或 SQL 安全检查。
-- Cloud 同时配置 typed business plugin 和受控 Text-to-SQL profile。Text-to-SQL 只由上述服务端 policy 触发；Simulation 必须显式选择，不得暗中接管 Cloud 空集、失败或未确认来源。
-- CloudReadOnly Text-to-SQL LLM prompt 可见的物理 schema 只能来自 `CloudReadOnlyGovernedSchema` 治理白名单，最多包含批准表名、列名、列类型、join hints 和必要业务描述；不得把连接串、凭据、role/权限细节、样例数据、查询结果、参数值、非白名单表字段或系统/敏感字段发给模型。
-- CloudReadOnly Text-to-SQL 修复重试默认最多 3 次、硬上限 5 次；timeout、权限、凭据、非只读、系统表、敏感字段、多语句或写 SQL 默认不可修复、不重试。
-- CloudReadOnly Text-to-SQL 修复历史不得保存完整 SQL、用户 prompt、连接串、参数值或敏感字段；上一轮失败 SQL 只允许在当前调用内以内存参数临时回传给 LLM 生成下一版，不能写入审计、日志、state、结果或持久化对象。
-- Prompt 只负责澄清、方言、schema 与结构化输出，不维护写操作动词黑名单；Cloud 专用 runner/policy 不再复制结构只读 guard。
-- Direct DB 语义映射中的工序名来自只读 `mfg_processes.process_name`；新增 join 表必须同步进入 `CloudReadOnlyGovernedSchema` 表/列/类型/join hint、所选 source profile 的 security schema、唯一共享 AST guard、只读 role 授权 SQL、授权探针、部署 preflight、RealSource 模板、架构测试和部署文档。
-- DeviceLog 语义查询必须使用真实 Cloud PostgreSQL 日志级别枚举值 `ERROR`、`WARN`、`INFO`，不能生成 `Error`/`Warn`/`Info` 这类大小写不匹配条件。
-- 用户要求“错误警告”“异常分析”“分析错误信息”等场景时，DeviceLog 必须支持 `ERROR + WARN` 多级别只读查询；不能只查 `ERROR` 后把 `WARN` 推断为没有。
-- DeviceLog 自然语言中的工序/设备范围必须落到只读 `devices` / `mfg_processes` join 暴露的业务字段过滤；不得让最终回答模型按文字自行猜测设备、工序或范围。
-- 用户追问其他日志级别、工序、设备或时间窗口时，`BusinessQueryExecutor` 必须按当前 Session 重新生成并执行对应 `Analysis.DeviceLog.*` 查询；主回答模型只能总结本轮查询结果，不能基于上一轮文本推断未查询级别“有/没有”。
-- DataAnalysis 最终上下文必须携带本轮查询执行事实，包括语义 target/kind、filters、timeRange、limit、returnedRowCount 和证据边界；最终回答必须先核对执行事实再输出结论。
-- DeviceLog 数据分析展示块和 Widget 只能从本轮只读查询返回行、`query_execution` 和 `semantic_summary` 派生；级别分布、时间分布、问题关键词分类、指标和证据表不得由模型编造、Markdown 解析、前端假数据或任意图表配置生成。
-- DeviceLog 最终回答使用 `display_blocks` 时必须按“结论、关键指标、关键记录、可能原因、建议动作、不能直接执行的动作、查询范围”组织；可能原因必须标注为 AI 推断分析，建议动作只能是人工排查建议，不能写成已执行的控制、下发、写入或修复动作。
-- Direct DB 设备主数据映射不得再连接最新日志或暴露 `status/lineName/updatedAt`；最新日志级别只通过 `Analysis.DeviceLog.*` 查询，不得包装为设备运行状态。
-- 真实 Cloud Text-to-SQL 验证不得走 Simulation 数据源冒充真实结果；Simulation 只能用于明确标识的模拟链路。
-- 创建或轮换 Cloud PostgreSQL 只读账号只能通过显式确认的受控自动化执行；只能创建/更新专用 readonly role，只授予白名单表 SELECT，不得授予写权限、schema create 权限、superuser、createdb、createrole 或 replication。
-- Cloud PostgreSQL readonly role 授权的权威载体是 `deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和 `check-readonly-grants.sql`；生产只允许对治理白名单表做显式表级 `GRANT SELECT`，不得使用 `GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
-- 启用 CloudReadOnly 直连数据库时，部署必须先执行 readonly 授权 preflight；权限错误只能向用户暴露治理白名单内的表名和只读权限不足结论，不得输出连接串、role、密码、SQL 原文或非白名单对象。
+- typed-first、结构化结果矩阵、查询确认、Text-to-SQL prompt/重试/审计、Simulation 与 fallback 决策的唯一技术正文是 [Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)；本文不复制其 policy 或实现矩阵。
 
 ## 6. MCP 规则
 
@@ -176,7 +158,6 @@ Cloud AiRead 设备契约：
 - Plan / Execute 是行为状态，不是安全隔离或授权边界；模式与授权正交，切换模式不得扩大或缩小用户权限、可用工具、数据边界或批准策略。
 - 空态文案和建议必须使用当前行为模式：`Plan` 建议澄清、调查和形成待办，`Execute` 建议连续完成待办；建议操作不得伪造权限变化或替用户隐式切换模式。
 - MAF / Harness 的模式持有、模型工具、会话持久化、公开模式接口、裁剪扩展点和升级流程只由 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) 定义，本产品规则不复制实现正文。
-- `BusinessQuery` 的查询确认键是 `SessionId`；追问改变设备、工序、日志级别、时间或数据源时必须重新确认，不得从旧回答文本反推事实。
 
 ### 8.2 当前内网 HTTP 部署红线
 
