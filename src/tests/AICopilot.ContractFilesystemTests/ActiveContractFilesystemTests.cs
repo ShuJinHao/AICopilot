@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace AICopilot.ContractFilesystemTests;
@@ -382,46 +383,24 @@ public sealed class ActiveContractFilesystemTests
             "85a96c6a69a35e467c3bbb9b681f64b7ebe27e09fd6102c81bf6f9c48cc076c5",
             "the reviewed fallback decision matrix is a closed contract block");
 
-        var activeContractSurface = BuildActiveContractSurface(root);
-        var activeContractSurfaceSha256 = ComputeSha256(activeContractSurface);
-        activeContractSurfaceSha256.Should().Be(
-            "d66c0bb010450cad9cd5ebaa19937344b99741317adab77db4362c0d8189ac5d",
-            "all reviewed active contracts form an intentional break gate for fallback semantics");
-
-        var activeContractText = string.Join(
-            '\n',
-            ActiveContractPaths.Select(path => File.ReadAllText(Path.Combine(root, path))));
-        string[] retiredOrContradictoryMarkers =
-        [
-            "同任务后续沿用已确认上下文",
-            "可由模型决定是否尝试同源 Text-to-SQL",
-            "模型决定是否进入 Text-to-SQL",
-            "模型决定 Text-to-SQL fallback",
-            "Simulation 可以 fallback",
-            "权限失败后允许 fallback",
-            "Unavailable 可跨源 fallback",
-        ];
-        foreach (var marker in retiredOrContradictoryMarkers)
-        {
-            activeContractText.Should().NotContain(marker);
-        }
-
         cloudContract.Should().Contain(
             "同一 `SessionId` 内只按已确认 scope 复用上下文");
-        string[] unsafeContractMutations =
+        var activeContractStatements = ActiveContractPaths
+            .SelectMany(path => GetContractClauses(
+                File.ReadAllText(Path.Combine(root, path))))
+            .ToArray();
+        string[] retiredFallbackAssertions =
         [
             "模型决定是否进入 Text-to-SQL fallback",
+            "模型可以决定是否进入 Text-to-SQL fallback",
+            "模型决定 Text-to-SQL fallback",
+            "可由模型决定是否尝试同源 Text-to-SQL",
             "可由模型触发同源 Text-to-SQL",
             "模型可以绕过 fallback",
-            "不得暴露 SQL，但模型决定 fallback",
-            "服务端负责审计；允许 LLM 选择 Text-to-SQL",
-            "模型决定，随后进入 fallback",
-            "模型不是旁观者而是决定 Text-to-SQL fallback",
+            "模型可以触发 fallback",
             "模型不得决定 fallback 但在服务端允许时可以触发 fallback",
-            "模型不能查看原始 SQL 并可以触发 fallback",
-            "模型可以决定是否进入\nText-to-SQL fallback",
-            "- 模型可以决定是否进入\n  Text-to-SQL fallback",
-            "模型拥有业务查询控制权。遇到 provider 失败时，可决定是否进入 Text-to-SQL fallback。",
+            "LLM 选择 Text-to-SQL",
+            "同任务后续沿用已确认上下文",
             "Simulation 可以 fallback",
             "Simulation fallback 不受限制",
             "权限失败后允许 fallback",
@@ -430,46 +409,119 @@ public sealed class ActiveContractFilesystemTests
             "Unavailable 可跨源 fallback",
             "Unavailable 可改用 MES Text-to-SQL",
             "跨源 fallback 合法",
-            "## 5. Direct DB 和 Text-to-SQL\n\n- 权限失败：允许继续执行",
         ];
-        foreach (var mutation in unsafeContractMutations)
+        (string Statement, string RetiredAssertion)[] unsafeRegressionExamples =
         {
-            var mutatedSurface = BuildActiveContractSurface(
-                root,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["docs/Cloud只读数据分析契约.md"] =
-                        cloudContract + Environment.NewLine + mutation,
-                });
-            ComputeSha256(mutatedSurface).Should().NotBe(
-                activeContractSurfaceSha256,
-                "any contradictory wording anywhere in the owner must break the reviewed surface");
+            ("不得暴露 SQL，但模型决定 Text-to-SQL fallback", "模型决定 Text-to-SQL fallback"),
+            ("服务端负责审计；允许 LLM 选择 Text-to-SQL", "LLM 选择 Text-to-SQL"),
+            ("模型不得决定 fallback 但在服务端允许时可以触发 fallback", "模型不得决定 fallback 但在服务端允许时可以触发 fallback"),
+            ("模型可以决定是否进入\nText-to-SQL fallback", "模型可以决定是否进入 Text-to-SQL fallback"),
+            ("权限检查必须保留，但是权限失败后允许 fallback", "权限失败后允许 fallback"),
+            ("禁止泄露 SQL，同时模型决定 Text-to-SQL fallback", "模型决定 Text-to-SQL fallback"),
+            ("禁止泄露 SQL，同时模型决定 **Text-to-SQL** fallback", "模型决定 Text-to-SQL fallback"),
+            ("禁止泄露 SQL，同时模型决定 [Text-to-SQL](https://example.invalid) fallback", "模型决定 Text-to-SQL fallback"),
+            ("禁止泄露 SQL，同时模型决定 [Text-to-SQL][policy] fallback", "模型决定 Text-to-SQL fallback"),
+            ("禁止泄露 SQL，同时模型决定 <em>Text-to-SQL</em> fallback", "模型决定 Text-to-SQL fallback"),
+            ("禁止泄露 SQL，同时模型决定 <code>Text-to-SQL</code> fallback", "模型决定 Text-to-SQL fallback"),
+        };
+        foreach (var (statement, retiredAssertion) in unsafeRegressionExamples)
+        {
+            ContainsUnnegatedRetiredAssertion(
+                    NormalizeContractStatement(statement),
+                    NormalizeContractStatement(retiredAssertion))
+                .Should()
+                .BeTrue();
         }
 
-        string[] hiddenCanonicalMutations =
+        (string Statement, string RetiredAssertion)[] safeRegressionExamples =
         [
-            cloudContract
-                .Replace(policyStartMarker, "```text\n" + policyStartMarker, StringComparison.Ordinal)
-                .Replace(policyEndMarker, policyEndMarker + "\n```", StringComparison.Ordinal),
-            cloudContract
-                .Replace(policyStartMarker, "<!--\n" + policyStartMarker, StringComparison.Ordinal)
-                .Replace(policyEndMarker, policyEndMarker + "\n-->", StringComparison.Ordinal),
-            cloudContract
-                .Replace(policyStartMarker, "<template>\n" + policyStartMarker, StringComparison.Ordinal)
-                .Replace(policyEndMarker, policyEndMarker + "\n</template>", StringComparison.Ordinal),
+            ("模型不得决定是否进入 Text-to-SQL fallback", "模型决定是否进入 Text-to-SQL fallback"),
+            ("权限失败后不得 fallback", "权限失败后允许 fallback"),
+            ("禁止 LLM 选择 Text-to-SQL", "LLM 选择 Text-to-SQL"),
+            ("这不是模型决定 Text-to-SQL fallback", "模型决定 Text-to-SQL fallback"),
+            ("并非模型决定 Text-to-SQL fallback", "模型决定 Text-to-SQL fallback"),
+            ("该规则不作为“模型决定 Text-to-SQL fallback”的依据", "模型决定 Text-to-SQL fallback"),
         ];
-        foreach (var hiddenCanonical in hiddenCanonicalMutations)
+        foreach (var (statement, retiredAssertion) in safeRegressionExamples)
         {
-            var mutatedSurface = BuildActiveContractSurface(
-                root,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["docs/Cloud只读数据分析契约.md"] = hiddenCanonical,
-                });
-            ComputeSha256(mutatedSurface).Should().NotBe(
-                activeContractSurfaceSha256,
-                "fenced, commented or raw-HTML-wrapped canonical policy text is not active prose");
+            ContainsUnnegatedRetiredAssertion(
+                    NormalizeContractStatement(statement),
+                    NormalizeContractStatement(retiredAssertion))
+                .Should()
+                .BeFalse();
         }
+
+        foreach (var activeStatement in activeContractStatements)
+        {
+            foreach (var retiredAssertion in retiredFallbackAssertions)
+            {
+                ContainsUnnegatedRetiredAssertion(
+                        activeStatement,
+                        NormalizeContractStatement(retiredAssertion))
+                    .Should()
+                    .BeFalse(
+                        $"active contracts must reject retired fallback assertion '{retiredAssertion}'");
+            }
+        }
+
+        var policyStartIndex = cloudContract.IndexOf(policyStartMarker, StringComparison.Ordinal);
+        var policyEndIndex = cloudContract.IndexOf(policyEndMarker, StringComparison.Ordinal);
+        IsStandaloneLineAtColumnZero(cloudContract, policyStartIndex, policyStartMarker)
+            .Should()
+            .BeTrue("the canonical policy start marker must be active at column zero");
+        IsStandaloneLineAtColumnZero(cloudContract, policyEndIndex, policyEndMarker)
+            .Should()
+            .BeTrue("the canonical policy end marker must be active at column zero");
+        IsInsideInactiveContractWrapper(cloudContract, policyStartIndex).Should().BeFalse(
+            "the canonical fallback policy must remain active Markdown prose");
+        string[] inactivePolicyFixtures =
+        [
+            $"```text\n{policyStartMarker}\n{policyEndMarker}\n```",
+            $"````text\n```text\n{policyStartMarker}\n{policyEndMarker}\n```\n````",
+            $"    {policyStartMarker}\n    {policyEndMarker}",
+            $"<!--\n{policyStartMarker}\n{policyEndMarker}\n-->",
+            $"<template>\n{policyStartMarker}\n{policyEndMarker}\n</template>",
+            $"<script type=\"text/plain\">\n{policyStartMarker}\n{policyEndMarker}\n</script>",
+            $"<pre>\n{policyStartMarker}\n{policyEndMarker}\n</pre>",
+            $"<style>\n{policyStartMarker}\n{policyEndMarker}\n</style>",
+            $"<textarea>\n{policyStartMarker}\n{policyEndMarker}\n</textarea>",
+            $"<xmp>\n{policyStartMarker}\n{policyEndMarker}\n</xmp>",
+            $"<iframe>\n{policyStartMarker}\n{policyEndMarker}\n</iframe>",
+            $"<noembed>\n{policyStartMarker}\n{policyEndMarker}\n</noembed>",
+            $"<noframes>\n{policyStartMarker}\n{policyEndMarker}\n</noframes>",
+            $"<plaintext>\n{policyStartMarker}\n{policyEndMarker}",
+            $"<div hidden>\n{policyStartMarker}\n{policyEndMarker}\n</div>",
+            $"<?hidden\n{policyStartMarker}\n{policyEndMarker}\n?>",
+            $"<![CDATA[\n{policyStartMarker}\n{policyEndMarker}\n]]>",
+            $"<!DOCTYPE\n{policyStartMarker}\n{policyEndMarker}\n>",
+        ];
+        foreach (var fixture in inactivePolicyFixtures)
+        {
+            IsInsideInactiveContractWrapper(
+                    fixture,
+                    fixture.IndexOf(policyStartMarker, StringComparison.Ordinal))
+                .Should()
+                .BeTrue();
+        }
+
+        var activeAfterIndentedCodeFixture =
+            $"    ```text\n{policyStartMarker}\n{policyEndMarker}";
+        IsInsideInactiveContractWrapper(
+                activeAfterIndentedCodeFixture,
+                activeAfterIndentedCodeFixture.IndexOf(
+                    policyStartMarker,
+                    StringComparison.Ordinal))
+            .Should()
+            .BeFalse("a four-space indented code line is not a CommonMark fence");
+        var activeAfterClosedCommentFixture =
+            $"<!-- example <div> -->\n{policyStartMarker}\n{policyEndMarker}";
+        IsInsideInactiveContractWrapper(
+                activeAfterClosedCommentFixture,
+                activeAfterClosedCommentFixture.IndexOf(
+                    policyStartMarker,
+                    StringComparison.Ordinal))
+            .Should()
+            .BeFalse("HTML element examples inside closed comments must not hide active prose");
     }
 
     [Fact]
@@ -481,31 +533,359 @@ public sealed class ActiveContractFilesystemTests
         var persistenceContract = File.ReadAllText(
             Path.Combine(root, "docs", "DDD聚合根边界.md"));
 
-        agentContract.Should().Contain("AgentSession checkpoint 只用于会话连续性");
-        agentContract.Should().Contain("不是 durable Tool checkpoint");
-        agentContract.Should().Contain("Interrupted 后不得恢复或重放");
-        persistenceContract.Should().Contain(
-            "数据库 durable commit marker 只用于事务提交结果验证");
-        persistenceContract.Should().Contain(
-            "不是 Agent durable 编排、Tool checkpoint");
+        AssertActiveFragment(
+            agentContract,
+            "AgentSession checkpoint 只用于会话连续性，不是 durable Tool checkpoint、任务队列、lease/fencing 或工具恢复点，也不证明远端工具已经完成。取得锁后发现遗留 `Running` 时只允许转为 `Interrupted`；Interrupted 后不得恢复或重放模型、工具及旧批准。",
+            "AgentSession checkpoints must remain active continuity-only prose");
+        AssertActiveFragment(
+            agentContract,
+            "`persistence_commit_outcome_unknown` 表示写入可能已提交，调用方不得自动重试；只返回非敏感 commit id 供受控对账。数据库 commit marker、事务验证与文件持久化规则的唯一技术正文是 [DDD 聚合根边界](./DDD聚合根边界.md)，本契约不复制其实现。",
+            "the no-auto-retry outcome and its DDD route must remain active prose");
+        AssertActiveFragment(
+            persistenceContract,
+            "数据库 durable commit marker 只用于事务提交结果验证和 commit-ACK 丢失对账，不是 Agent durable 编排、Tool checkpoint、任务恢复点或工具重放依据。",
+            "database commit markers must remain distinct from Agent durability");
+    }
+
+    [Fact]
+    public void DddAndPersistenceTechnicalContract_ShouldRemainTheSingleSourceOfTruth()
+    {
+        var root = FindRepositoryRoot();
+        var agentInstructions = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
+        var businessRules = File.ReadAllText(
+            Path.Combine(root, "docs", "AICopilot业务规则.md"));
+        var agentContract = File.ReadAllText(
+            Path.Combine(root, "docs", "Agent工作流与异常契约.md"));
+        var cloudContract = File.ReadAllText(
+            Path.Combine(root, "docs", "Cloud只读数据分析契约.md"));
+        var roadmap = File.ReadAllText(
+            Path.Combine(root, "docs", "AI架构路线图.md"));
+        var deploymentGuide = File.ReadAllText(
+            Path.Combine(root, "deploy", "enterprise-ai", "README.md"));
+        var dddContract = File.ReadAllText(
+            Path.Combine(root, "docs", "DDD聚合根边界.md"));
+        var normalizedDddContract = NormalizeContractText(dddContract);
+        var persistenceContractPaths = ActiveContractPaths
+            .Append("deploy/enterprise-ai/README.md")
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        normalizedDddContract.Should().Contain(
+            "聚合、持久化集合分类、DbContext 与迁移所有权、审计、Outbox、事务提交和 RAG 文件持久化的唯一技术正文");
+        string[] requiredDddMarkers =
+        [
+            "`Session`",
+            "`LanguageModel`",
+            "`ConversationTemplate`",
+            "`ToolRegistration`",
+            "`BusinessDatabase`",
+            "`DataSourcePermissionGrant`",
+            "`McpServerInfo`",
+            "`KnowledgeBase`",
+            "`EmbeddingModel`",
+            "`KnowledgeCategory`",
+            "`KnowledgeSupplement`",
+            "`Message`",
+            "`Document`",
+            "`DocumentChunk`",
+            "`ModelParameters`",
+            "`TemplateSpecification`",
+            "`AgentSessionState`",
+            "`ModelQuotaReservation`",
+            "`PersistenceCommitMarker`",
+            "`AuditLogEntry`",
+            "`OutboxMessage`",
+            "`ApplicationUser`",
+            "`ExternalIdentityBinding`",
+            "`IdentityRoleClaim<>`",
+            "`IdentityRole<>`",
+            "`IdentityUserClaim<>`",
+            "`IdentityUserLogin<>`",
+            "`IdentityUserRole<>`",
+            "`IdentityUserToken<>`",
+            "| Aggregate |",
+            "| AggregateChild |",
+            "| OwnedValueObject |",
+            "| RuntimeRecord |",
+            "| Audit |",
+            "| IdentityRecord |",
+            "`AiCopilotDbContext`",
+            "`IdentityStoreDbContext`",
+            "`AiGatewayDbContext`",
+            "`RagDbContext`",
+            "`DataAnalysisDbContext`",
+            "`McpServerDbContext`",
+            "`AuditDbContext`",
+            "`OutboxDbContext`",
+            "`PersistenceCommitMarkerDbContext`",
+            "`ExcludeFromMigrations`",
+            "`__EFMigrationsHistory_*`",
+            "`PostgresModelQuotaReservationStore`",
+            "`AiGatewayTransactionRunner`",
+            "Audit writer decision tree",
+            "`OutboxDispatcher`",
+            "`FOR UPDATE SKIP LOCKED`",
+            "`PersistenceCommitEngine`",
+            "`RepositoryPersistenceCommitter`",
+            "`SaveChangesAsync(false)`",
+            "`ITransactionalExecutionService`",
+            "`ExecuteInTransactionAsync(... verifySucceeded ...)`",
+            "`PersistenceMaintenanceWorker`",
+            "`PersistenceFileMaintenanceService`",
+            "`IModelQuotaReservationStore.ReclaimExpiredAsync`",
+            "`PersistenceFileCommitProtocol`",
+            "PostgreSQL advisory lease",
+            "`AICOPILOT_PERSISTENCE_*`",
+            "`FileStorage:RootPath`",
+            "`LocalApplicationData/AICopilot/storage`",
+            "`created_at_utc`",
+            "commit-ACK 丢失、verification transient/persistent failure、caller cancellation 和数据库生成 identity 重放",
+        ];
+        foreach (var marker in requiredDddMarkers)
+        {
+            var markerIndex = dddContract.IndexOf(marker, StringComparison.Ordinal);
+            markerIndex.Should().BeGreaterThanOrEqualTo(
+                0,
+                "the DDD contract must own the complete persistence implementation boundary");
+            IsInsideInactiveContractWrapper(dddContract, markerIndex)
+                .Should()
+                .BeFalse($"required DDD marker '{marker}' must remain active Markdown prose");
+        }
+
+        string[] requiredDddRelationshipFragments =
+        [
+            "`DataSourcePermissionGrant` 是 DataAnalysis bounded context 的正式独立聚合根。独立 `DataSourcePermissionGrantId`、`RowVersion`、授权/撤销生命周期、repository、审计写入和 `(DataSourceId, TargetType, TargetValue)` 唯一目标约束共同构成其独立不变量边界。`DataSourceId` 的强类型是 `BusinessDatabaseId`。",
+            "`DataSourcePermissionGrant` 与 `BusinessDatabase` 是两个聚合；跨聚合仅由 Grant 的 `DataSourceId` 引用 `BusinessDatabaseId`，`BusinessDatabase` 不持有 Grant 子实体集合，也不得通过 EF navigation 恢复父子归属。该归属是正式长期边界。",
+            "| Aggregate | `Session`、`LanguageModel`、`ConversationTemplate`、`ToolRegistration`、`BusinessDatabase`、`DataSourcePermissionGrant`、`McpServerInfo`、`KnowledgeBase`、`EmbeddingModel`、`KnowledgeCategory`、`KnowledgeSupplement` |",
+            "| AggregateChild | `Message`、`Document`、`DocumentChunk` |",
+            "| OwnedValueObject | `ModelParameters`、`TemplateSpecification` |",
+            "| RuntimeRecord | `AgentSessionState`、`ModelQuotaReservation`、`PersistenceCommitMarker` |",
+            "| Audit | `AuditLogEntry`、`OutboxMessage` |",
+            "| IdentityRecord | `ApplicationUser`、`ExternalIdentityBinding`、`IdentityRoleClaim<>`、`IdentityRole<>`、`IdentityUserClaim<>`、`IdentityUserLogin<>`、`IdentityUserRole<>`、`IdentityUserToken<>` |",
+            "| `AiCopilotDbContext` | `AuditLogEntry`、`OutboxMessage`、`PersistenceCommitMarker` | 主基础设施 migration owner；唯一拥有 Outbox 与 persistence commit marker 迁移 |",
+            "| `IdentityStoreDbContext` | Identity 记录、`ExternalIdentityBinding`；审计只作为事务参与者 | 拥有 Identity 迁移；审计映射使用 `ExcludeFromMigrations` |",
+            "| `AiGatewayDbContext` | 上述七个 AiGateway 集合 | 拥有当前单一 Harness baseline |",
+            "| `RagDbContext` | RAG 聚合、`Document`、`DocumentChunk` | 拥有 RAG 迁移 |",
+            "| `DataAnalysisDbContext` | `BusinessDatabase`、`DataSourcePermissionGrant` | 拥有 DataAnalysis 迁移 |",
+            "| `McpServerDbContext` | `McpServerInfo` | 拥有 MCP 迁移 |",
+            "| `AuditDbContext` | 审计查询和运行时审计写入 | 无独立 migration |",
+            "| `OutboxDbContext` | 事务内物化和短生命周期领取 Outbox | 无独立 migration |",
+            "| `PersistenceCommitMarkerDbContext` | fresh verification 与 marker 维护 | 无独立 migration，映射使用 `ExcludeFromMigrations` |",
+            "六个 migration owner 必须使用各自隔离的 `__EFMigrationsHistory_*`；不得让单一 Context 的迁移或回滚污染其它 Context。",
+            "`PostgresModelQuotaReservationStore` 是模型配额唯一生产 store，只能经 `AiGatewayTransactionRunner` 写入 `AiGatewayDbContext`；模型调用预约、结算、回收的事务语义不得复制到其它 Context。",
+            "没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描。DataAnalysis 与 MCP 不写 Outbox；AiGateway 只从 `Session` 领域事件物化 Outbox，RAG 只使用 delayed integration-event factory，业务 Context 不映射共享 Outbox。",
+            "审计写入遵守唯一 Audit writer decision tree：有业务保存点的命令把业务变更和审计行放入同一事务；`auditLogWriter.SaveChangesAsync` 只允许用于没有业务保存点且已被白名单记录的路径。",
+            "`OutboxDispatcher` 统一领取和发布，必须保留 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略以及 dead-letter 上限，禁止多 worker 重复发布同一消息。",
+            "业务行、Outbox、审计和数据库 durable commit marker 只能由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交。每个 execution-strategy attempt 对业务 Context 只执行一次 `SaveChangesAsync(false)`；事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。",
+            "Identity 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine；非成功 `Result` 必须回滚 UserManager/RoleManager 已触发的中间保存，拒绝审计只能在回滚后另行提交。禁止恢复 `EfTransactionalExecutionService`、通用 Outbox 扫描或复制第二套 transaction/retry。",
+            "EF execution strategy 必须使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，禁止手写业务重试循环。commit-unknown 不得通过 `SaveChanges(false)`、Outbox 或 audit 是否存在来推断成功。",
+            "数据库 durable commit marker 只用于事务提交结果验证和 commit-ACK 丢失对账，不是 Agent durable 编排、Tool checkpoint、任务恢复点或工具重放依据。marker 必须与业务写入处于同一事务，并由 fresh context 在独立超时和 execution strategy 下验证。",
+            "marker 写入后 caller cancellation 不得中断 commit/verification。无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id；调用方不得自动重放业务。",
+            "`PersistenceMaintenanceWorker` 只通过 `PersistenceFileMaintenanceService` 对账 RAG journal、清理 commit marker，并通过 `IModelQuotaReservationStore.ReclaimExpiredAsync` 回收过期模型配额预约；它不领取或发布 Outbox。Outbox 由独立托管的 `OutboxDispatcher` 负责。commit marker 默认保留 30 天并按 `created_at_utc` 索引；保留期必须长于对账延迟，有待处理或不可读 journal 时不得删除 marker。",
+            "知识库文件唯一写入口是 RAG Document API。RAG `UploadDocument` 必须先写 durable reconciliation journal，再写物理文件，并与 repository marker 共用同一 commit id。",
+            "RAG 数据库绑定上传路径必须复用唯一 `PersistenceFileCommitProtocol`。repository 未消费预留 commit id 时确认必须 fail-closed，回滚未提交文件并保留失败信号；不得因为 callback 正常返回就清除 journal。",
+            "请求与 DataWorker 通过 PostgreSQL advisory lease 互斥。提交结果未知时保留文件和 journal；后台看到同一 marker 才保留文件并清 journal，看不到 marker 才删除文件。journal 不可读时停止 marker 清理。",
+            "默认每 300 秒扫描，只对至少 10 分钟前的 journal 对账，单轮最多 100 条；`AICOPILOT_PERSISTENCE_*` 只能调整这些部署参数，不得把对账延迟设为 0，也不得让 marker 保留期短于对账延迟。不可读 journal 必须 fail-closed，不得手工批量删除 `.persistence/file-reconciliation`。",
+            "标准容器共享卷只允许受信任的 AICopilot 后端写入。当前路径边界拒绝既有 symlink/reparse traversal，但不把同 UID 恶意进程在检查与打开之间替换目录的 TOCTOU 视为已解决；扩大威胁模型前必须增加容器权限隔离或 dirfd/`openat` 原子路径操作。",
+            "标准生产容器部署必须把 RAG 可写 `FileStorage:RootPath` 固定为共享卷 `/var/lib/aicopilot/storage`，在该部署中不得回退容器层、`/app`、`LocalApplicationData` 或共享卷外路径。本地 dev/test 未显式配置时可使用现有 `LocalApplicationData/AICopilot/storage` fallback，但不得把它当作生产容器持久化。durable local file/journal backend 只支持 Linux/macOS，生产固定 Linux；Windows 必须明确拒绝该 backend。",
+            "HttpApi、DataWorker 与 RagWorker 必须共享 `/var/lib/aicopilot`。RagWorker 的文档删除 consumer 必须先按 storage path 查询 pending journal 并争用同一 commit lease；journal 不可读或 lease active 时让消息重试，禁止从容器或 cron 直接删文件。文件对账、marker 保留与清理只能由当前维护链执行，不得恢复会话文件、Artifact workspace 或第二套文件 checkpoint。",
+        ];
+        foreach (var fragment in requiredDddRelationshipFragments)
+        {
+            var fragmentIndex = dddContract.IndexOf(fragment, StringComparison.Ordinal);
+            fragmentIndex.Should().BeGreaterThanOrEqualTo(
+                0,
+                "the DDD contract must keep each reviewed classification, ownership and persistence relationship intact");
+            IsInsideInactiveContractWrapper(dddContract, fragmentIndex)
+                .Should()
+                .BeFalse("reviewed DDD relationship fragments must remain active Markdown prose");
+        }
+
+        string[] uniqueTechnicalOwnerMarkers =
+        [
+            "DataSourcePermissionGrant",
+            "DataSourcePermissionGrantId",
+            "AiCopilotDbContext",
+            "IdentityStoreDbContext",
+            "AiGatewayDbContext",
+            "RagDbContext",
+            "DataAnalysisDbContext",
+            "McpServerDbContext",
+            "AuditDbContext",
+            "OutboxDbContext",
+            "PersistenceCommitMarkerDbContext",
+            "AggregateChild",
+            "OwnedValueObject",
+            "RuntimeRecord",
+            "IdentityRecord",
+            "ExcludeFromMigrations",
+            "__EFMigrationsHistory_*",
+            "PostgresModelQuotaReservationStore",
+            "AiGatewayTransactionRunner",
+            "Audit writer decision tree",
+            "OutboxDispatcher",
+            "FOR UPDATE SKIP LOCKED",
+            "PersistenceCommitEngine",
+            "RepositoryPersistenceCommitter",
+            "SaveChangesAsync(false)",
+            "ITransactionalExecutionService",
+            "ExecuteInTransactionAsync(... verifySucceeded ...)",
+            "PersistenceMaintenanceWorker",
+            "PersistenceFileMaintenanceService",
+            "IModelQuotaReservationStore.ReclaimExpiredAsync",
+            "PersistenceFileCommitProtocol",
+            "PostgreSQL advisory lease",
+            "AICOPILOT_PERSISTENCE_*",
+            "FileStorage:RootPath",
+            "LocalApplicationData/AICopilot/storage",
+            "created_at_utc",
+        ];
+        var linkedAuthorityDocuments = persistenceContractPaths
+            .Where(path => path != "docs/DDD聚合根边界.md")
+            .Select(path => (
+                Name: path,
+                Text: NormalizeContractText(File.ReadAllText(Path.Combine(root, path)))))
+            .ToArray();
+        foreach (var (name, text) in linkedAuthorityDocuments)
+        {
+            foreach (var marker in uniqueTechnicalOwnerMarkers)
+            {
+                text.Should().NotContain(
+                    NormalizeContractText(marker),
+                    $"{name} must link the unique DDD contract instead of copying {marker}");
+            }
+        }
+
+        AssertActiveFragment(
+            agentInstructions,
+            "唯一技术正文 [DDD 聚合根边界](docs/DDD聚合根边界.md)",
+            "AGENTS must actively route DDD and persistence work to the owner contract");
+        AssertActiveFragment(
+            businessRules,
+            "唯一技术正文是 [DDD 聚合根边界](./DDD聚合根边界.md)",
+            "business rules must actively link the DDD owner contract");
+        AssertActiveFragment(
+            agentContract,
+            "唯一技术正文是 [DDD 聚合根边界](./DDD聚合根边界.md)",
+            "the Agent contract must actively link the DDD owner contract");
+        AssertActiveFragment(
+            cloudContract,
+            "只由 [DDD 聚合根边界](./DDD聚合根边界.md) 定义",
+            "the Cloud contract must actively link the DDD owner contract");
+        AssertActiveFragment(
+            roadmap,
+            "[DDD 聚合根边界](./DDD聚合根边界.md)",
+            "the roadmap must actively link the DDD owner contract");
+        AssertActiveFragment(
+            deploymentGuide,
+            "[DDD 聚合根边界](../../docs/DDD聚合根边界.md)",
+            "the deployment guide must actively link the DDD owner contract");
+
+        AssertActiveFragment(
+            businessRules,
+            "聚合必须按各自业务不变量和生命周期独立演进；数据源授权与业务数据源之间只通过稳定标识跨聚合引用，不能把独立授权生命周期重新下沉为父实体的可变子集合。正式聚合清单、持久化分类和不变量理由只见 DDD 唯一技术正文。",
+            "the business aggregate principle must remain active prose");
+        AssertActiveFragment(
+            businessRules,
+            "业务变更、审计、待发布事件和数据库提交结果保障必须保持原子；提交结果未知时不得自动重放业务。事务参与者、重试/验证算法、Outbox 领取和 commit marker 细节只见 DDD 唯一技术正文。",
+            "the business atomicity and no-replay principle must remain active prose");
+        AssertActiveFragment(
+            businessRules,
+            "知识库上传必须通过持久化对账保护数据库与文件一致性，且只能使用正式 RAG 文档入口。journal、lease、存储路径、后台对账与保留实现只见 DDD 唯一技术正文。",
+            "the business RAG persistence principle must remain active prose");
+        AssertActiveFragment(
+            agentContract,
+            "`persistence_commit_outcome_unknown` 表示写入可能已提交，调用方不得自动重试；只返回非敏感 commit id 供受控对账。数据库 commit marker、事务验证与文件持久化规则的唯一技术正文是 [DDD 聚合根边界](./DDD聚合根边界.md)，本契约不复制其实现。",
+            "the Agent outcome contract must actively forbid automatic retries and route to DDD");
+        AssertActiveFragment(
+            agentContract,
+            "AgentSession checkpoint 只用于会话连续性，不是 durable Tool checkpoint、任务队列、lease/fencing 或工具恢复点，也不证明远端工具已经完成。取得锁后发现遗留 `Running` 时只允许转为 `Interrupted`；Interrupted 后不得恢复或重放模型、工具及旧批准。",
+            "AgentSession checkpoints must remain active continuity-only prose");
+
+        var activeStatements = persistenceContractPaths
+            .SelectMany(path => GetContractClauses(
+                File.ReadAllText(Path.Combine(root, path))))
+            .ToArray();
+        string[] retiredPersistenceAssertions =
+        [
+            "DataSourcePermissionGrant 是 BusinessDatabase 子实体",
+            "BusinessDatabase 持有 DataSourcePermissionGrant",
+            "恢复 EfTransactionalExecutionService",
+            "复制第二套 transaction/retry",
+            "恢复通用 Outbox 扫描",
+            "DataAnalysis 写 Outbox",
+            "MCP 写 Outbox",
+            "业务 Context 映射共享 Outbox",
+        ];
+        (string Statement, string RetiredAssertion)[] unsafeRegressionExamples =
+        [
+            ("DataSourcePermissionGrant 是 BusinessDatabase 子实体", "DataSourcePermissionGrant 是 BusinessDatabase 子实体"),
+            ("允许恢复 EfTransactionalExecutionService", "恢复 EfTransactionalExecutionService"),
+            ("事务可以复制第二套 transaction/retry", "复制第二套 transaction/retry"),
+            ("DataAnalysis 写 Outbox", "DataAnalysis 写 Outbox"),
+            ("不得删除审计且 DataAnalysis 写 Outbox", "DataAnalysis 写 Outbox"),
+            ("不得删除审计并允许 DataAnalysis 写 Outbox", "DataAnalysis 写 Outbox"),
+            ("不得删除审计，同时 DataAnalysis **写** Outbox", "DataAnalysis 写 Outbox"),
+            ("不得删除审计，同时 DataAnalysis [写][verb] Outbox", "DataAnalysis 写 Outbox"),
+            ("不得删除审计，同时 DataAnalysis <strong>写</strong> Outbox", "DataAnalysis 写 Outbox"),
+            ("不得删除审计，同时 DataAnalysis <code>写</code> Outbox", "DataAnalysis 写 Outbox"),
+        ];
+        foreach (var (statement, retiredAssertion) in unsafeRegressionExamples)
+        {
+            ContainsUnnegatedRetiredAssertion(
+                    NormalizeContractStatement(statement),
+                    NormalizeContractStatement(retiredAssertion))
+                .Should()
+                .BeTrue();
+        }
+
+        (string Statement, string RetiredAssertion)[] safeRegressionExamples =
+        [
+            ("这不是 DataAnalysis 写 Outbox", "DataAnalysis 写 Outbox"),
+            ("并非 DataAnalysis 写 Outbox", "DataAnalysis 写 Outbox"),
+            ("该规则不作为“DataAnalysis 写 Outbox”的依据", "DataAnalysis 写 Outbox"),
+            ("不得通过旧路径而恢复通用 Outbox 扫描", "恢复通用 Outbox 扫描"),
+        ];
+        foreach (var (statement, retiredAssertion) in safeRegressionExamples)
+        {
+            ContainsUnnegatedRetiredAssertion(
+                    NormalizeContractStatement(statement),
+                    NormalizeContractStatement(retiredAssertion))
+                .Should()
+                .BeFalse();
+        }
+
+        foreach (var activeStatement in activeStatements)
+        {
+            foreach (var retiredAssertion in retiredPersistenceAssertions)
+            {
+                ContainsUnnegatedRetiredAssertion(
+                        activeStatement,
+                        NormalizeContractStatement(retiredAssertion))
+                    .Should()
+                    .BeFalse(
+                        $"active contracts must reject retired persistence assertion '{retiredAssertion}'");
+            }
+        }
     }
 
     [Fact]
     public void DataSourcePermissionGrant_ShouldKeepFormalIndependentAggregateOwnership()
     {
         var root = FindRepositoryRoot();
-        var businessRules = File.ReadAllText(
-            Path.Combine(root, "docs", "AICopilot业务规则.md"));
         var aggregateContract = File.ReadAllText(
             Path.Combine(root, "docs", "DDD聚合根边界.md"));
-        var ownershipLines = string.Join(
-            '\n',
-            new[] { businessRules, aggregateContract }
-                .SelectMany(text => text.Split('\n'))
-                .Where(line => line.Contains("DataSourcePermissionGrant", StringComparison.Ordinal)));
+        var nonOwnerContracts = ActiveContractPaths
+            .Where(path => path != "docs/DDD聚合根边界.md")
+            .Select(path => File.ReadAllText(Path.Combine(root, path)))
+            .ToArray();
+        foreach (var contract in nonOwnerContracts)
+        {
+            contract.Should().NotContain(
+                "DataSourcePermissionGrant",
+                "aggregate type ownership belongs only to the DDD technical contract");
+        }
 
-        businessRules.Should().Contain(
-            "`DataSourcePermissionGrant` 正式冻结为 DataAnalysis bounded context 的独立聚合根");
         aggregateContract.Should().Contain(
             "`DataSourcePermissionGrant` 是 DataAnalysis bounded context 的正式独立聚合根");
         aggregateContract.Should().Contain("独立 `DataSourcePermissionGrantId`");
@@ -514,8 +894,11 @@ public sealed class ActiveContractFilesystemTests
         aggregateContract.Should().Contain("repository");
         aggregateContract.Should().Contain("审计写入");
         aggregateContract.Should().Contain(
-            "`(BusinessDatabaseId, TargetType, TargetValue)` 唯一目标约束");
-        aggregateContract.Should().Contain("跨聚合仅由 Grant 引用 `BusinessDatabaseId`");
+            "`(DataSourceId, TargetType, TargetValue)` 唯一目标约束");
+        aggregateContract.Should().Contain(
+            "`DataSourceId` 的强类型是 `BusinessDatabaseId`");
+        aggregateContract.Should().Contain(
+            "跨聚合仅由 Grant 的 `DataSourceId` 引用 `BusinessDatabaseId`");
         aggregateContract.Should().Contain("`BusinessDatabase` 不持有 Grant 子实体集合");
 
         string[] unresolvedOwnershipMarkers =
@@ -533,9 +916,22 @@ public sealed class ActiveContractFilesystemTests
             "待评估",
             "下沉",
         ];
-        foreach (var marker in unresolvedOwnershipMarkers)
+        var ownershipStatements = ActiveContractPaths
+            .SelectMany(path => GetContractClauses(
+                File.ReadAllText(Path.Combine(root, path))))
+            .Where(statement =>
+                statement.Contains("DataSourcePermissionGrant", StringComparison.Ordinal) ||
+                statement.Contains("数据源授权", StringComparison.Ordinal))
+            .ToArray();
+        foreach (var statement in ownershipStatements)
         {
-            ownershipLines.Should().NotContain(marker);
+            foreach (var marker in unresolvedOwnershipMarkers)
+            {
+                ContainsUnnegatedRetiredAssertion(statement, marker)
+                    .Should()
+                    .BeFalse(
+                        $"aggregate ownership must not return to unresolved wording '{marker}'");
+            }
         }
     }
 
@@ -688,10 +1084,36 @@ public sealed class ActiveContractFilesystemTests
 
     private static string NormalizeContractText(string text)
     {
-        var withoutMarkdownCode = text.Replace("`", string.Empty, StringComparison.Ordinal);
+        var visibleMarkdown = System.Net.WebUtility.HtmlDecode(text);
+        visibleMarkdown = Regex.Replace(
+            visibleMarkdown,
+            @"</?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*?)?/?>",
+            string.Empty,
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        visibleMarkdown = Regex.Replace(
+            visibleMarkdown,
+            @"!?\[([^\]\r\n]+)\]\([^)\r\n]*\)",
+            "$1",
+            RegexOptions.CultureInvariant);
+        visibleMarkdown = Regex.Replace(
+            visibleMarkdown,
+            @"!?\[([^\]\r\n]+)\]\[[^\]\r\n]*\]",
+            "$1",
+            RegexOptions.CultureInvariant);
+        visibleMarkdown = visibleMarkdown
+            .Replace("`", string.Empty, StringComparison.Ordinal)
+            .Replace("**", string.Empty, StringComparison.Ordinal)
+            .Replace("__", string.Empty, StringComparison.Ordinal)
+            .Replace("~~", string.Empty, StringComparison.Ordinal)
+            .Replace("*", string.Empty, StringComparison.Ordinal);
+        visibleMarkdown = Regex.Replace(
+            visibleMarkdown,
+            @"(?<![\p{L}\p{N}])_(?=\S)|(?<=\S)_(?![\p{L}\p{N}])",
+            string.Empty,
+            RegexOptions.CultureInvariant);
         return string.Join(
             ' ',
-            withoutMarkdownCode.Split(
+            visibleMarkdown.Split(
                 new[] { ' ', '\t', '\r', '\n' },
                 StringSplitOptions.RemoveEmptyEntries));
     }
@@ -721,30 +1143,242 @@ public sealed class ActiveContractFilesystemTests
         return text[(start + startMarker.Length)..end];
     }
 
-    private static string BuildActiveContractSurface(
-        string root,
-        IReadOnlyDictionary<string, string>? overrides = null)
+    private static IEnumerable<string> GetContractClauses(string text)
     {
-        var surface = new StringBuilder();
-        foreach (var path in ActiveContractPaths)
+        return NormalizeContractText(text)
+            .Split(
+                new[] { '。', '；', ';', '！', '!', '？', '?' },
+                StringSplitOptions.RemoveEmptyEntries)
+            .Select(NormalizeContractStatement)
+            .Where(statement => !string.IsNullOrWhiteSpace(statement));
+    }
+
+    private static void AssertActiveFragment(
+        string text,
+        string fragment,
+        string because)
+    {
+        var fragmentIndex = text.IndexOf(fragment, StringComparison.Ordinal);
+        fragmentIndex.Should().BeGreaterThanOrEqualTo(0, because);
+        IsInsideInactiveContractWrapper(text, fragmentIndex)
+            .Should()
+            .BeFalse(because);
+    }
+
+    private static bool IsInsideInactiveContractWrapper(string text, int markerIndex)
+    {
+        if (markerIndex < 0 || markerIndex > text.Length)
         {
-            var text = overrides is not null && overrides.TryGetValue(path, out var replacement)
-                ? replacement
-                : File.ReadAllText(Path.Combine(root, path));
-            var normalizedText = text
-                .Replace("\r\n", "\n", StringComparison.Ordinal)
-                .Replace('\r', '\n');
-            surface.Append(path.Length)
-                .Append(':')
-                .Append(path)
-                .Append('\n')
-                .Append(normalizedText.Length)
-                .Append(':')
-                .Append(normalizedText)
-                .Append("\n---\n");
+            throw new ArgumentOutOfRangeException(nameof(markerIndex));
         }
 
-        return surface.ToString();
+        var prefix = text[..markerIndex];
+        var markdownPrefix = Regex.Replace(
+            prefix,
+            @"<!--.*?-->|<\?.*?\?>|<!\[CDATA\[.*?\]\]>|<![A-Z][^>]*>",
+            PreserveLineBreaks,
+            RegexOptions.CultureInvariant | RegexOptions.Singleline);
+        var markerLineStart = markerIndex == 0
+            ? 0
+            : text.LastIndexOf('\n', markerIndex - 1) + 1;
+        var markerLinePrefix = text.AsSpan(markerLineStart, markerIndex - markerLineStart);
+        if (markerLinePrefix.Length > 0)
+        {
+            if (markerLinePrefix[0] == '\t')
+            {
+                return true;
+            }
+
+            var leadingSpaces = 0;
+            while (leadingSpaces < markerLinePrefix.Length &&
+                   markerLinePrefix[leadingSpaces] == ' ')
+            {
+                leadingSpaces++;
+            }
+
+            if (leadingSpaces >= 4)
+            {
+                return true;
+            }
+        }
+
+        char? openFenceCharacter = null;
+        var openFenceLength = 0;
+        var openHtmlElements = new List<string>();
+        foreach (var rawLine in markdownPrefix.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+            var fenceIndent = 0;
+            while (fenceIndent < line.Length && line[fenceIndent] == ' ')
+            {
+                fenceIndent++;
+            }
+
+            if (fenceIndent > 3 ||
+                (fenceIndent < line.Length && line[fenceIndent] == '\t'))
+            {
+                continue;
+            }
+
+            var content = line[fenceIndent..];
+            if (content.Length < 3 || content[0] is not ('`' or '~'))
+            {
+                if (openFenceCharacter is null)
+                {
+                    UpdateOpenHtmlElements(line, openHtmlElements);
+                }
+
+                continue;
+            }
+
+            var fenceCharacter = content[0];
+            var fenceLength = 0;
+            while (fenceLength < content.Length &&
+                   content[fenceLength] == fenceCharacter)
+            {
+                fenceLength++;
+            }
+
+            if (fenceLength < 3)
+            {
+                if (openFenceCharacter is null)
+                {
+                    UpdateOpenHtmlElements(line, openHtmlElements);
+                }
+
+                continue;
+            }
+
+            if (openFenceCharacter is null)
+            {
+                openFenceCharacter = fenceCharacter;
+                openFenceLength = fenceLength;
+                continue;
+            }
+
+            if (openFenceCharacter == fenceCharacter &&
+                fenceLength >= openFenceLength &&
+                string.IsNullOrWhiteSpace(content[fenceLength..]))
+            {
+                openFenceCharacter = null;
+                openFenceLength = 0;
+            }
+        }
+
+        var htmlCommentOpen = prefix.LastIndexOf("<!--", StringComparison.Ordinal);
+        var htmlCommentClose = prefix.LastIndexOf("-->", StringComparison.Ordinal);
+        var processingInstructionOpen = prefix.LastIndexOf("<?", StringComparison.Ordinal);
+        var processingInstructionClose = prefix.LastIndexOf("?>", StringComparison.Ordinal);
+        var cdataOpen = prefix.LastIndexOf("<![CDATA[", StringComparison.Ordinal);
+        var cdataClose = prefix.LastIndexOf("]]>", StringComparison.Ordinal);
+        var declarationMatches = Regex.Matches(
+            prefix,
+            @"<![A-Z]",
+            RegexOptions.CultureInvariant);
+        var declarationOpen = declarationMatches.Count == 0
+            ? -1
+            : declarationMatches[declarationMatches.Count - 1].Index;
+        var declarationClose = prefix.LastIndexOf('>');
+
+        return openFenceCharacter is not null ||
+               htmlCommentOpen > htmlCommentClose ||
+               processingInstructionOpen > processingInstructionClose ||
+               cdataOpen > cdataClose ||
+               declarationOpen > declarationClose ||
+               openHtmlElements.Count > 0;
+    }
+
+    private static string PreserveLineBreaks(Match match)
+    {
+        return new string(match.Value
+            .Select(character => character is '\r' or '\n' ? character : ' ')
+            .ToArray());
+    }
+
+    private static void UpdateOpenHtmlElements(
+        string line,
+        List<string> openHtmlElements)
+    {
+        var withoutInlineCode = Regex.Replace(
+            line,
+            @"`+[^`\r\n]*`+",
+            string.Empty,
+            RegexOptions.CultureInvariant);
+        var tags = Regex.Matches(
+            withoutInlineCode,
+            @"<(?<closing>/)?(?<name>[A-Za-z][A-Za-z0-9:-]*)(?:\s[^<>]*?)?(?<self>/)?>",
+            RegexOptions.CultureInvariant);
+        string[] voidElements =
+        [
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        ];
+        foreach (Match tag in tags)
+        {
+            var name = tag.Groups["name"].Value.ToLowerInvariant();
+            if (tag.Groups["closing"].Success)
+            {
+                for (var index = openHtmlElements.Count - 1; index >= 0; index--)
+                {
+                    if (!string.Equals(
+                            openHtmlElements[index],
+                            name,
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    openHtmlElements.RemoveRange(
+                        index,
+                        openHtmlElements.Count - index);
+                    break;
+                }
+
+                continue;
+            }
+
+            if (!tag.Groups["self"].Success &&
+                !voidElements.Contains(name, StringComparer.Ordinal))
+            {
+                openHtmlElements.Add(name);
+            }
+        }
+    }
+
+    private static bool IsStandaloneLineAtColumnZero(
+        string text,
+        int markerIndex,
+        string marker)
+    {
+        if (markerIndex < 0 || markerIndex + marker.Length > text.Length)
+        {
+            return false;
+        }
+
+        var lineStart = markerIndex == 0
+            ? 0
+            : text.LastIndexOf('\n', markerIndex - 1) + 1;
+        var lineEnd = text.IndexOf('\n', markerIndex);
+        if (lineEnd < 0)
+        {
+            lineEnd = text.Length;
+        }
+
+        var line = text[lineStart..lineEnd].TrimEnd('\r');
+        return markerIndex == lineStart &&
+               string.Equals(line, marker, StringComparison.Ordinal);
     }
 
     private static string ComputeSha256(string text)
@@ -770,6 +1404,9 @@ public sealed class ActiveContractFilesystemTests
             "阻止",
             "防止",
             "避免",
+            "不是",
+            "并非",
+            "不作为",
         ];
         var searchStart = 0;
         while (searchStart < statement.Length)
@@ -786,7 +1423,20 @@ public sealed class ActiveContractFilesystemTests
             var prefix = statement[..assertionIndex];
             var clauseBoundary = prefix.LastIndexOfAny(
                 new[] { '。', '；', ';', '！', '!', '？', '?', '，', ',', '：', ':' });
-            string[] polarityResetMarkers = ["但是", "然而", "但", "却"];
+            string[] polarityResetMarkers =
+            [
+                "但是",
+                "然而",
+                "并且",
+                "并允许",
+                "同时",
+                "随后",
+                "然后",
+                "而且",
+                "且",
+                "但",
+                "却",
+            ];
             foreach (var resetMarker in polarityResetMarkers)
             {
                 var resetIndex = prefix.LastIndexOf(

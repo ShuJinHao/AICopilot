@@ -82,7 +82,7 @@
 
 - 未知 HTTP 异常走稳定 ProblemDetails，返回 canonical `code`、安全 `detail`、`userFacingMessage` 和当前 `traceId`。descriptor extensions 中大小写变体的 `code` / `traceId` 必须丢弃，调用方不能注入伪值。
 - SSE Error / AgentEvent 也只返回稳定错误码和安全摘要；字段固定为 camelCase。Chat Error 的 `code`、`detail`、`userFacingMessage` 均是后端完成脱敏后的活动诊断契约，前端必须完整展示；未知 code 只在缺少用户提示时使用固定 fallback，不得因此隐藏安全 `detail`。后端不得把 raw exception、SQL、内部路径或 provider 原文放入这些字段。
-- `persistence_commit_outcome_unknown` 表示写入可能已提交，调用方不得自动重试；必须先按非敏感 commit id 对账。commit marker、advisory lease 和文件 reconciliation 规则仍由持久化专题契约负责。
+- `persistence_commit_outcome_unknown` 表示写入可能已提交，调用方不得自动重试；只返回非敏感 commit id 供受控对账。数据库 commit marker、事务验证与文件持久化规则的唯一技术正文是 [DDD 聚合根边界](./DDD聚合根边界.md)，本契约不复制其实现。
 - 日志、审计和持久化失败原因只允许 trace/correlation id、exception type、稳定 code、长度、计数和 SHA-256。不得记录 raw exception message/object、SQL、prompt、参数值、token、密码、连接串、endpoint、source/table/database、原始工具参数或结果行。
 - AgentSession 状态、Data Protection key、Knowledge 内容和工具 raw output 视为敏感数据；任何失败路径都不得为了诊断将其写入日志。
 

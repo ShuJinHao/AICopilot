@@ -369,8 +369,12 @@ public sealed class SecurityDeploymentTests
             "AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests\"");
         securityDeploymentContract.Should().NotContain(
             "AICopilot.HttpIntegrationTests/AICopilot.HttpIntegrationTests.csproj --filter \"CloudOidcOptionsTests|CloudOidcFinalizationWorkflowTests|IdentityProblemContractTests|UnhandledApiExceptionPolicyTests\"");
-        architectureRoadmap.Should().Contain("CloudAiReadClientContractTests");
-        architectureRoadmap.Should().Contain("AgentSafetyApplicationTests");
+        architectureRoadmap.Should().Contain(
+            "[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)");
+        architectureRoadmap.Should().Contain(
+            "[Agent 工作流与异常契约](./Agent工作流与异常契约.md)");
+        architectureRoadmap.Should().NotContain("CloudAiReadClientContractTests");
+        architectureRoadmap.Should().NotContain("AgentSafetyApplicationTests");
         architectureRoadmap.Should().NotContain("CloudAiReadClientTests");
         architectureRoadmap.Should().NotContain("AiEvalBehaviorGuardrailTests");
         agentInstructions.Should().Contain(
