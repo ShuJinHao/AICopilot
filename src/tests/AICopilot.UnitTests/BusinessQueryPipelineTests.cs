@@ -480,6 +480,39 @@ public sealed class BusinessQueryPipelineTests
     }
 
     [Fact]
+    public void CloudProviderResultContract_ShouldAllowCanonicalCapacityPlcCode()
+    {
+        var context = CreateContext(
+            DataSourceExternalSystemType.CloudReadOnly,
+            sourceExplicitlySelected: true) with
+        {
+            Capability = BusinessDataCapability.Capacity
+        };
+        var provider = new CloudAiReadBusinessQueryProvider(null!);
+        var result = new BusinessQueryProviderResult(
+            BusinessQueryOutcome.Success,
+            provider.ProviderCode,
+            context.SourceKey,
+            context.DataSourceId,
+            context.SourceType,
+            context.Capability,
+            [new Dictionary<string, object?> { ["plcCode"] = "P2-CP05" }],
+            1,
+            false,
+            "/api/v1/ai/read/capacity/hourly",
+            "Cloud AiRead",
+            DateTimeOffset.UtcNow,
+            "safe");
+
+        var action = () => BusinessQueryProviderResultContract.EnsureMatches(
+            context,
+            provider,
+            result);
+
+        action.Should().NotThrow();
+    }
+
+    [Fact]
     public void ProviderRegistry_ShouldKeepMesAndErpProvidersIsolatedByConfirmedSourceKey()
     {
         var mesProvider = new StubBusinessQueryProvider(

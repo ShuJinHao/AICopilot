@@ -30,9 +30,14 @@ internal static class SemanticSummaryFormatting
 
     public static decimal GetDecimal(Dictionary<string, object?> row, string field)
     {
+        return GetNullableDecimal(row, field) ?? 0m;
+    }
+
+    public static decimal? GetNullableDecimal(Dictionary<string, object?> row, string field)
+    {
         if (!row.TryGetValue(field, out var value) || value == null)
         {
-            return 0m;
+            return null;
         }
 
         return value switch
@@ -43,7 +48,7 @@ internal static class SemanticSummaryFormatting
             int intValue => intValue,
             long longValue => longValue,
             _ when decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed) => parsed,
-            _ => 0m
+            _ => null
         };
     }
 

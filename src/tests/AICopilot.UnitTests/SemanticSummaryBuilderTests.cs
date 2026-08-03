@@ -99,6 +99,25 @@ public sealed class SemanticSummaryBuilderTests
     }
 
     [Fact]
+    public void Builder_ShouldPreserveUnknownCapacityQualityFacts()
+    {
+        var plan = CreatePlan(SemanticQueryTarget.Capacity, SemanticQueryKind.ByDevice, ("deviceId", "11111111-1111-1111-1111-111111111111"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(("outputQty", 118), ("qualifiedQty", null), ("plcName", "正极模切05"), ("occurredAt", "2026-04-20T08:00:00Z"))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Metrics.Should().Contain(item => item.Name == "totalOutputQty" && item.Value == "118 个");
+        summary.Metrics.Should().Contain(item => item.Name == "totalQualifiedQty" && item.Value == "未知");
+        summary.Metrics.Should().Contain(item => item.Name == "qualifiedRate" && item.Value == "未知");
+        summary.Conclusion.Should().Contain("合格完工弹夹数 未知，合格率 未知");
+        summary.Conclusion.Should().NotContain("0.00%");
+        summary.Highlights.Should().ContainSingle().Which.Should().Contain("合格完工弹夹数 未知");
+    }
+
+    [Fact]
     public void Builder_ShouldSummarizeDeviceLogs()
     {
         var plan = CreatePlan(SemanticQueryTarget.DeviceLog, SemanticQueryKind.ByLevel, ("deviceId", "11111111-1111-1111-1111-111111111111"), ("level", "ERROR"));
