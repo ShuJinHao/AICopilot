@@ -68,11 +68,26 @@ case "${1:-}" in
     ;;
   compose)
     shift
+    compose_files=()
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        --env-file|-f) shift 2 ;;
+        --env-file) shift 2 ;;
+        -f)
+          compose_files+=( "$2" )
+          shift 2
+          ;;
         *) command="$1"; shift; break ;;
       esac
+    done
+    migration_invocation=unbound
+    for compose_file in "${compose_files[@]-}"; do
+      [ -n "$compose_file" ] || continue
+      [ -r "$compose_file" ] || continue
+      candidate_invocation="$(sed -n \
+        's/^[[:space:]]*MigrationWorker__InvocationId:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' \
+        "$compose_file" | tail -n 1)"
+      [ -z "$candidate_invocation" ] || \
+        migration_invocation="$candidate_invocation"
     done
     case "$command" in
       version|config|pull|start)
@@ -104,7 +119,7 @@ case "${1:-}" in
           exit 29
         fi
         printf 'aicopilot_catalog_fence_preflight=success invocation_id=%s\n' \
-          "${AICOPILOT_MIGRATION_INVOCATION_ID:-unbound}"
+          "$migration_invocation"
         exit 0
         ;;
       up)
@@ -113,8 +128,8 @@ case "${1:-}" in
           exit 23
         fi
         if [[ "$*" == *aicopilot-migration* ]] &&
-           [ -n "${AICOPILOT_MIGRATION_INVOCATION_ID:-}" ]; then
-          printf '%s\n' "$AICOPILOT_MIGRATION_INVOCATION_ID" > \
+           [ "$migration_invocation" != unbound ]; then
+          printf '%s\n' "$migration_invocation" > \
             "${FAKE_MIGRATION_INVOCATION_FILE:?}"
         fi
         exit 0
@@ -160,6 +175,8 @@ QDRANT_IMAGE=qdrant:old
 EOF
 chmod 600 "$SERVER_DIR/.env"
 printf 'services: {}\n' > "$SERVER_DIR/docker-compose.yaml"
+grep -Fq 'MigrationWorker__InvocationId' "$SERVER_DIR/docker-compose.yaml" &&
+  fail 'legacy compose fixture unexpectedly declares the migration invocation'
 
 cat > "$SERVER_DIR/releases/current-images.env" <<'EOF'
 AICOPILOT_HTTPAPI_IMAGE=registry.test/enterprise-ai/aicopilot-httpapi:old
@@ -298,6 +315,10 @@ grep -Fq "INVOCATION_ID=$success_invocation" "$SERVER_DIR/releases/routine-curre
   fail 'valid migration proof did not commit the durable migration state'
 [ ! -f "$SERVER_DIR/releases/routine-history/$success_invocation.migration-started.env" ] || \
   fail 'valid migration proof left an unresolved migration-started marker'
+if find "$SERVER_DIR/releases/routine-incoming" -maxdepth 1 -type f \
+    -name '.migration-invocation-override.*.yaml' -print -quit | grep -q .; then
+  fail 'request-scoped migration invocation override was not removed'
+fi
 
 sed 's/^STATUS=migration-committed$/STATUS=migration-started/' \
   "$SERVER_DIR/releases/routine-history/$success_invocation.migration-committed.env" > \
