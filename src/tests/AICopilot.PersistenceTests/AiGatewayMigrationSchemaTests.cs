@@ -136,6 +136,29 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         toolColumns.Should().NotContainKeys("is_visible_to_planner", "approval_policy");
     }
 
+    [Theory]
+    [InlineData("CREATE SEQUENCE aigateway.leftover_sequence;")]
+    [InlineData("CREATE VIEW aigateway.leftover_view AS SELECT 1 AS value;")]
+    [InlineData("CREATE FUNCTION aigateway.leftover_function() RETURNS integer LANGUAGE sql AS 'SELECT 1';")]
+    [InlineData("CREATE TYPE aigateway.leftover_type AS ENUM ('legacy');")]
+    public async Task NonEmptySchemaWithoutHistory_ShouldNeverBeClassifiedAsFresh(
+        string leftoverObjectSql)
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_nonempty_without_history");
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await ExecuteNonQueryAsync(connection, "CREATE SCHEMA aigateway;");
+        await ExecuteNonQueryAsync(connection, leftoverObjectSql);
+
+        var inspect = async () => await AiGatewayProductionUpgradePreflight.InspectAsync(
+            database.ConnectionString);
+
+        await inspect.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*rejected an unknown schema/history state*");
+    }
+
     [Fact]
     public async Task FrozenProductionDatabase_ShouldUpgradeAndPreserveAuthoritativeRecords()
     {
@@ -442,6 +465,15 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         }
 
         return result;
+    }
+
+    private static async Task ExecuteNonQueryAsync(
+        NpgsqlConnection connection,
+        string sql)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
     }
 
     private static async Task<long> ReadInt64Async(

@@ -396,6 +396,11 @@ cat > "$WORKER_PLAN_FILE" <<EOF
 {"schemaVersion":1,"runId":"deployment-behavior-worker","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["migration","dataworker"],"all":false,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
 EOF
 WORKER_PLAN_DIGEST="$(sha256_file "$WORKER_PLAN_FILE")"
+FULL_WORKER_PLAN_FILE="$TEST_ROOT/workspace-worker-full-plan.json"
+cat > "$FULL_WORKER_PLAN_FILE" <<EOF
+{"schemaVersion":1,"runId":"deployment-behavior-worker-full","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["httpapi","migration","dataworker","ragworker","web"],"all":false,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
+EOF
+FULL_WORKER_PLAN_DIGEST="$(sha256_file "$FULL_WORKER_PLAN_FILE")"
 ALL_PLAN_FILE="$TEST_ROOT/workspace-all-plan.json"
 cat > "$ALL_PLAN_FILE" <<EOF
 {"schemaVersion":1,"runId":"deployment-behavior-all","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["httpapi","migration","dataworker","ragworker","web"],"all":true,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
@@ -1011,17 +1016,33 @@ assert_eq 79 "$orphan_retry_status" "orphan transaction retry gate exit code"
 assert_file_contains "$TEST_ROOT/orphan-transaction-retry.log" "unresolved transaction backup"
 rm -rf "$orphan_transaction" "$REMOTE_DIR/.locks/release.lock.d" "$REMOTE_DIR/.support-backups"
 
-printf 'TEST abnormal worker process state blocks commit and records migration partial state\n'
-TEST_SERVICES='migration,dataworker' \
-TEST_WORKSPACE_PLAN_FILE="$WORKER_PLAN_FILE" \
-TEST_WORKSPACE_PLAN_DIGEST="$WORKER_PLAN_DIGEST" \
-TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker \
-  run_local_release > "$TEST_ROOT/worker-baseline.log" 2>&1
+printf 'TEST partial migration service group is rejected before destructive migration\n'
 set +e
 TEST_SERVICES='migration,dataworker' \
 TEST_WORKSPACE_PLAN_FILE="$WORKER_PLAN_FILE" \
 TEST_WORKSPACE_PLAN_DIGEST="$WORKER_PLAN_DIGEST" \
 TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker \
+  run_local_release > "$TEST_ROOT/worker-partial-group.log" 2>&1
+worker_partial_status=$?
+set -e
+assert_eq 64 "$worker_partial_status" "partial migration runtime group rejection"
+assert_file_contains "$TEST_ROOT/worker-partial-group.log" "migration requires the complete runtime group"
+[ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || \
+  fail "partial migration group created unsafe-partial evidence before migration"
+
+printf 'TEST abnormal worker process state blocks commit and records migration partial state\n'
+: > "$DOCKER_LOG"
+TEST_SERVICES='httpapi,migration,dataworker,ragworker,web' \
+TEST_WORKSPACE_PLAN_FILE="$FULL_WORKER_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$FULL_WORKER_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker-full \
+  run_local_release > "$TEST_ROOT/worker-baseline.log" 2>&1
+assert_file_contains "$DOCKER_LOG" "stop aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui"
+set +e
+TEST_SERVICES='httpapi,migration,dataworker,ragworker,web' \
+TEST_WORKSPACE_PLAN_FILE="$FULL_WORKER_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$FULL_WORKER_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker-full \
 FAKE_UNHEALTHY_SERVICE=aicopilot-dataworker \
   run_local_release > "$TEST_ROOT/worker-abnormal.log" 2>&1
 worker_abnormal_status=$?

@@ -483,6 +483,12 @@ if [ "$TARGET" = aicopilot ] && \
    [[ "$SELECTED" != *" migration "* ]]; then
   fail "AICopilot backend runtime releases must include migration" 65
 fi
+if [ "$TARGET" = aicopilot ] && [[ "$SELECTED" == *" migration "* ]]; then
+  for required_runtime in httpapi dataworker ragworker web; do
+    [[ "$SELECTED" == *" $required_runtime "* ]] || \
+      fail "AICopilot migration requires the complete runtime group: httpapi,migration,dataworker,ragworker,web" 65
+  done
+fi
 
 mkdir -p "$RELEASES_DIR" "$HISTORY_DIR" "$INCOMING_DIR" "$LOCK_DIR" "$DEPLOY_DIR/backups/postgres"
 exec 9> "$LOCK_FILE"
@@ -644,7 +650,7 @@ if [[ "$SELECTED" == *" migration "* ]]; then
   printf '%s  %s\n' "$BACKUP_SHA256" "$(basename "$BACKUP_FILE")" > "$BACKUP_FILE.sha256"
   chmod 600 "$BACKUP_FILE.sha256"
 
-  if [ "$TARGET" = aicopilot ] && [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ]; then
+  if [ "$TARGET" = aicopilot ]; then
     printf 'runner_phase=runtime-quiesce target=%s services=%s\n' \
       "$TARGET_NAME" "${RUNTIME_COMPOSE_SERVICES[*]}"
     ROLLOUT_STARTED=1

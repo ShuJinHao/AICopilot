@@ -170,6 +170,15 @@ backup_database_before_migration() {
   printf 'AICopilot migration database backup verified: sha256=%s\n' "$DATABASE_BACKUP_SHA256"
 }
 
+quiesce_schema_dependent_runtimes() {
+  printf 'AICopilot migration runtime quiesce: httpapi dataworker ragworker webui\n'
+  compose stop \
+    aicopilot-httpapi \
+    aicopilot-dataworker \
+    aicopilot-ragworker \
+    aicopilot-webui
+}
+
 ensure_release_tag() {
   local release_tag="$1"
   if [[ ! "$release_tag" =~ ^sha-[0-9a-f]+$ ]]; then
@@ -2013,6 +2022,21 @@ if [ "$CHECK_CURRENT_ONLY" != true ] &&
   printf 'Use --services migration,httpapi,dataworker,ragworker as applicable. Web-only deploys may omit migration.\n' >&2
   exit 64
 fi
+if [ "$CHECK_CURRENT_ONLY" != true ] && [ "$RUN_MIGRATION" = true ]; then
+  for required_runtime in \
+    aicopilot-httpapi \
+    aicopilot-dataworker \
+    aicopilot-ragworker \
+    aicopilot-webui; do
+    case " $SELECTED_SERVICE_NAMES " in
+      *" $required_runtime "*) ;;
+      *)
+        printf 'AICopilot migration requires the complete runtime group: httpapi,migration,dataworker,ragworker,web.\n' >&2
+        exit 64
+        ;;
+    esac
+  done
+fi
 
 # All candidate identity checks happen before lock adoption, release-state writes,
 # .env changes, image pulls, compose updates, or any other container mutation.
@@ -2150,6 +2174,7 @@ if [ -z "$REQUESTED_SERVICES" ]; then
   compose up -d --remove-orphans postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
   backup_database_before_migration
+  quiesce_schema_dependent_runtimes
   MIGRATION_EXECUTED=true
   run_migration_and_verify
   check_model_secret_migration_preflight
@@ -2161,6 +2186,7 @@ else
   wait_for_compose_service_healthy postgres 180
   if [ "$RUN_MIGRATION" = "true" ]; then
     backup_database_before_migration
+    quiesce_schema_dependent_runtimes
     MIGRATION_EXECUTED=true
     run_migration_and_verify
     check_model_secret_migration_preflight

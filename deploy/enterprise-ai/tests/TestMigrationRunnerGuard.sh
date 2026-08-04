@@ -140,6 +140,7 @@ make_request() {
   local invocation_id="$1"
   local sha="$2"
   local digest_character="$3"
+  local services="${4:-httpapi,migration,dataworker,ragworker,web}"
   local body="$TEST_ROOT/$invocation_id.body"
   local request="$TEST_ROOT/$invocation_id.env"
   local image_digest
@@ -150,7 +151,7 @@ make_request() {
     printf 'INVOCATION_ID=%s\n' "$invocation_id"
     printf 'GIT_SHA=%s\n' "$sha"
     printf 'RELEASE_TAG=sha-%s\n' "$sha"
-    printf 'SERVICES=httpapi,migration,dataworker,ragworker,web\n'
+    printf 'SERVICES=%s\n' "$services"
     printf 'AICOPILOT_HTTPAPI_IMAGE=registry.test/enterprise-ai/aicopilot-httpapi@sha256:%s\n' "$image_digest"
     printf 'AICOPILOT_MIGRATION_IMAGE=registry.test/enterprise-ai/aicopilot-migration@sha256:%s\n' "$image_digest"
     printf 'AICOPILOT_DATAWORKER_IMAGE=registry.test/enterprise-ai/aicopilot-dataworker@sha256:%s\n' "$image_digest"
@@ -173,6 +174,24 @@ run_request() {
       --target aicopilot --expected-user "$(id -un)" --request-stdin < "$request"
 }
 
+: > "$DOCKER_LOG"
+partial_invocation='migration-guard-partial-group'
+partial_request="$(make_request "$partial_invocation" 5555555555555555555555555555555555555555 e 'migration,dataworker')"
+set +e
+FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+  run_request "$partial_request" > "$TEST_ROOT/partial-group.log" 2>&1
+partial_status=$?
+set -e
+[ "$partial_status" -eq 65 ] || \
+  fail 'partial AICopilot migration group was not rejected before mutation'
+grep -Fq 'migration requires the complete runtime group' "$TEST_ROOT/partial-group.log" || \
+  fail 'partial AICopilot migration rejection did not identify the runtime closure'
+grep -Eq 'pull| stop | up | start | exec ' "$DOCKER_LOG" && \
+  fail 'partial AICopilot migration request mutated containers'
+[ ! -f "$SERVER_DIR/releases/routine-history/$partial_invocation.migration-started.env" ] || \
+  fail 'partial AICopilot migration request wrote a started marker'
+
+: > "$DOCKER_LOG"
 success_invocation='migration-guard-success'
 success_request="$(make_request "$success_invocation" 1111111111111111111111111111111111111111 a)"
 FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 run_request "$success_request"

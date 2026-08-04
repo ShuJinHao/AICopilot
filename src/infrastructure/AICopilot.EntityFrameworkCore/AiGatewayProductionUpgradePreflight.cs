@@ -35,18 +35,30 @@ public static class AiGatewayProductionUpgradePreflight
             connection,
             "SELECT to_regclass('aigateway.\"__EFMigrationsHistory_AiGateway\"') IS NOT NULL;",
             cancellationToken);
-        var businessTableCount = await ReadInt32Async(
+        var schemaObjectCount = await ReadInt32Async(
             connection,
             """
-            SELECT count(*)::integer
-            FROM information_schema.tables
-            WHERE table_schema = 'aigateway'
-              AND table_type = 'BASE TABLE'
-              AND table_name <> '__EFMigrationsHistory_AiGateway';
+            SELECT (
+                (SELECT count(*)
+                 FROM pg_class AS object_class
+                 JOIN pg_namespace AS object_namespace
+                   ON object_namespace.oid = object_class.relnamespace
+                 WHERE object_namespace.nspname = 'aigateway') +
+                (SELECT count(*)
+                 FROM pg_proc AS object_function
+                 JOIN pg_namespace AS object_namespace
+                   ON object_namespace.oid = object_function.pronamespace
+                 WHERE object_namespace.nspname = 'aigateway') +
+                (SELECT count(*)
+                 FROM pg_type AS object_type
+                 JOIN pg_namespace AS object_namespace
+                   ON object_namespace.oid = object_type.typnamespace
+                 WHERE object_namespace.nspname = 'aigateway')
+            )::integer;
             """,
             cancellationToken);
 
-        if (!historyExists && businessTableCount == 0)
+        if (!historyExists && schemaObjectCount == 0)
         {
             return new AiGatewayProductionUpgradeInspection(
                 AiGatewayProductionUpgradeState.Fresh,
