@@ -155,7 +155,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             AiGatewayProductionUpgradeContract.ExpectedProductionHistorySha256,
             AiGatewayProductionUpgradeContract.ProductionMigrationIds.Count,
             AiGatewayProductionUpgradeContract.ExpectedProductionSchemaSha256,
-            562));
+            596));
 
         await using var connection = new NpgsqlConnection(database.ConnectionString);
         await connection.OpenAsync();
@@ -311,6 +311,52 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         var history = await QueryMigrationIdsAsync(connection);
         history.Should().Equal(AiGatewayProductionUpgradeContract.ProductionMigrationIds);
         history.Should().NotContain(AiGatewayProductionUpgradeContract.CurrentUpgradeMigrationId);
+    }
+
+    public static TheoryData<string> StructuralDriftCommands => new()
+    {
+        """
+        DROP INDEX aigateway.ux_model_quota_reservations_correlation;
+        CREATE INDEX ux_model_quota_reservations_correlation
+            ON aigateway.model_quota_reservations (correlation_hash);
+        """,
+        """
+        ALTER TABLE aigateway.model_quota_reservations
+            DROP CONSTRAINT "PK_model_quota_reservations";
+        ALTER TABLE aigateway.model_quota_reservations
+            ADD CONSTRAINT "PK_model_quota_reservations" PRIMARY KEY (correlation_hash);
+        """
+    };
+
+    [Theory]
+    [MemberData(nameof(StructuralDriftCommands))]
+    public async Task ProductionHistoryWithSameNamedStructuralDrift_ShouldFailPreflight(
+        string driftSql)
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_structural_drift");
+        await using (var baselineContext = CreateDbContext(database.ConnectionString))
+        {
+            await baselineContext.Database.MigrateAsync(
+                AiGatewayProductionUpgradeContract.LastProductionMigrationId);
+        }
+
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using (var driftCommand = connection.CreateCommand())
+        {
+            driftCommand.CommandText = driftSql;
+            await driftCommand.ExecuteNonQueryAsync();
+        }
+
+        var action = () => AiGatewayProductionUpgradePreflight.InspectAsync(
+            database.ConnectionString);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*unknown schema/history state*Do not infer or insert migration history*");
+        var history = await QueryMigrationIdsAsync(connection);
+        history.Should().Equal(AiGatewayProductionUpgradeContract.ProductionMigrationIds);
     }
 
     private static AiGatewayDbContext CreateDbContext(string connectionString)

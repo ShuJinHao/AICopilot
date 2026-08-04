@@ -79,17 +79,39 @@ public static class AiGatewayProductionUpgradePreflight
             SELECT 'column|' || table_name || '|' || lpad(ordinal_position::text, 4, '0') || '|' ||
                    column_name || '|' || data_type || '|' || udt_name || '|' || is_nullable || '|' ||
                    coalesce(character_maximum_length::text, '') || '|' ||
-                   coalesce(numeric_precision::text, '') || '|' || coalesce(numeric_scale::text, '')
+                   coalesce(numeric_precision::text, '') || '|' || coalesce(numeric_scale::text, '') || '|' ||
+                   coalesce(column_default, '') || '|' || coalesce(collation_name, '') || '|' ||
+                   is_identity || '|' || coalesce(identity_generation, '') || '|' ||
+                   is_generated || '|' || coalesce(generation_expression, '')
             FROM information_schema.columns
             WHERE table_schema = 'aigateway'
               AND table_name <> '__EFMigrationsHistory_AiGateway'
             ORDER BY table_name, ordinal_position;
 
-            SELECT 'index|' || tablename || '|' || indexname
-            FROM pg_indexes
-            WHERE schemaname = 'aigateway'
-              AND tablename <> '__EFMigrationsHistory_AiGateway'
-            ORDER BY tablename, indexname;
+            SELECT 'index|' || table_class.relname || '|' || index_class.relname || '|' ||
+                   index_state.indisunique::text || '|' || index_state.indisprimary::text || '|' ||
+                   index_state.indisexclusion::text || '|' || index_state.indimmediate::text || '|' ||
+                   index_state.indisclustered::text || '|' || index_state.indisvalid::text || '|' ||
+                   index_state.indisready::text || '|' || index_state.indislive::text || '|' ||
+                   index_state.indisreplident::text || '|' || pg_get_indexdef(index_class.oid)
+            FROM pg_index AS index_state
+            JOIN pg_class AS table_class ON table_class.oid = index_state.indrelid
+            JOIN pg_class AS index_class ON index_class.oid = index_state.indexrelid
+            JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
+            WHERE table_namespace.nspname = 'aigateway'
+              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
+            ORDER BY table_class.relname, index_class.relname;
+
+            SELECT 'constraint|' || table_class.relname || '|' || constraint_state.conname || '|' ||
+                   constraint_state.contype::text || '|' || constraint_state.condeferrable::text || '|' ||
+                   constraint_state.condeferred::text || '|' || constraint_state.convalidated::text || '|' ||
+                   pg_get_constraintdef(constraint_state.oid, true)
+            FROM pg_constraint AS constraint_state
+            JOIN pg_class AS table_class ON table_class.oid = constraint_state.conrelid
+            JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
+            WHERE table_namespace.nspname = 'aigateway'
+              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
+            ORDER BY table_class.relname, constraint_state.conname;
 
             SELECT 'sequence|' || sequence_name || '|' || data_type || '|' ||
                    start_value || '|' || minimum_value || '|' || maximum_value || '|' ||
