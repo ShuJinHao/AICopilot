@@ -24,6 +24,11 @@ mkdir -p "$BIN_DIR" "$SERVER_DIR/runner" "$SERVER_DIR/releases/routine-history" 
   "$SERVER_DIR/releases/routine-incoming" "$SERVER_DIR/.locks" "$SERVER_DIR/backups/postgres"
 cp "$RUNNER_SOURCE" "$SERVER_DIR/runner/iiot-release-runner.sh"
 chmod 700 "$SERVER_DIR/runner/iiot-release-runner.sh"
+sed -n '/^commit_migration_state()/,/^}/p' "$RUNNER_SOURCE" | \
+  grep -Fq 'MIGRATION_STARTED=0' || \
+  fail 'committed migration state does not clear the in-memory partial flag'
+grep -Fq 'migration_is_unresolved' "$RUNNER_SOURCE" || \
+  fail 'runner exit handling does not derive partial state from durable markers'
 
 cat > "$BIN_DIR/docker" <<'EOF'
 #!/usr/bin/env bash

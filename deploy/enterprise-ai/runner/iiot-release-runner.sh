@@ -187,6 +187,15 @@ migration_committed_matches_started() {
   done
 }
 
+migration_is_unresolved() {
+  local started committed
+  [ "$TARGET" = aicopilot ] && [ "$MIGRATION_STARTED" -eq 1 ] || return 1
+  started="$HISTORY_DIR/${INVOCATION_ID}.migration-started.env"
+  committed="$HISTORY_DIR/${INVOCATION_ID}.migration-committed.env"
+  migration_committed_matches_started "$started" "$committed" && return 1
+  return 0
+}
+
 atomic_copy() {
   local source="$1"
   local destination="$2"
@@ -238,6 +247,7 @@ commit_migration_state() {
   } > "$temp"
   chmod 600 "$temp"
   mv -f "$temp" "$committed"
+  MIGRATION_STARTED=0
   rm -f "$MIGRATION_STATE_FILE"
   MIGRATION_STATE_FILE="$committed"
 }
@@ -364,7 +374,7 @@ write_failure_state() {
   local failure_status=failed
   local resume_allowed=true
   if [ "$TARGET" = aicopilot ] && \
-     { [ "$MIGRATION_STARTED" -eq 1 ] || [ "$runner_status" -eq 86 ]; }; then
+     { migration_is_unresolved || [ "$runner_status" -eq 86 ]; }; then
     failure_status=blocked-partial
     resume_allowed=false
   fi
@@ -396,7 +406,7 @@ on_exit() {
   local rollback_status=not-required
   trap - EXIT HUP INT TERM
   set +e
-  if [ "$status" -ne 0 ] && [ "$TARGET" = aicopilot ] && [ "$MIGRATION_STARTED" -eq 1 ]; then
+  if [ "$status" -ne 0 ] && migration_is_unresolved; then
     runner_status=86
     rollback_status=blocked-migration-started
   elif [ "$status" -ne 0 ] && [ "$ROLLBACK_REQUIRED" -eq 1 ] && [ "$ROLLOUT_STARTED" -eq 1 ]; then
