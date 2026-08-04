@@ -173,6 +173,29 @@ read_env_value() {
   printf '%s\n' "$value"
 }
 
+migration_committed_matches_started() {
+  local started="$1"
+  local committed="$2"
+  local key
+  [ -f "$started" ] && [ -f "$committed" ] || return 1
+  [ "$(read_env_value "$started" STATUS || true)" = migration-started ] || return 1
+  [ "$(read_env_value "$committed" STATUS || true)" = migration-committed ] || return 1
+  for key in RUNNER_PROTOCOL TARGET INVOCATION_ID GIT_SHA REQUEST_DIGEST \
+    DATABASE_BACKUP DATABASE_BACKUP_SHA256 RESUME_ALLOWED; do
+    [ "$(read_env_value "$started" "$key" || true)" = \
+      "$(read_env_value "$committed" "$key" || true)" ] || return 1
+  done
+}
+
+migration_is_unresolved() {
+  local started committed
+  [ "$TARGET" = aicopilot ] && [ "$MIGRATION_STARTED" -eq 1 ] || return 1
+  started="$HISTORY_DIR/${INVOCATION_ID}.migration-started.env"
+  committed="$HISTORY_DIR/${INVOCATION_ID}.migration-committed.env"
+  migration_committed_matches_started "$started" "$committed" && return 1
+  return 0
+}
+
 atomic_copy() {
   local source="$1"
   local destination="$2"
@@ -181,6 +204,52 @@ atomic_copy() {
   cp "$source" "$temp"
   chmod 600 "$temp"
   mv -f "$temp" "$destination"
+}
+
+write_migration_started_state() {
+  local temp
+  [ "$TARGET" = aicopilot ] || return 0
+  MIGRATION_STATE_FILE="$HISTORY_DIR/${INVOCATION_ID}.migration-started.env"
+  temp="$(mktemp "$HISTORY_DIR/.migration-started.XXXXXX")"
+  {
+    printf 'RUNNER_PROTOCOL=%s\n' "$RUNNER_PROTOCOL_VERSION"
+    printf 'TARGET=%s\n' "$TARGET_NAME"
+    printf 'INVOCATION_ID=%s\n' "$INVOCATION_ID"
+    printf 'GIT_SHA=%s\n' "$GIT_SHA"
+    printf 'REQUEST_DIGEST=%s\n' "$REQUEST_DIGEST"
+    printf 'DATABASE_BACKUP=%s\n' "$BACKUP_FILE"
+    printf 'DATABASE_BACKUP_SHA256=%s\n' "$BACKUP_SHA256"
+    printf 'STATUS=migration-started\n'
+    printf 'RESUME_ALLOWED=false\n'
+    printf 'STARTED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$temp"
+  chmod 600 "$temp"
+  mv -f "$temp" "$MIGRATION_STATE_FILE"
+  MIGRATION_STARTED=1
+}
+
+commit_migration_state() {
+  local committed temp
+  [ "$TARGET" = aicopilot ] && [ "$MIGRATION_STARTED" -eq 1 ] || return 0
+  committed="$HISTORY_DIR/${INVOCATION_ID}.migration-committed.env"
+  temp="$(mktemp "$HISTORY_DIR/.migration-committed.XXXXXX")"
+  {
+    printf 'RUNNER_PROTOCOL=%s\n' "$RUNNER_PROTOCOL_VERSION"
+    printf 'TARGET=%s\n' "$TARGET_NAME"
+    printf 'INVOCATION_ID=%s\n' "$INVOCATION_ID"
+    printf 'GIT_SHA=%s\n' "$GIT_SHA"
+    printf 'REQUEST_DIGEST=%s\n' "$REQUEST_DIGEST"
+    printf 'DATABASE_BACKUP=%s\n' "$BACKUP_FILE"
+    printf 'DATABASE_BACKUP_SHA256=%s\n' "$BACKUP_SHA256"
+    printf 'STATUS=migration-committed\n'
+    printf 'RESUME_ALLOWED=false\n'
+    printf 'COMMITTED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$temp"
+  chmod 600 "$temp"
+  mv -f "$temp" "$committed"
+  MIGRATION_STARTED=0
+  rm -f "$MIGRATION_STATE_FILE"
+  MIGRATION_STATE_FILE="$committed"
 }
 
 validate_general_image_ref() {
@@ -220,11 +289,48 @@ doctor_common() {
 compose_with_images() {
   local images_file="$1"
   shift
-  docker compose --env-file "$ENV_FILE" --env-file "$images_file" -f "$COMPOSE_FILE" "$@"
+  if [ "$TARGET" = aicopilot ]; then
+    AICOPILOT_MIGRATION_INVOCATION_ID="${INVOCATION_ID:-unbound}" \
+      docker compose --env-file "$ENV_FILE" --env-file "$images_file" -f "$COMPOSE_FILE" "$@"
+  else
+    docker compose --env-file "$ENV_FILE" --env-file "$images_file" -f "$COMPOSE_FILE" "$@"
+  fi
 }
 
 compose_without_images() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
+verify_aicopilot_migration_completion() {
+  local images_file="$1"
+  local container exit_code logs expected_marker
+  [ "$TARGET" = aicopilot ] || return 0
+
+  container="$(compose_with_images "$images_file" ps -a -q "$MIGRATION_SERVICE" 2>/dev/null || true)"
+  [[ "$container" =~ ^[A-Za-z0-9._-]+$ ]] || \
+    fail "migration container identity is missing or ambiguous" 70
+  exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || true)"
+  [ "$exit_code" = 0 ] || fail "migration container exit code is not zero: ${exit_code:-unknown}" 70
+  logs="$(docker logs "$container" 2>&1)" || fail "migration container logs are unreadable" 70
+  expected_marker="aicopilot_migration_result=success invocation_id=$INVOCATION_ID"
+  grep -Fqx "$expected_marker" <<< "$logs" || \
+    fail "migration success marker is missing for invocation $INVOCATION_ID" 70
+  printf 'runner_migration=verified container=%s exit_code=0 invocation_id=%s\n' \
+    "$container" "$INVOCATION_ID"
+}
+
+verify_aicopilot_catalog_fence_preflight() {
+  local output expected_marker
+  [ "$TARGET" = aicopilot ] || return 0
+  expected_marker="aicopilot_catalog_fence_preflight=success invocation_id=$INVOCATION_ID"
+  if ! output="$(compose_with_images "$CANDIDATE_IMAGES_FILE" run --rm --no-deps \
+      -e MigrationWorker__CatalogFencePreflightOnly=true \
+      "$MIGRATION_SERVICE" 2>&1)"; then
+    fail "AiGateway catalog-fence preflight failed before runtime quiesce" 77
+  fi
+  grep -Fqx "$expected_marker" <<< "$output" || \
+    fail "AiGateway catalog-fence preflight success marker is missing" 77
+  printf 'runner_migration_preflight=verified invocation_id=%s\n' "$INVOCATION_ID"
 }
 
 if [ "$MODE" = doctor ]; then
@@ -253,6 +359,11 @@ PREVIOUS_IMAGES_FILE="$(mktemp "$INCOMING_DIR/.previous-images.XXXXXX")"
 FAILURE_STATE_FILE=""
 ROLLOUT_STARTED=0
 ROLLBACK_REQUIRED=0
+MIGRATION_STARTED=0
+MIGRATION_COMPLETED=0
+MIGRATION_STATE_FILE=""
+BACKUP_FILE=none
+BACKUP_SHA256=none
 RUNTIME_COMPOSE_SERVICES=()
 REQUEST_PROTOCOL=""
 REQUEST_TARGET=""
@@ -261,6 +372,7 @@ GIT_SHA=""
 RELEASE_TAG=""
 SERVICES=""
 REQUEST_DIGEST=""
+RUNNER_SHA256=""
 REQUEST_SEEN=" "
 SELECTED=" "
 
@@ -269,9 +381,17 @@ cleanup_files() {
 }
 
 write_failure_state() {
-  local status="$1"
-  local rollback_status="$2"
+  local original_status="$1"
+  local runner_status="$2"
+  local rollback_status="$3"
   local invocation="${INVOCATION_ID:-unknown}"
+  local failure_status=failed
+  local resume_allowed=true
+  if [ "$TARGET" = aicopilot ] && \
+     { migration_is_unresolved || [ "$runner_status" -eq 86 ]; }; then
+    failure_status=blocked-partial
+    resume_allowed=false
+  fi
   FAILURE_STATE_FILE="$HISTORY_DIR/${invocation}.failed.env"
   {
     printf 'RUNNER_PROTOCOL=%s\n' "$RUNNER_PROTOCOL_VERSION"
@@ -280,9 +400,15 @@ write_failure_state() {
     printf 'GIT_SHA=%s\n' "${GIT_SHA:-unknown}"
     printf 'SERVICES=%s\n' "${SERVICES:-unknown}"
     printf 'REQUEST_DIGEST=%s\n' "${REQUEST_DIGEST:-unknown}"
-    printf 'STATUS=failed\n'
-    printf 'EXIT_CODE=%s\n' "$status"
+    printf 'STATUS=%s\n' "$failure_status"
+    printf 'EXIT_CODE=%s\n' "$original_status"
+    printf 'RUNNER_EXIT_CODE=%s\n' "$runner_status"
     printf 'ROLLBACK_STATUS=%s\n' "$rollback_status"
+    printf 'RESUME_ALLOWED=%s\n' "$resume_allowed"
+    printf 'MIGRATION_STARTED=%s\n' "$MIGRATION_STARTED"
+    printf 'MIGRATION_COMPLETED=%s\n' "$MIGRATION_COMPLETED"
+    printf 'DATABASE_BACKUP=%s\n' "${BACKUP_FILE:-none}"
+    printf 'DATABASE_BACKUP_SHA256=%s\n' "${BACKUP_SHA256:-none}"
     printf 'FINISHED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$FAILURE_STATE_FILE"
   chmod 600 "$FAILURE_STATE_FILE"
@@ -290,26 +416,37 @@ write_failure_state() {
 
 on_exit() {
   local status=$?
+  local runner_status=$status
   local rollback_status=not-required
   trap - EXIT HUP INT TERM
   set +e
-  if [ "$status" -ne 0 ] && [ "$ROLLBACK_REQUIRED" -eq 1 ] && [ "$ROLLOUT_STARTED" -eq 1 ]; then
+  if [ "$status" -ne 0 ] && migration_is_unresolved; then
+    runner_status=86
+    rollback_status=blocked-migration-started
+  elif [ "$status" -ne 0 ] && [ "$ROLLBACK_REQUIRED" -eq 1 ] && [ "$ROLLOUT_STARTED" -eq 1 ]; then
     rollback_status=failed
     if [ -s "$PREVIOUS_IMAGES_FILE" ]; then
       printf 'runner_phase=rollback target=%s\n' "$TARGET_NAME" >&2
       if [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ] && \
          compose_with_images "$PREVIOUS_IMAGES_FILE" up -d --no-deps "${RUNTIME_COMPOSE_SERVICES[@]}"; then
-        rollback_status=completed
+        if verify_runtime_recovery "$PREVIOUS_IMAGES_FILE"; then
+          rollback_status=completed
+        else
+          rollback_status=failed-unverified
+          [ "$TARGET" != aicopilot ] || runner_status=86
+        fi
+      else
+        [ "$TARGET" != aicopilot ] || runner_status=86
       fi
     fi
   fi
   if [ "$status" -ne 0 ]; then
-    write_failure_state "$status" "$rollback_status"
+    write_failure_state "$status" "$runner_status" "$rollback_status"
     printf 'runner_result=failed target=%s exit_code=%s rollback=%s evidence=%s\n' \
-      "$TARGET_NAME" "$status" "$rollback_status" "$FAILURE_STATE_FILE" >&2
+      "$TARGET_NAME" "$runner_status" "$rollback_status" "$FAILURE_STATE_FILE" >&2
   fi
   cleanup_files
-  exit "$status"
+  exit "$runner_status"
 }
 trap on_exit EXIT
 trap 'exit 129' HUP
@@ -322,7 +459,7 @@ chmod 600 "$REQUEST_FILE"
 
 allowed_request_key() {
   case "$1" in
-    PROTOCOL|TARGET|INVOCATION_ID|GIT_SHA|RELEASE_TAG|SERVICES|REQUEST_DIGEST|\
+    PROTOCOL|TARGET|INVOCATION_ID|GIT_SHA|RELEASE_TAG|SERVICES|RUNNER_SHA256|REQUEST_DIGEST|\
     IIOT_HTTPAPI_IMAGE|IIOT_GATEWAY_IMAGE|IIOT_DATAWORKER_IMAGE|IIOT_MIGRATION_IMAGE|IIOT_WEB_IMAGE|\
     AICOPILOT_HTTPAPI_IMAGE|AICOPILOT_MIGRATION_IMAGE|AICOPILOT_DATAWORKER_IMAGE|AICOPILOT_RAGWORKER_IMAGE|AICOPILOT_WEBUI_IMAGE)
       return 0
@@ -352,6 +489,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     GIT_SHA) GIT_SHA="$value" ;;
     RELEASE_TAG) RELEASE_TAG="$value" ;;
     SERVICES) SERVICES="$value" ;;
+    RUNNER_SHA256) RUNNER_SHA256="$value" ;;
     REQUEST_DIGEST) REQUEST_DIGEST="$value" ;;
     *) printf -v "$key" '%s' "$value" ;;
   esac
@@ -368,6 +506,16 @@ done < "$REQUEST_FILE"
 [[ "$REQUEST_DIGEST" =~ ^[0-9a-f]{64}$ ]] || fail "invalid request digest" 65
 actual_request_digest="$(sha256sum "$REQUEST_BODY_FILE" | awk '{print $1}')"
 [ "$actual_request_digest" = "$REQUEST_DIGEST" ] || fail "request digest mismatch" 65
+if [ "$TARGET" = aicopilot ]; then
+  [[ "$RUNNER_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "AICopilot request is missing the prepared runner SHA-256" 65
+  running_runner_path="${BASH_SOURCE[0]}"
+  if [ -r "/proc/$$/fd/255" ]; then
+    running_runner_path="/proc/$$/fd/255"
+  fi
+  actual_runner_sha256="$(sha256sum "$running_runner_path" | awk '{print $1}')"
+  [ "$actual_runner_sha256" = "$RUNNER_SHA256" ] || \
+    fail "running AICopilot runner bytes do not match the prepared request" 78
+fi
 
 IFS=',' read -r -a REQUESTED_SERVICES <<< "$SERVICES"
 [ "${#REQUESTED_SERVICES[@]}" -gt 0 ] || fail "no services selected" 65
@@ -393,6 +541,12 @@ if [ "$TARGET" = aicopilot ] && \
    [[ "$SELECTED" != *" migration "* ]]; then
   fail "AICopilot backend runtime releases must include migration" 65
 fi
+if [ "$TARGET" = aicopilot ] && [[ "$SELECTED" == *" migration "* ]]; then
+  for required_runtime in httpapi dataworker ragworker web; do
+    [[ "$SELECTED" == *" $required_runtime "* ]] || \
+      fail "AICopilot migration requires the complete runtime group: httpapi,migration,dataworker,ragworker,web" 65
+  done
+fi
 
 mkdir -p "$RELEASES_DIR" "$HISTORY_DIR" "$INCOMING_DIR" "$LOCK_DIR" "$DEPLOY_DIR/backups/postgres"
 exec 9> "$LOCK_FILE"
@@ -400,6 +554,26 @@ flock -n 9 || fail "another routine deployment is active: $LOCK_FILE" 75
 for legacy_lock in "${LEGACY_LOCKS[@]}"; do
   [ ! -d "$legacy_lock" ] || fail "legacy deployment lock is present: $legacy_lock" 75
 done
+unresolved_migration=""
+while IFS= read -r migration_started_file; do
+  [ -n "$migration_started_file" ] || continue
+  migration_committed_file="${migration_started_file%.migration-started.env}.migration-committed.env"
+  if migration_committed_matches_started "$migration_started_file" "$migration_committed_file"; then
+    rm -f "$migration_started_file"
+    printf 'runner_migration_state=reconciled-committed started=%s committed=%s\n' \
+      "$migration_started_file" "$migration_committed_file"
+    continue
+  fi
+  unresolved_migration="$migration_started_file"
+  break
+done < <(find "$HISTORY_DIR" -maxdepth 1 -type f -name '*.migration-started.env' -print 2>/dev/null | LC_ALL=C sort)
+if [ -n "$unresolved_migration" ]; then
+  MIGRATION_STATE_FILE="$unresolved_migration"
+  MIGRATION_STARTED=1
+  BACKUP_FILE="$(read_env_value "$unresolved_migration" DATABASE_BACKUP || printf none)"
+  BACKUP_SHA256="$(read_env_value "$unresolved_migration" DATABASE_BACKUP_SHA256 || printf none)"
+  fail "unresolved AICopilot migration state blocks automatic retry: $unresolved_migration" 86
+fi
 
 : > "$PREVIOUS_IMAGES_FILE"
 : > "$CANDIDATE_IMAGES_FILE"
@@ -423,16 +597,39 @@ done
 chmod 600 "$PREVIOUS_IMAGES_FILE" "$CANDIDATE_IMAGES_FILE"
 compose_with_images "$CANDIDATE_IMAGES_FILE" config --quiet
 
-service_running_and_healthy() {
+runtime_health_snapshot() {
   local images_file="$1"
   local service_name="$2"
-  local container state running health
+  local container state running restarting oom_killed restart_count health
   container="$(compose_with_images "$images_file" ps -q "$service_name" 2>/dev/null || true)"
   [ -n "$container" ] || return 1
-  state="$(docker inspect --format '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || true)"
-  IFS='|' read -r running health <<< "$state"
-  [ "$running" = true ] || return 1
-  [ "$health" = none ] || [ "$health" = healthy ]
+  state="$(docker inspect --format '{{.State.Running}}|{{.State.Restarting}}|{{.State.OOMKilled}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || true)"
+  IFS='|' read -r running restarting oom_killed restart_count health <<< "$state"
+  [ "$running" = true ] && [ "$restarting" = false ] && [ "$oom_killed" = false ] || return 1
+  [[ "$restart_count" =~ ^[0-9]+$ ]] || return 1
+  { [ "$health" = none ] || [ "$health" = healthy ]; } || return 1
+  printf '%s|%s\n' "$container" "$restart_count"
+}
+
+service_running_and_healthy() {
+  runtime_health_snapshot "$1" "$2" >/dev/null
+}
+
+recovery_http_endpoint_stable() {
+  local url="$1"
+  local health_attempts="$2"
+  local health_interval="$3"
+  local attempt first_status second_status
+  for attempt in $(seq 1 "$health_attempts"); do
+    first_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 5 "$url" || true)"
+    if [ "$first_status" = 200 ]; then
+      sleep "$health_interval"
+      second_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 5 "$url" || true)"
+      [ "$second_status" = 200 ] && return 0
+    fi
+    sleep "$health_interval"
+  done
+  return 1
 }
 
 wait_service() {
@@ -453,6 +650,40 @@ wait_service() {
     sleep "$health_interval"
   done
   fail "service did not become running/healthy: $service_name" 70
+}
+
+verify_runtime_recovery() {
+  local images_file="$1"
+  local service_name attempt recovered snapshot_before snapshot_after ai_port
+  local health_attempts="${IIOT_RUNNER_HEALTH_ATTEMPTS:-90}"
+  local health_interval="${IIOT_RUNNER_HEALTH_INTERVAL_SECONDS:-2}"
+  [[ "$health_attempts" =~ ^[1-9][0-9]*$ ]] || return 1
+  [ "$health_attempts" -le 300 ] || return 1
+  [[ "$health_interval" =~ ^[0-9]+$ ]] || return 1
+  [ "$health_interval" -le 30 ] || return 1
+  for service_name in "${RUNTIME_COMPOSE_SERVICES[@]}"; do
+    recovered=0
+    for attempt in $(seq 1 "$health_attempts"); do
+      if snapshot_before="$(runtime_health_snapshot "$images_file" "$service_name")"; then
+        sleep "$health_interval"
+        if snapshot_after="$(runtime_health_snapshot "$images_file" "$service_name")" &&
+           [ "$snapshot_after" = "$snapshot_before" ]; then
+          recovered=1
+          break
+        fi
+      fi
+      sleep "$health_interval"
+    done
+    [ "$recovered" -eq 1 ] || return 1
+  done
+  if [ "$TARGET" = aicopilot ]; then
+    ai_port="$(read_env_value "$ENV_FILE" AICOPILOT_WEB_PORT || true)"
+    recovery_http_endpoint_stable \
+      "http://127.0.0.1:${ai_port:-82}/" "$health_attempts" "$health_interval" || return 1
+    recovery_http_endpoint_stable \
+      "http://127.0.0.1:${ai_port:-82}/api/identity/cloud-oidc/status" \
+      "$health_attempts" "$health_interval" || return 1
+  fi
 }
 
 probe_http() {
@@ -521,33 +752,60 @@ done
 printf 'runner_phase=pull target=%s\n' "$TARGET_NAME"
 compose_with_images "$CANDIDATE_IMAGES_FILE" pull "${SELECTED_COMPOSE_SERVICES[@]}"
 
-BACKUP_FILE=none
+if [ "$TARGET" = aicopilot ] && [[ "$SELECTED" == *" migration "* ]]; then
+  verify_aicopilot_catalog_fence_preflight
+fi
+
 if [[ "$SELECTED" == *" migration "* ]]; then
+  if [ "$TARGET" = aicopilot ]; then
+    printf 'runner_phase=runtime-quiesce target=%s services=%s\n' \
+      "$TARGET_NAME" "${RUNTIME_COMPOSE_SERVICES[*]}"
+    ROLLOUT_STARTED=1
+    ROLLBACK_REQUIRED=1
+    compose_with_images "$PREVIOUS_IMAGES_FILE" stop "${RUNTIME_COMPOSE_SERVICES[@]}"
+  fi
+
   backup_dir="$DEPLOY_DIR/backups/postgres"
   BACKUP_FILE="$backup_dir/${TARGET}-${INVOCATION_ID}.dump"
   backup_temp="${BACKUP_FILE}.partial"
   rm -f "$backup_temp"
   printf 'runner_phase=database-backup target=%s file=%s\n' "$TARGET_NAME" "$BACKUP_FILE"
   if [ "$TARGET" = cloud ]; then
-    compose_with_images "$CANDIDATE_IMAGES_FILE" exec -T postgres \
-      pg_dump -h 127.0.0.1 -Fc -U postgres -d iiot-db > "$backup_temp"
+    if ! compose_with_images "$CANDIDATE_IMAGES_FILE" exec -T postgres \
+      pg_dump -h 127.0.0.1 -Fc -U postgres -d iiot-db > "$backup_temp"; then
+      rm -f "$backup_temp"
+      fail "database backup command failed" 74
+    fi
   else
     postgres_user="$(read_env_value "$ENV_FILE" POSTGRES_USER || true)"
     postgres_db="$(read_env_value "$ENV_FILE" POSTGRES_DB || true)"
     postgres_password="$(read_env_value "$ENV_FILE" POSTGRES_PASSWORD || true)"
     [ -n "$postgres_user" ] && [ -n "$postgres_db" ] && [ -n "$postgres_password" ] || \
       fail "POSTGRES_USER/POSTGRES_DB/POSTGRES_PASSWORD are required for migration backup" 66
-    compose_with_images "$CANDIDATE_IMAGES_FILE" exec -T -e "PGPASSWORD=$postgres_password" postgres \
-      pg_dump -h 127.0.0.1 -Fc -U "$postgres_user" -d "$postgres_db" > "$backup_temp"
+    if ! compose_with_images "$CANDIDATE_IMAGES_FILE" exec -T -e "PGPASSWORD=$postgres_password" postgres \
+      pg_dump -h 127.0.0.1 -Fc -U "$postgres_user" -d "$postgres_db" > "$backup_temp"; then
+      rm -f "$backup_temp"
+      fail "database backup command failed" 74
+    fi
   fi
   [ -s "$backup_temp" ] || fail "database backup is empty" 74
   mv "$backup_temp" "$BACKUP_FILE"
   chmod 600 "$BACKUP_FILE"
-  (cd "$backup_dir" && sha256sum "$(basename "$BACKUP_FILE")" > "$(basename "$BACKUP_FILE").sha256")
+  BACKUP_SHA256="$(sha256sum "$BACKUP_FILE" | awk '{print $1}')"
+  printf '%s  %s\n' "$BACKUP_SHA256" "$(basename "$BACKUP_FILE")" > "$BACKUP_FILE.sha256"
+  chmod 600 "$BACKUP_FILE.sha256"
+
+  write_migration_started_state
 
   printf 'runner_phase=migration target=%s\n' "$TARGET_NAME"
-  compose_with_images "$CANDIDATE_IMAGES_FILE" up --no-deps --abort-on-container-exit \
-    --exit-code-from "$MIGRATION_SERVICE" "$MIGRATION_SERVICE"
+  if ! compose_with_images "$CANDIDATE_IMAGES_FILE" up --no-deps --abort-on-container-exit \
+    --exit-code-from "$MIGRATION_SERVICE" "$MIGRATION_SERVICE"; then
+    fail "compose migration command failed" 70
+  fi
+  verify_aicopilot_migration_completion "$CANDIDATE_IMAGES_FILE"
+  if [ "$TARGET" = aicopilot ]; then
+    MIGRATION_COMPLETED=1
+  fi
 fi
 
 if [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ]; then
@@ -566,6 +824,8 @@ if [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ]; then
        { [[ "$SELECTED" == *" httpapi "* ]] || [[ "$SELECTED" == *" web "* ]]; }; then
     ai_port="$(read_env_value "$ENV_FILE" AICOPILOT_WEB_PORT || true)"
     probe_http "http://127.0.0.1:${ai_port:-82}/"
+    probe_http \
+      "http://127.0.0.1:${ai_port:-82}/api/identity/cloud-oidc/status"
   fi
 fi
 
@@ -579,6 +839,7 @@ state_temp="$(mktemp "$RELEASES_DIR/.routine-state.XXXXXX")"
   printf 'SERVICES=%s\n' "$SERVICES"
   printf 'REQUEST_DIGEST=%s\n' "$REQUEST_DIGEST"
   printf 'DATABASE_BACKUP=%s\n' "$BACKUP_FILE"
+  printf 'DATABASE_BACKUP_SHA256=%s\n' "$BACKUP_SHA256"
   printf 'STATUS=healthy\n'
   printf 'FINISHED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$state_temp"
@@ -589,6 +850,7 @@ atomic_copy "$state_temp" "$CURRENT_STATE_FILE"
 atomic_copy "$state_temp" "$HISTORY_DIR/${INVOCATION_ID}.env"
 rm -f "$state_temp"
 ROLLBACK_REQUIRED=0
+commit_migration_state
 
 printf 'runner_result=success target=%s sha=%s services=%s state=%s\n' \
   "$TARGET_NAME" "$GIT_SHA" "$SERVICES" "$CURRENT_STATE_FILE"

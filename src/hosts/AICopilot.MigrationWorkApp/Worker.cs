@@ -11,19 +11,36 @@ namespace AICopilot.MigrationWorkApp;
 public class Worker(
     IServiceProvider serviceProvider,
     IConfiguration configuration,
-    IHostEnvironment hostEnvironment,
-    IHostApplicationLifetime hostApplicationLifetime) : BackgroundService
+    IHostEnvironment hostEnvironment)
 {
     public const string ActivitySourceName = "Migrations";
     private static readonly ActivitySource ActivitySource = new(ActivitySourceName);
 
-    protected override async Task ExecuteAsync(CancellationToken cancellationToken)
+    public async Task RunAsync(CancellationToken cancellationToken)
     {
         using var activity = ActivitySource.StartActivity("Migrating database", ActivityKind.Client);
 
         try
         {
             using var scope = serviceProvider.CreateScope();
+            var catalogFencePreflightOnly = configuration.GetValue<bool>(
+                "MigrationWorker:CatalogFencePreflightOnly");
+            if (catalogFencePreflightOnly)
+            {
+                if (configuration.GetValue<bool>("MigrationWorker:CheckSecretsOnly"))
+                {
+                    throw new InvalidOperationException(
+                        "Catalog-fence preflight cannot be combined with secret-only migration mode.");
+                }
+
+                var preflightDbContext = scope.ServiceProvider
+                    .GetRequiredService<AiGatewayDbContext>();
+                await MigrationWorkerDatabaseMigrator.RunAiGatewayPreDeploymentPreflightAsync(
+                    preflightDbContext,
+                    cancellationToken);
+                return;
+            }
+
             var dbContext = scope.ServiceProvider.GetRequiredService<AiCopilotDbContext>();
             var identityStoreDbContext = scope.ServiceProvider.GetRequiredService<IdentityStoreDbContext>();
             var aiGatewayDbContext = scope.ServiceProvider.GetRequiredService<AiGatewayDbContext>();
@@ -110,10 +127,6 @@ public class Worker(
                             stageCancellationToken);
                         break;
 
-                    case MigrationWorkerStage.StopApplication:
-                        hostApplicationLifetime.StopApplication();
-                        break;
-
                     default:
                         throw new ArgumentOutOfRangeException(nameof(stage), stage, "Unknown migration worker stage.");
                 }
@@ -141,16 +154,14 @@ internal enum MigrationWorkerStage
     SeedIdentity,
     SeedAiGateway,
     SeedCloudReadOnly,
-    SeedSimulation,
-    StopApplication
+    SeedSimulation
 }
 
 internal static class MigrationWorkerExecutionPlan
 {
     private static readonly MigrationWorkerStage[] CheckSecretsOnlyStages =
     [
-        MigrationWorkerStage.VerifySecrets,
-        MigrationWorkerStage.StopApplication
+        MigrationWorkerStage.VerifySecrets
     ];
 
     private static readonly MigrationWorkerStage[] FullMigrationStages =
@@ -160,8 +171,7 @@ internal static class MigrationWorkerExecutionPlan
         MigrationWorkerStage.SeedIdentity,
         MigrationWorkerStage.SeedAiGateway,
         MigrationWorkerStage.SeedCloudReadOnly,
-        MigrationWorkerStage.SeedSimulation,
-        MigrationWorkerStage.StopApplication
+        MigrationWorkerStage.SeedSimulation
     ];
 
     internal static async Task RunAsync(

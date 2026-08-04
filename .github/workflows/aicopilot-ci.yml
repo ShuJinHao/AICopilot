@@ -163,6 +163,7 @@ jobs:
           mkdir -p artifacts/ci-test-results
           pwsh -NoProfile -File deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1
           bash deploy/enterprise-ai/tests/deployment-behavior.sh 2>&1 | tee artifacts/ci-test-results/deployment-behavior.log
+          bash deploy/enterprise-ai/tests/TestMigrationRunnerGuard.sh 2>&1 | tee artifacts/ci-test-results/migration-runner-guard.log
 
       - name: Run explicit quality gates
         if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'quality' || inputs.mode == 'full') }}

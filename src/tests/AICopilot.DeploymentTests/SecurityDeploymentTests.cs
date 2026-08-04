@@ -466,13 +466,35 @@ public sealed class SecurityDeploymentTests
         deployRelease.Should().Contain("exit \"$attestation_status\"");
         deployRelease.Should().Contain("check_model_secret_migration_preflight");
         deployRelease.Should().Contain("Run ./deploy-release.sh %s --services migration");
+        deployRelease.Should().Contain("if ! compose up --no-deps --abort-on-container-exit");
+        deployRelease.Should().Contain("container=\"$(compose ps -a -q aicopilot-migration");
+        deployRelease.Should().Contain("docker inspect --format '{{.State.ExitCode}}'");
+        deployRelease.Should().Contain(
+            "expected_marker=\"aicopilot_migration_result=success invocation_id=$invocation_id\"");
+        deployRelease.Should().Contain("MigrationWorker__CatalogFencePreflightOnly=true");
+        deployRelease.Should().Contain(
+            "expected_marker=\"aicopilot_catalog_fence_preflight=success invocation_id=$invocation_id\"");
+        var fullDeployCatalogFenceBeforeQuiesce = """
+          run_catalog_fence_preflight
+          quiesce_schema_dependent_runtimes
+          backup_database_before_migration
+          persist_migration_started_state
+        """;
+        var selectedDeployCatalogFenceBeforeQuiesce = """
+            run_catalog_fence_preflight
+            quiesce_schema_dependent_runtimes
+            backup_database_before_migration
+            persist_migration_started_state
+        """;
+        deployRelease.Should().Contain(fullDeployCatalogFenceBeforeQuiesce);
+        deployRelease.Should().Contain(selectedDeployCatalogFenceBeforeQuiesce);
         var fullDeployMigrationThenPreflight = """
-          compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+          run_migration_and_verify
           check_model_secret_migration_preflight
           compose up -d aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui
         """;
         var selectedDeployMigrationThenPreflight = """
-            compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+            run_migration_and_verify
             check_model_secret_migration_preflight
         """;
         deployRelease.Should().Contain(fullDeployMigrationThenPreflight);

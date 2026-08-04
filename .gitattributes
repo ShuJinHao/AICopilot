@@ -17,4 +17,6 @@
 /src/vues/AICopilot.Web/tests/smoke/*.ts text eol=lf
 /src/vues/AICopilot.Web/playwright.smoke.config.ts text eol=lf
 /deploy/enterprise-ai/tests/deployment-behavior.sh text eol=lf
+/deploy/enterprise-ai/tests/TestMigrationRunnerGuard.sh text eol=lf
 /deploy/enterprise-ai/tests/TestDeploymentPolicy.ps1 text eol=lf
+/src/infrastructure/AICopilot.EntityFrameworkCore/Migrations/AiGatewayDbContext/20260519112000_AddToolGovernanceP4.Designer.cs whitespace=-blank-at-eof

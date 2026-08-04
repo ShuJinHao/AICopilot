@@ -14,6 +14,7 @@ PREVIOUS_RELEASE_FILE="$RELEASES_DIR/previous-release.env"
 STAGED_RELEASE_FILE="$RELEASES_DIR/staged-release.env"
 CURRENT_RELEASE_SUMMARY_FILE="$RELEASES_DIR/current-release.summary.md"
 BLOCKED_RELEASE_FILE="$RELEASES_DIR/blocked-release.env"
+MIGRATION_STATE_DIR="$RELEASES_DIR/migration-states"
 SUPPORT_MANIFEST_FILE="$DEPLOY_DIR/.aicopilot-support-manifest.sha256"
 SUPPORT_DIGEST_FILE="$DEPLOY_DIR/.aicopilot-support-manifest.digest"
 RELEASE_LOCK_DIR="${AICOPILOT_RELEASE_LOCK_DIR:-$DEPLOY_DIR/.locks/release.lock.d}"
@@ -34,6 +35,7 @@ RELEASE_COMMITTED=false
 STATE_TRANSACTION_DIR=""
 CONTAINER_UPDATE_STARTED=false
 MIGRATION_EXECUTED=false
+MIGRATION_STARTED=false
 RECOVERY_SUCCEEDED=false
 KEEP_FAILURE_LOCK=false
 FROZEN_AICOPILOT_HTTPAPI_IMAGE=""
@@ -69,9 +71,13 @@ RUNTIME_RABBITMQ_IMAGE_DIGEST=""
 RUNTIME_QDRANT_IMAGE_REF=""
 RUNTIME_QDRANT_IMAGE_DIGEST=""
 MIGRATION_COMPLETED=false
+DATABASE_BACKUP_FILE=""
+DATABASE_BACKUP_SHA256=""
 UNSAFE_PARTIAL_EXIT=86
 INVOCATION_STATE_INITIALIZED=false
 INVOCATION_STATE_FILE=""
+MIGRATION_STATE_FILE=""
+MIGRATION_STARTED_AT_UTC=""
 
 APP_IMAGE_KEYS=(
   AICOPILOT_HTTPAPI_IMAGE
@@ -88,7 +94,205 @@ INFRA_IMAGE_KEYS=(
 )
 
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  AICOPILOT_MIGRATION_INVOCATION_ID="${WORKSPACE_INVOCATION_ID:-unbound}" \
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
+run_migration_and_verify() {
+  local invocation_id container exit_code logs expected_marker
+  invocation_id="${WORKSPACE_INVOCATION_ID:-unbound}"
+
+  if ! compose up --no-deps --abort-on-container-exit \
+    --exit-code-from aicopilot-migration aicopilot-migration; then
+    printf 'AICopilot migration compose command failed.\n' >&2
+    return 70
+  fi
+  container="$(compose ps -a -q aicopilot-migration 2>/dev/null || true)"
+  if [[ ! "$container" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf 'AICopilot migration container identity is missing or ambiguous.\n' >&2
+    return 70
+  fi
+  exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || true)"
+  if [ "$exit_code" != 0 ]; then
+    printf 'AICopilot migration container exit code is not zero: %s\n' "${exit_code:-unknown}" >&2
+    return 70
+  fi
+  if ! logs="$(docker logs "$container" 2>&1)"; then
+    printf 'AICopilot migration container logs are unreadable.\n' >&2
+    return 70
+  fi
+  expected_marker="aicopilot_migration_result=success invocation_id=$invocation_id"
+  if ! grep -Fqx "$expected_marker" <<< "$logs"; then
+    printf 'AICopilot migration success marker is missing for invocation %s.\n' "$invocation_id" >&2
+    return 70
+  fi
+  printf 'AICopilot migration verified: container=%s exit_code=0 invocation_id=%s\n' \
+    "$container" "$invocation_id"
+}
+
+run_catalog_fence_preflight() {
+  local invocation_id output expected_marker
+  invocation_id="${WORKSPACE_INVOCATION_ID:-unbound}"
+  expected_marker="aicopilot_catalog_fence_preflight=success invocation_id=$invocation_id"
+  if ! output="$(compose run --rm --no-deps \
+      -e MigrationWorker__CatalogFencePreflightOnly=true \
+      aicopilot-migration 2>&1)"; then
+    printf 'AiGateway catalog-fence preflight failed before runtime quiesce.\n' >&2
+    return 77
+  fi
+  if ! grep -Fqx "$expected_marker" <<< "$output"; then
+    printf 'AiGateway catalog-fence preflight success marker is missing.\n' >&2
+    return 77
+  fi
+  printf 'AiGateway catalog-fence preflight verified: invocation_id=%s\n' "$invocation_id"
+}
+
+backup_database_before_migration() {
+  local backup_dir backup_id backup_file backup_temp checksum_temp
+  backup_dir="$DEPLOY_DIR/backups/postgres"
+  backup_id="${WORKSPACE_INVOCATION_ID:-$DEPLOY_LOCK_TOKEN}"
+  [[ "$backup_id" =~ ^[A-Za-z0-9._-]{1,96}$ ]] || {
+    printf 'AICopilot migration backup identity is invalid.\n' >&2
+    return 64
+  }
+  [ -n "${POSTGRES_USER:-}" ] && [ -n "${POSTGRES_DB:-}" ] && \
+    [ -n "${POSTGRES_PASSWORD:-}" ] || {
+      printf 'AICopilot migration backup requires POSTGRES_USER/POSTGRES_DB/POSTGRES_PASSWORD.\n' >&2
+      return 66
+    }
+  mkdir -p "$backup_dir"
+  umask 077
+  backup_file="$backup_dir/aicopilot-${backup_id}-$(date -u +%Y%m%dT%H%M%SZ)-$$.dump"
+  backup_temp="$backup_file.partial"
+  checksum_temp="$backup_file.sha256.partial"
+  [ ! -e "$backup_file" ] && [ ! -e "$backup_temp" ] && [ ! -e "$checksum_temp" ] || {
+    printf 'AICopilot migration backup path already exists: %s\n' "$backup_file" >&2
+    return 65
+  }
+  printf 'AICopilot migration database backup: %s\n' "$backup_file"
+  if ! compose exec -T -e "PGPASSWORD=$POSTGRES_PASSWORD" postgres \
+    pg_dump -h 127.0.0.1 -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$backup_temp"; then
+    rm -f "$backup_temp" "$checksum_temp"
+    printf 'AICopilot migration database backup command failed.\n' >&2
+    return 74
+  fi
+  if [ ! -s "$backup_temp" ]; then
+    rm -f "$backup_temp" "$checksum_temp"
+    printf 'AICopilot migration database backup is empty.\n' >&2
+    return 74
+  fi
+  mv "$backup_temp" "$backup_file"
+  chmod 600 "$backup_file"
+  DATABASE_BACKUP_SHA256="$(release_sha256_file "$backup_file")"
+  printf '%s  %s\n' "$DATABASE_BACKUP_SHA256" "$(basename "$backup_file")" > "$checksum_temp"
+  chmod 600 "$checksum_temp"
+  mv "$checksum_temp" "$backup_file.sha256"
+  DATABASE_BACKUP_FILE="$backup_file"
+  printf 'AICopilot migration database backup verified: sha256=%s\n' "$DATABASE_BACKUP_SHA256"
+}
+
+write_migration_state() {
+  local status="$1"
+  local temp_file
+  case "$status" in
+    migration-started|migration-committed) ;;
+    *) return 64 ;;
+  esac
+  [ -n "$MIGRATION_STATE_FILE" ] || return 64
+  temp_file="$(mktemp "$MIGRATION_STATE_DIR/.migration-state.XXXXXX")"
+  umask 077
+  {
+    printf 'DEPLOY_MIGRATION_STATUS=%s\n' "$status"
+    printf 'DEPLOY_RELEASE_ID=%s\n' "$RELEASE_TAG"
+    printf 'DEPLOY_INVOCATION_ID=%s\n' "$WORKSPACE_INVOCATION_ID"
+    printf 'DEPLOY_EXPECTED_SHA=%s\n' "$WORKSPACE_EXPECTED_SHA"
+    printf 'DEPLOY_PLAN_DIGEST=%s\n' "$WORKSPACE_PLAN_DIGEST"
+    printf 'DEPLOY_DATABASE_BACKUP=%s\n' "$DATABASE_BACKUP_FILE"
+    printf 'DEPLOY_DATABASE_BACKUP_SHA256=%s\n' "$DATABASE_BACKUP_SHA256"
+    printf 'DEPLOY_TRANSACTION_BACKUP=%s\n' "$STATE_TRANSACTION_DIR"
+    printf 'DEPLOY_RESUME_ALLOWED=false\n'
+    printf 'DEPLOY_MIGRATION_STARTED_AT_UTC=%s\n' "$MIGRATION_STARTED_AT_UTC"
+    if [ "$status" = migration-committed ]; then
+      printf 'DEPLOY_MIGRATION_COMMITTED_AT_UTC=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    fi
+  } > "$temp_file"
+  chmod 600 "$temp_file"
+  mv -f "$temp_file" "$MIGRATION_STATE_FILE"
+}
+
+migration_state_matches_runtime() {
+  local expected_status="$1"
+  [ -f "$MIGRATION_STATE_FILE" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_MIGRATION_STATUS)" = "$expected_status" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_RELEASE_ID)" = "$RELEASE_TAG" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_INVOCATION_ID)" = "$WORKSPACE_INVOCATION_ID" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_EXPECTED_SHA)" = "$WORKSPACE_EXPECTED_SHA" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_PLAN_DIGEST)" = "$WORKSPACE_PLAN_DIGEST" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_DATABASE_BACKUP)" = "$DATABASE_BACKUP_FILE" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_DATABASE_BACKUP_SHA256)" = "$DATABASE_BACKUP_SHA256" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_TRANSACTION_BACKUP)" = "$STATE_TRANSACTION_DIR" ] || return 1
+  [ "$(read_manifest_value "$MIGRATION_STATE_FILE" DEPLOY_RESUME_ALLOWED)" = false ] || return 1
+}
+
+persist_migration_started_state() {
+  mkdir -p "$MIGRATION_STATE_DIR"
+  [[ "$WORKSPACE_INVOCATION_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$ ]] || return 64
+  [[ "$DATABASE_BACKUP_SHA256" =~ ^[0-9a-f]{64}$ ]] || return 64
+  [ -s "$DATABASE_BACKUP_FILE" ] || return 74
+  MIGRATION_STATE_FILE="$MIGRATION_STATE_DIR/$WORKSPACE_INVOCATION_ID.env"
+  [ ! -e "$MIGRATION_STATE_FILE" ] || {
+    printf 'AICopilot migration state already exists for invocation: %s\n' "$MIGRATION_STATE_FILE" >&2
+    return 86
+  }
+  MIGRATION_STARTED_AT_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  write_migration_state migration-started
+  migration_state_matches_runtime migration-started || return 86
+  MIGRATION_STARTED=true
+}
+
+commit_migration_state() {
+  [ "$MIGRATION_STARTED" = true ] || return 0
+  migration_state_matches_runtime migration-started || return 86
+  write_migration_state migration-committed
+  migration_state_matches_runtime migration-committed || return 86
+  MIGRATION_STARTED=false
+}
+
+migration_state_is_started() {
+  migration_state_matches_runtime migration-started
+}
+
+migration_state_is_committed() {
+  [ "$MIGRATION_EXECUTED" = true ] || return 1
+  migration_state_matches_runtime migration-committed || return 1
+  [ -f "$CURRENT_RELEASE_FILE" ] || return 1
+  [ "$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_RELEASE_ID)" = "$RELEASE_TAG" ] || return 1
+  [ "$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_INVOCATION_ID)" = "$WORKSPACE_INVOCATION_ID" ] || return 1
+  [ "$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_EXPECTED_SHA)" = "$WORKSPACE_EXPECTED_SHA" ] || return 1
+  [ "$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_PLAN_DIGEST)" = "$WORKSPACE_PLAN_DIGEST" ] || return 1
+  [ "$(read_manifest_value "$CURRENT_RELEASE_FILE" DEPLOY_MIGRATION_COMPLETED)" = true ] || return 1
+}
+
+find_unresolved_migration_state() {
+  local state_file
+  [ -d "$MIGRATION_STATE_DIR" ] || return 0
+  for state_file in "$MIGRATION_STATE_DIR"/*.env; do
+    [ -f "$state_file" ] || continue
+    if grep -Fxq 'DEPLOY_MIGRATION_STATUS=migration-started' "$state_file"; then
+      printf '%s\n' "$state_file"
+      return 0
+    fi
+  done
+  return 0
+}
+
+quiesce_schema_dependent_runtimes() {
+  printf 'AICopilot migration runtime quiesce: httpapi dataworker ragworker webui\n'
+  compose stop \
+    aicopilot-httpapi \
+    aicopilot-dataworker \
+    aicopilot-ragworker \
+    aicopilot-webui
 }
 
 ensure_release_tag() {
@@ -530,6 +734,8 @@ persist_blocked_release() {
     printf 'DEPLOY_FAILURE_EXIT_CODE=%s\n' "$original_status"
     printf 'DEPLOY_FAILURE_REASON=%s\n' "$reason"
     printf 'DEPLOY_MIGRATION_EXECUTED=%s\n' "$MIGRATION_EXECUTED"
+    printf 'DEPLOY_DATABASE_BACKUP=%s\n' "${DATABASE_BACKUP_FILE:-none}"
+    printf 'DEPLOY_DATABASE_BACKUP_SHA256=%s\n' "${DATABASE_BACKUP_SHA256:-none}"
     printf 'DEPLOY_TRANSACTION_BACKUP=%s\n' "$STATE_TRANSACTION_DIR"
     printf 'DEPLOY_BLOCKED_AT_UTC=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   } > "$temp_file"
@@ -543,6 +749,12 @@ finish_deploy_release() {
   local state_restore_ok=true
   local blocked_reason=""
   trap - EXIT HUP INT TERM
+  if [ "$RELEASE_COMMITTED" != true ] && migration_state_is_committed; then
+    RELEASE_COMMITTED=true
+  elif migration_state_is_started; then
+    MIGRATION_STARTED=true
+    MIGRATION_EXECUTED=true
+  fi
   if [ "$status" -ne 0 ] && [ "$RELEASE_COMMITTED" != true ] &&
      [ "${VALIDATE_ONLY:-false}" != true ] &&
      { [ "$RELEASE_LOCK_HELD" = true ] || [ -n "$STATE_TRANSACTION_DIR" ]; }; then
@@ -667,7 +879,7 @@ acquire_release_lock() {
 }
 
 prepare_release_directories() {
-  mkdir -p "$RELEASE_HISTORY_DIR" "$RELEASES_DIR/invocations"
+  mkdir -p "$RELEASE_HISTORY_DIR" "$RELEASES_DIR/invocations" "$MIGRATION_STATE_DIR"
 }
 
 write_invocation_state() {
@@ -1932,6 +2144,21 @@ if [ "$CHECK_CURRENT_ONLY" != true ] &&
   printf 'Use --services migration,httpapi,dataworker,ragworker as applicable. Web-only deploys may omit migration.\n' >&2
   exit 64
 fi
+if [ "$CHECK_CURRENT_ONLY" != true ] && [ "$RUN_MIGRATION" = true ]; then
+  for required_runtime in \
+    aicopilot-httpapi \
+    aicopilot-dataworker \
+    aicopilot-ragworker \
+    aicopilot-webui; do
+    case " $SELECTED_SERVICE_NAMES " in
+      *" $required_runtime "*) ;;
+      *)
+        printf 'AICopilot migration requires the complete runtime group: httpapi,migration,dataworker,ragworker,web.\n' >&2
+        exit 64
+        ;;
+    esac
+  done
+fi
 
 # All candidate identity checks happen before lock adoption, release-state writes,
 # .env changes, image pulls, compose updates, or any other container mutation.
@@ -1939,6 +2166,12 @@ verify_workspace_candidate_basics
 unsafe_support_marker="$(release_find_unsafe_partial_marker "$DEPLOY_DIR")"
 if [ -n "$unsafe_support_marker" ]; then
   printf 'AICopilot deployment is blocked by unresolved unsafe support state: %s\n' "$unsafe_support_marker" >&2
+  exit "$UNSAFE_PARTIAL_EXIT"
+fi
+unresolved_migration_state="$(find_unresolved_migration_state)"
+if [ -n "$unresolved_migration_state" ]; then
+  printf 'AICopilot deployment is blocked by unresolved migration state: %s\n' \
+    "$unresolved_migration_state" >&2
   exit "$UNSAFE_PARTIAL_EXIT"
 fi
 if [ "$CHECK_CURRENT_ONLY" != true ]; then
@@ -2068,8 +2301,12 @@ if [ -z "$REQUESTED_SERVICES" ]; then
   CONTAINER_UPDATE_STARTED=true
   compose up -d --remove-orphans postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
+  run_catalog_fence_preflight
+  quiesce_schema_dependent_runtimes
+  backup_database_before_migration
+  persist_migration_started_state
   MIGRATION_EXECUTED=true
-  compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+  run_migration_and_verify
   check_model_secret_migration_preflight
   compose up -d aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui
 else
@@ -2078,8 +2315,12 @@ else
   compose up -d postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
   if [ "$RUN_MIGRATION" = "true" ]; then
+    run_catalog_fence_preflight
+    quiesce_schema_dependent_runtimes
+    backup_database_before_migration
+    persist_migration_started_state
     MIGRATION_EXECUTED=true
-    compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+    run_migration_and_verify
     check_model_secret_migration_preflight
   elif [ "$BACKEND_RUNTIME_SELECTED" = "true" ]; then
     check_model_secret_migration_preflight
@@ -2156,6 +2397,7 @@ if [ -f "$CURRENT_RELEASE_FILE" ]; then
 fi
 atomic_copy_file "$STAGED_RELEASE_FILE" "$CURRENT_RELEASE_FILE"
 atomic_copy_file "$pending_summary_file" "$CURRENT_RELEASE_SUMMARY_FILE"
+commit_migration_state
 RELEASE_COMMITTED=true
 history_file="$(record_release_history "$CURRENT_RELEASE_FILE" "$DEPLOY_RELEASE_ID")"
 

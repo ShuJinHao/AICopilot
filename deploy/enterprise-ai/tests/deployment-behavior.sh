@@ -108,6 +108,19 @@ if [ "${FAKE_INFRA_TAG_DRIFT:-false}" = true ] &&
    [ ! -f "${FAKE_REMOTE_DIR:?}/.fake-infra-tag-drift-active" ]; then
   : > "${FAKE_REMOTE_DIR:?}/.fake-infra-tag-drift-active"
 fi
+if [[ "$full" == compose*" up "*aicopilot-migration* ]] &&
+   [ -n "${AICOPILOT_MIGRATION_INVOCATION_ID:-}" ]; then
+  printf '%s\n' "$AICOPILOT_MIGRATION_INVOCATION_ID" > \
+    "${FAKE_REMOTE_DIR:?}/.fake-migration-invocation"
+fi
+if [[ "$full" == compose*" run "*MigrationWorker__CatalogFencePreflightOnly=true* ]]; then
+  if [ "${FAKE_CATALOG_FENCE_PREFLIGHT_FAIL:-false}" = true ]; then
+    exit 29
+  fi
+  printf 'aicopilot_catalog_fence_preflight=success invocation_id=%s\n' \
+    "${AICOPILOT_MIGRATION_INVOCATION_ID:-unbound}"
+  exit 0
+fi
 case "$full" in
   "buildx version"*) printf 'github.com/docker/buildx fake\n'; exit 0 ;;
   buildx\ build*) exit 0 ;;
@@ -179,6 +192,10 @@ case "$full" in
     fi
     exit 0
     ;;
+  inspect*'.State.ExitCode'*)
+    printf '%s\n' "${FAKE_MIGRATION_CONTAINER_EXIT_CODE:-0}"
+    exit 0
+    ;;
   inspect*'.State.Running'*)
     container_id="${full##* }"
     if [ -n "${FAKE_UNHEALTHY_SERVICE:-}" ] && [[ "$container_id" == *"$FAKE_UNHEALTHY_SERVICE"* ]]; then
@@ -191,13 +208,24 @@ case "$full" in
     exit 0
     ;;
   inspect*'-f '*|inspect*'--format '*) printf 'healthy\n'; exit 0 ;;
+  compose*' ps -a -q '*) service="${full##* }"; printf 'fake-%s\n' "$service"; exit 0 ;;
   compose*' ps -q '*) service="${full##* }"; printf 'fake-%s\n' "$service"; exit 0 ;;
+  compose*pg_dump*) printf 'fake-complete-postgresql-dump\n'; exit 0 ;;
   compose*psql*)
     printf 'aigateway.language_models|0|0\nrag.embedding_models|0|0\n'
     exit 0
     ;;
   compose*' exec -T aicopilot-webui '*)
     printf 'AICopilot web container non-root attestation passed: uid=1000\n'
+    exit 0
+    ;;
+  logs*)
+    if [ "${FAKE_MIGRATION_MARKER_MISSING:-false}" = true ]; then
+      printf 'aicopilot_migration_result=failure exception=InvalidOperationException\n'
+    else
+      invocation_id="$(sed -n '1p' "${FAKE_REMOTE_DIR:?}/.fake-migration-invocation")"
+      printf 'aicopilot_migration_result=success invocation_id=%s\n' "$invocation_id"
+    fi
     exit 0
     ;;
   system\ df*) printf 'TYPE TOTAL ACTIVE SIZE RECLAIMABLE\n'; exit 0 ;;
@@ -376,6 +404,11 @@ cat > "$WORKER_PLAN_FILE" <<EOF
 {"schemaVersion":1,"runId":"deployment-behavior-worker","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["migration","dataworker"],"all":false,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
 EOF
 WORKER_PLAN_DIGEST="$(sha256_file "$WORKER_PLAN_FILE")"
+FULL_WORKER_PLAN_FILE="$TEST_ROOT/workspace-worker-full-plan.json"
+cat > "$FULL_WORKER_PLAN_FILE" <<EOF
+{"schemaVersion":1,"runId":"deployment-behavior-worker-full","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["httpapi","migration","dataworker","ragworker","web"],"all":false,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
+EOF
+FULL_WORKER_PLAN_DIGEST="$(sha256_file "$FULL_WORKER_PLAN_FILE")"
 ALL_PLAN_FILE="$TEST_ROOT/workspace-all-plan.json"
 cat > "$ALL_PLAN_FILE" <<EOF
 {"schemaVersion":1,"runId":"deployment-behavior-all","mode":"check-candidate","target":"AICopilot","fullSha":"$SOURCE_SHA","services":["httpapi","migration","dataworker","ragworker","web"],"all":true,"profileDigest":"$WORKSPACE_PROFILE_DIGEST","branch":"main","remote":"origin","remoteHeadSha":"$SOURCE_SHA","requireRemoteTip":true,"remoteVerified":true,"worktreeClean":true}
@@ -535,6 +568,21 @@ TEST_WORKSPACE_PLAN_FILE="$ALL_PLAN_FILE" \
 TEST_WORKSPACE_PLAN_DIGEST="$ALL_PLAN_DIGEST" \
 TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-all \
   run_local_release > "$TEST_ROOT/config-fingerprint-full-release.log" 2>&1
+full_database_backup="$(find "$REMOTE_DIR/backups/postgres" -maxdepth 1 -type f \
+  -name 'aicopilot-deployment-behavior-all-*.dump' -print -quit)"
+[ -s "$full_database_backup" ] || fail "full migration path did not create a complete database backup"
+[ -s "$full_database_backup.sha256" ] || fail "full migration path did not create a backup checksum"
+(cd "$(dirname "$full_database_backup")" && sha256sum -c "$(basename "$full_database_backup").sha256" >/dev/null) || \
+  fail "full migration path database backup checksum did not verify"
+full_migration_state="$REMOTE_DIR/releases/migration-states/deployment-behavior-all.env"
+assert_file_contains "$full_migration_state" "DEPLOY_MIGRATION_STATUS=migration-committed"
+assert_file_contains "$full_migration_state" "DEPLOY_DATABASE_BACKUP=$full_database_backup"
+assert_file_contains "$full_migration_state" "DEPLOY_RESUME_ALLOWED=false"
+full_quiesce_line="$(grep -n 'compose .* stop aicopilot-httpapi .*aicopilot-webui' "$DOCKER_LOG" | head -n 1 | cut -d: -f1)"
+full_backup_line="$(grep -n 'compose .* exec .*pg_dump' "$DOCKER_LOG" | head -n 1 | cut -d: -f1)"
+[ -n "$full_quiesce_line" ] && [ -n "$full_backup_line" ] && \
+  [ "$full_quiesce_line" -lt "$full_backup_line" ] || \
+  fail "full migration path did not quiesce schema writers before the final database backup"
 if grep -Fq 'QdRotatedStrongSecretValue5678' "$REMOTE_DIR/releases/current-release.env" "$REMOTE_DIR/releases/current-release.summary.md"; then
   fail "full config deployment recorded a secret value instead of only its fingerprint"
 fi
@@ -985,27 +1033,81 @@ assert_eq 79 "$orphan_retry_status" "orphan transaction retry gate exit code"
 assert_file_contains "$TEST_ROOT/orphan-transaction-retry.log" "unresolved transaction backup"
 rm -rf "$orphan_transaction" "$REMOTE_DIR/.locks/release.lock.d" "$REMOTE_DIR/.support-backups"
 
-printf 'TEST abnormal worker process state blocks commit and records migration partial state\n'
-TEST_SERVICES='migration,dataworker' \
-TEST_WORKSPACE_PLAN_FILE="$WORKER_PLAN_FILE" \
-TEST_WORKSPACE_PLAN_DIGEST="$WORKER_PLAN_DIGEST" \
-TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker \
-  run_local_release > "$TEST_ROOT/worker-baseline.log" 2>&1
+printf 'TEST partial migration service group is rejected before destructive migration\n'
 set +e
 TEST_SERVICES='migration,dataworker' \
 TEST_WORKSPACE_PLAN_FILE="$WORKER_PLAN_FILE" \
 TEST_WORKSPACE_PLAN_DIGEST="$WORKER_PLAN_DIGEST" \
 TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker \
+  run_local_release > "$TEST_ROOT/worker-partial-group.log" 2>&1
+worker_partial_status=$?
+set -e
+assert_eq 64 "$worker_partial_status" "partial migration runtime group rejection"
+assert_file_contains "$TEST_ROOT/worker-partial-group.log" "migration requires the complete runtime group"
+[ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || \
+  fail "partial migration group created unsafe-partial evidence before migration"
+
+printf 'TEST catalog-fence authority failure stops before runtime quiesce or migration state\n'
+current_release_hash_before_preflight="$(sha256_file "$REMOTE_DIR/releases/current-release.env")"
+: > "$DOCKER_LOG"
+set +e
+AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true \
+FAKE_CATALOG_FENCE_PREFLIGHT_FAIL=true \
+TEST_SERVICES='httpapi,migration,dataworker,ragworker,web' \
+TEST_WORKSPACE_PLAN_FILE="$FULL_WORKER_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$FULL_WORKER_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-catalog-fence-preflight \
+  run_local_release > "$TEST_ROOT/catalog-fence-preflight.log" 2>&1
+catalog_fence_preflight_status=$?
+set -e
+assert_eq 77 "$catalog_fence_preflight_status" "catalog-fence preflight exit code"
+assert_file_contains "$TEST_ROOT/catalog-fence-preflight.log" \
+  "catalog-fence preflight failed before runtime quiesce"
+if grep -Eq 'compose .* (stop aicopilot-httpapi|exec .*pg_dump|up .*aicopilot-migration)' "$DOCKER_LOG"; then
+  fail "catalog-fence preflight failure reached runtime quiesce, backup, or migration"
+fi
+[ ! -f "$REMOTE_DIR/releases/migration-states/deployment-behavior-catalog-fence-preflight.env" ] || \
+  fail "catalog-fence preflight failure wrote migration-started state"
+[ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || \
+  fail "catalog-fence preflight failure was misclassified as unsafe-partial"
+assert_eq "$current_release_hash_before_preflight" \
+  "$(sha256_file "$REMOTE_DIR/releases/current-release.env")" \
+  "current release after catalog-fence preflight failure"
+
+printf 'TEST abnormal worker process state blocks commit and records migration partial state\n'
+: > "$DOCKER_LOG"
+TEST_SERVICES='httpapi,migration,dataworker,ragworker,web' \
+TEST_WORKSPACE_PLAN_FILE="$FULL_WORKER_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$FULL_WORKER_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker-full \
+  run_local_release > "$TEST_ROOT/worker-baseline.log" 2>&1
+assert_file_contains "$DOCKER_LOG" "stop aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui"
+set +e
+TEST_SERVICES='httpapi,migration,dataworker,ragworker,web' \
+TEST_WORKSPACE_PLAN_FILE="$FULL_WORKER_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$FULL_WORKER_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker-full-abnormal \
 FAKE_UNHEALTHY_SERVICE=aicopilot-dataworker \
   run_local_release > "$TEST_ROOT/worker-abnormal.log" 2>&1
 worker_abnormal_status=$?
 set -e
 assert_eq 86 "$worker_abnormal_status" "abnormal worker unsafe-partial exit code"
 assert_file_contains "$REMOTE_DIR/releases/blocked-release.env" "DEPLOY_FAILURE_REASON=migration-or-runtime-partial"
+worker_migration_state="$REMOTE_DIR/releases/migration-states/deployment-behavior-worker-full-abnormal.env"
+assert_file_contains "$worker_migration_state" "DEPLOY_MIGRATION_STATUS=migration-started"
+assert_file_contains "$worker_migration_state" "DEPLOY_INVOCATION_ID=deployment-behavior-worker-full-abnormal"
+assert_file_contains "$worker_migration_state" "DEPLOY_RESUME_ALLOWED=false"
 worker_transaction="$(sed -n 's/^DEPLOY_TRANSACTION_BACKUP=//p' "$REMOTE_DIR/releases/blocked-release.env")"
 [ -d "$worker_transaction" ] || fail "worker partial failure did not retain transaction backup"
 rm -f "$REMOTE_DIR/releases/blocked-release.env"
 rm -rf "$worker_transaction" "$REMOTE_DIR/.locks/release.lock.d" "$REMOTE_DIR/.support-backups"
+set +e
+run_local_release > "$TEST_ROOT/migration-started-retry.log" 2>&1
+migration_started_retry_status=$?
+set -e
+assert_eq 86 "$migration_started_retry_status" "migration-started retry gate exit code"
+assert_file_contains "$TEST_ROOT/migration-started-retry.log" "unresolved migration state"
+rm -f "$worker_migration_state"
 
 printf 'TEST active and stale release locks\n'
 . "$REPO_DIR/deploy/enterprise-ai/scripts/release-common.sh"

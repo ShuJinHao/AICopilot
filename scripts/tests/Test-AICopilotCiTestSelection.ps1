@@ -576,6 +576,25 @@ try {
         throw 'Directory.Build.targets did not select all automatic release lanes while deferring explicit-only lanes.'
     }
 
+    $repositoryBytePolicyOutput = Join-Path $temporaryRoot 'repository-byte-policy.json'
+    & $selector `
+        -RepositoryRoot $root `
+        -ChangedFiles @('.gitattributes') `
+        -OutputPath $repositoryBytePolicyOutput `
+        -GitHubOutputPath ''
+    $repositoryBytePolicy = Get-Content $repositoryBytePolicyOutput -Raw | ConvertFrom-Json
+    $repositoryBytePolicyCategories = @(
+        $repositoryBytePolicy.selectedDotNetProjects.categories | Sort-Object -Unique)
+    if (@($repositoryBytePolicy.unclassifiedFiles).Count -ne 0 -or
+        -not [bool]$repositoryBytePolicy.deploymentAffected -or
+        $repositoryBytePolicyCategories -notcontains 'Architecture' -or
+        $repositoryBytePolicyCategories -notcontains 'DeploymentContract' -or
+        @($repositoryBytePolicyCategories | Where-Object {
+                $_ -notin @('Architecture', 'DeploymentContract')
+            }).Count -ne 0) {
+        throw '.gitattributes did not select the exact Architecture and DeploymentContract byte-policy lanes.'
+    }
+
     $manualOutput = Join-Path $temporaryRoot 'manual.json'
     & $selector `
         -RepositoryRoot $root `

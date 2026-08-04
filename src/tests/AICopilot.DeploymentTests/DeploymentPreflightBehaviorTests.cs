@@ -30,7 +30,8 @@ public sealed class DeploymentPreflightBehaviorTests
     [
         "deploy/enterprise-ai/scripts/query-release-invocation.sh",
         "deploy/enterprise-ai/scripts/release-common.sh",
-        "deploy/enterprise-ai/tests/deployment-behavior.sh"
+        "deploy/enterprise-ai/tests/deployment-behavior.sh",
+        "deploy/enterprise-ai/tests/TestMigrationRunnerGuard.sh"
     ];
 
     [Fact]
