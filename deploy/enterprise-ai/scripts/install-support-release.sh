@@ -89,6 +89,12 @@ if [ -d "$RELEASE_LOCK_DIR" ] && release_lock_is_active "$RELEASE_LOCK_DIR"; the
   rm -rf "$STAGING_DIR" 2>/dev/null || true
   exit 75
 fi
+if [ -d "$SUPPORT_BACKUP_DIR" ]; then
+  printf 'AICopilot support install is blocked by a pre-existing backup for this token: %s\n' \
+    "$SUPPORT_BACKUP_DIR" >&2
+  rm -rf "$STAGING_DIR" 2>/dev/null || true
+  exit 86
+fi
 
 restore_support_backup() {
   local relative_path
