@@ -173,6 +173,20 @@ read_env_value() {
   printf '%s\n' "$value"
 }
 
+migration_committed_matches_started() {
+  local started="$1"
+  local committed="$2"
+  local key
+  [ -f "$started" ] && [ -f "$committed" ] || return 1
+  [ "$(read_env_value "$started" STATUS || true)" = migration-started ] || return 1
+  [ "$(read_env_value "$committed" STATUS || true)" = migration-committed ] || return 1
+  for key in RUNNER_PROTOCOL TARGET INVOCATION_ID GIT_SHA REQUEST_DIGEST \
+    DATABASE_BACKUP DATABASE_BACKUP_SHA256 RESUME_ALLOWED; do
+    [ "$(read_env_value "$started" "$key" || true)" = \
+      "$(read_env_value "$committed" "$key" || true)" ] || return 1
+  done
+}
+
 atomic_copy() {
   local source="$1"
   local destination="$2"
@@ -334,6 +348,7 @@ GIT_SHA=""
 RELEASE_TAG=""
 SERVICES=""
 REQUEST_DIGEST=""
+RUNNER_SHA256=""
 REQUEST_SEEN=" "
 SELECTED=" "
 
@@ -348,7 +363,8 @@ write_failure_state() {
   local invocation="${INVOCATION_ID:-unknown}"
   local failure_status=failed
   local resume_allowed=true
-  if [ "$TARGET" = aicopilot ] && [ "$MIGRATION_STARTED" -eq 1 ]; then
+  if [ "$TARGET" = aicopilot ] && \
+     { [ "$MIGRATION_STARTED" -eq 1 ] || [ "$runner_status" -eq 86 ]; }; then
     failure_status=blocked-partial
     resume_allowed=false
   fi
@@ -389,7 +405,14 @@ on_exit() {
       printf 'runner_phase=rollback target=%s\n' "$TARGET_NAME" >&2
       if [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ] && \
          compose_with_images "$PREVIOUS_IMAGES_FILE" up -d --no-deps "${RUNTIME_COMPOSE_SERVICES[@]}"; then
-        rollback_status=completed
+        if verify_runtime_recovery "$PREVIOUS_IMAGES_FILE"; then
+          rollback_status=completed
+        else
+          rollback_status=failed-unverified
+          [ "$TARGET" != aicopilot ] || runner_status=86
+        fi
+      else
+        [ "$TARGET" != aicopilot ] || runner_status=86
       fi
     fi
   fi
@@ -412,7 +435,7 @@ chmod 600 "$REQUEST_FILE"
 
 allowed_request_key() {
   case "$1" in
-    PROTOCOL|TARGET|INVOCATION_ID|GIT_SHA|RELEASE_TAG|SERVICES|REQUEST_DIGEST|\
+    PROTOCOL|TARGET|INVOCATION_ID|GIT_SHA|RELEASE_TAG|SERVICES|RUNNER_SHA256|REQUEST_DIGEST|\
     IIOT_HTTPAPI_IMAGE|IIOT_GATEWAY_IMAGE|IIOT_DATAWORKER_IMAGE|IIOT_MIGRATION_IMAGE|IIOT_WEB_IMAGE|\
     AICOPILOT_HTTPAPI_IMAGE|AICOPILOT_MIGRATION_IMAGE|AICOPILOT_DATAWORKER_IMAGE|AICOPILOT_RAGWORKER_IMAGE|AICOPILOT_WEBUI_IMAGE)
       return 0
@@ -442,6 +465,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     GIT_SHA) GIT_SHA="$value" ;;
     RELEASE_TAG) RELEASE_TAG="$value" ;;
     SERVICES) SERVICES="$value" ;;
+    RUNNER_SHA256) RUNNER_SHA256="$value" ;;
     REQUEST_DIGEST) REQUEST_DIGEST="$value" ;;
     *) printf -v "$key" '%s' "$value" ;;
   esac
@@ -458,6 +482,16 @@ done < "$REQUEST_FILE"
 [[ "$REQUEST_DIGEST" =~ ^[0-9a-f]{64}$ ]] || fail "invalid request digest" 65
 actual_request_digest="$(sha256sum "$REQUEST_BODY_FILE" | awk '{print $1}')"
 [ "$actual_request_digest" = "$REQUEST_DIGEST" ] || fail "request digest mismatch" 65
+if [ "$TARGET" = aicopilot ]; then
+  [[ "$RUNNER_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "AICopilot request is missing the prepared runner SHA-256" 65
+  running_runner_path="${BASH_SOURCE[0]}"
+  if [ -r "/proc/$$/fd/255" ]; then
+    running_runner_path="/proc/$$/fd/255"
+  fi
+  actual_runner_sha256="$(sha256sum "$running_runner_path" | awk '{print $1}')"
+  [ "$actual_runner_sha256" = "$RUNNER_SHA256" ] || \
+    fail "running AICopilot runner bytes do not match the prepared request" 78
+fi
 
 IFS=',' read -r -a REQUESTED_SERVICES <<< "$SERVICES"
 [ "${#REQUESTED_SERVICES[@]}" -gt 0 ] || fail "no services selected" 65
@@ -496,7 +530,19 @@ flock -n 9 || fail "another routine deployment is active: $LOCK_FILE" 75
 for legacy_lock in "${LEGACY_LOCKS[@]}"; do
   [ ! -d "$legacy_lock" ] || fail "legacy deployment lock is present: $legacy_lock" 75
 done
-unresolved_migration="$(find "$HISTORY_DIR" -maxdepth 1 -type f -name '*.migration-started.env' -print -quit 2>/dev/null || true)"
+unresolved_migration=""
+while IFS= read -r migration_started_file; do
+  [ -n "$migration_started_file" ] || continue
+  migration_committed_file="${migration_started_file%.migration-started.env}.migration-committed.env"
+  if migration_committed_matches_started "$migration_started_file" "$migration_committed_file"; then
+    rm -f "$migration_started_file"
+    printf 'runner_migration_state=reconciled-committed started=%s committed=%s\n' \
+      "$migration_started_file" "$migration_committed_file"
+    continue
+  fi
+  unresolved_migration="$migration_started_file"
+  break
+done < <(find "$HISTORY_DIR" -maxdepth 1 -type f -name '*.migration-started.env' -print 2>/dev/null | LC_ALL=C sort)
 if [ -n "$unresolved_migration" ]; then
   MIGRATION_STATE_FILE="$unresolved_migration"
   MIGRATION_STARTED=1
@@ -557,6 +603,31 @@ wait_service() {
     sleep "$health_interval"
   done
   fail "service did not become running/healthy: $service_name" 70
+}
+
+verify_runtime_recovery() {
+  local images_file="$1"
+  local service_name attempt recovered
+  local health_attempts="${IIOT_RUNNER_HEALTH_ATTEMPTS:-90}"
+  local health_interval="${IIOT_RUNNER_HEALTH_INTERVAL_SECONDS:-2}"
+  [[ "$health_attempts" =~ ^[1-9][0-9]*$ ]] || return 1
+  [ "$health_attempts" -le 300 ] || return 1
+  [[ "$health_interval" =~ ^[0-9]+$ ]] || return 1
+  [ "$health_interval" -le 30 ] || return 1
+  for service_name in "${RUNTIME_COMPOSE_SERVICES[@]}"; do
+    recovered=0
+    for attempt in $(seq 1 "$health_attempts"); do
+      if service_running_and_healthy "$images_file" "$service_name"; then
+        sleep "$health_interval"
+        if service_running_and_healthy "$images_file" "$service_name"; then
+          recovered=1
+          break
+        fi
+      fi
+      sleep "$health_interval"
+    done
+    [ "$recovered" -eq 1 ] || return 1
+  done
 }
 
 probe_http() {

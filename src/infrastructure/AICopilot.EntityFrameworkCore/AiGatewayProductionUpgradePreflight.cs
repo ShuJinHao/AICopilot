@@ -131,6 +131,29 @@ public static class AiGatewayProductionUpgradePreflight
               AND table_class.relkind IN ('r', 'p')
             ORDER BY table_class.relname;
 
+            SELECT 'relation|' || relation_state.relname || '|' ||
+                   relation_state.relkind::text || '|' ||
+                   relation_state.relpersistence::text || '|' ||
+                   relation_state.relispartition::text || '|' ||
+                   coalesce((
+                       SELECT string_agg(relation_option.option, ',' ORDER BY relation_option.option)
+                       FROM unnest(relation_state.reloptions) AS relation_option(option)), '')
+            FROM pg_class AS relation_state
+            JOIN pg_namespace AS relation_namespace
+              ON relation_namespace.oid = relation_state.relnamespace
+            WHERE relation_namespace.nspname = 'aigateway'
+            ORDER BY relation_state.relname, relation_state.relkind;
+
+            SELECT 'view|' || view_state.relname || '|' ||
+                   view_state.relkind::text || '|' ||
+                   pg_get_viewdef(view_state.oid, true)
+            FROM pg_class AS view_state
+            JOIN pg_namespace AS view_namespace
+              ON view_namespace.oid = view_state.relnamespace
+            WHERE view_namespace.nspname = 'aigateway'
+              AND view_state.relkind IN ('v', 'm')
+            ORDER BY view_state.relname, view_state.relkind;
+
             SELECT 'trigger|' || table_class.relname || '|' || trigger_state.tgname || '|' ||
                    trigger_state.tgenabled::text || '|' || pg_get_triggerdef(trigger_state.oid, true)
             FROM pg_trigger AS trigger_state
@@ -140,21 +163,87 @@ public static class AiGatewayProductionUpgradePreflight
               AND NOT trigger_state.tgisinternal
             ORDER BY table_class.relname, trigger_state.tgname;
 
-            SELECT 'trigger-function|' || function_namespace.nspname || '|' ||
+            SELECT 'function|' || function_namespace.nspname || '|' ||
                    function_state.proname || '|' ||
                    pg_get_function_identity_arguments(function_state.oid) || '|' ||
+                   function_state.prokind::text || '|' ||
+                   function_state.provolatile::text || '|' ||
+                   function_state.proisstrict::text || '|' ||
+                   function_state.prosecdef::text || '|' ||
+                   function_state.proleakproof::text || '|' ||
+                   function_state.proparallel::text || '|' ||
+                   coalesce((
+                       SELECT string_agg(function_option.option, ',' ORDER BY function_option.option)
+                       FROM unnest(function_state.proconfig) AS function_option(option)), '') || '|' ||
                    pg_get_functiondef(function_state.oid)
             FROM pg_proc AS function_state
             JOIN pg_namespace AS function_namespace ON function_namespace.oid = function_state.pronamespace
-            WHERE function_state.oid IN (
-                SELECT DISTINCT trigger_state.tgfoid
-                FROM pg_trigger AS trigger_state
-                JOIN pg_class AS table_class ON table_class.oid = trigger_state.tgrelid
-                JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
-                WHERE table_namespace.nspname = 'aigateway'
-                  AND NOT trigger_state.tgisinternal)
+            WHERE function_namespace.nspname = 'aigateway'
             ORDER BY function_namespace.nspname, function_state.proname,
                      pg_get_function_identity_arguments(function_state.oid);
+
+            SELECT 'type|' || type_state.typname || '|' ||
+                   type_state.typtype::text || '|' ||
+                   type_state.typcategory::text || '|' ||
+                   type_state.typispreferred::text || '|' ||
+                   type_state.typnotnull::text || '|' ||
+                   coalesce(format_type(nullif(type_state.typbasetype, 0), type_state.typtypmod), '') || '|' ||
+                   type_state.typndims::text || '|' ||
+                   coalesce(nullif(type_state.typcollation, 0)::regcollation::text, '') || '|' ||
+                   coalesce(type_state.typdefault, '') || '|' ||
+                   coalesce((
+                       SELECT string_agg(
+                           enum_state.enumsortorder::text || ':' || enum_state.enumlabel,
+                           ',' ORDER BY enum_state.enumsortorder)
+                       FROM pg_enum AS enum_state
+                       WHERE enum_state.enumtypid = type_state.oid), '') || '|' ||
+                   coalesce((
+                       SELECT string_agg(
+                           domain_constraint.conname || ':' ||
+                           pg_get_constraintdef(domain_constraint.oid, true),
+                           ',' ORDER BY domain_constraint.conname)
+                       FROM pg_constraint AS domain_constraint
+                       WHERE domain_constraint.contypid = type_state.oid), '') || '|' ||
+                   coalesce((
+                       SELECT range_state.rngsubtype::regtype::text || ':' ||
+                              coalesce(nullif(range_state.rngcollation, 0)::regcollation::text, '') || ':' ||
+                              coalesce(nullif(range_state.rngcanonical, 0)::regproc::text, '') || ':' ||
+                              coalesce(nullif(range_state.rngsubdiff, 0)::regproc::text, '') || ':' ||
+                              coalesce(nullif(range_state.rngmultitypid, 0)::regtype::text, '')
+                       FROM pg_range AS range_state
+                       WHERE range_state.rngtypid = type_state.oid), '')
+            FROM pg_type AS type_state
+            JOIN pg_namespace AS type_namespace
+              ON type_namespace.oid = type_state.typnamespace
+            WHERE type_namespace.nspname = 'aigateway'
+              AND (
+                  type_state.typtype IN ('e', 'd', 'r', 'm') OR
+                  (type_state.typtype = 'c' AND EXISTS (
+                      SELECT 1
+                      FROM pg_class AS composite_relation
+                      WHERE composite_relation.oid = type_state.typrelid
+                        AND composite_relation.relkind = 'c')))
+            ORDER BY type_state.typname;
+
+            SELECT 'composite-attribute|' || type_state.typname || '|' ||
+                   lpad(attribute_state.attnum::text, 4, '0') || '|' ||
+                   attribute_state.attname || '|' ||
+                   format_type(attribute_state.atttypid, attribute_state.atttypmod) || '|' ||
+                   attribute_state.attnotnull::text || '|' ||
+                   attribute_state.attidentity::text || '|' ||
+                   attribute_state.attgenerated::text
+            FROM pg_type AS type_state
+            JOIN pg_namespace AS type_namespace
+              ON type_namespace.oid = type_state.typnamespace
+            JOIN pg_class AS composite_relation
+              ON composite_relation.oid = type_state.typrelid
+             AND composite_relation.relkind = 'c'
+            JOIN pg_attribute AS attribute_state
+              ON attribute_state.attrelid = composite_relation.oid
+             AND attribute_state.attnum > 0
+             AND NOT attribute_state.attisdropped
+            WHERE type_namespace.nspname = 'aigateway'
+            ORDER BY type_state.typname, attribute_state.attnum;
 
             SELECT 'policy|' || table_class.relname || '|' || policy_state.polname || '|' ||
                    policy_state.polpermissive::text || '|' || policy_state.polcmd::text || '|' ||

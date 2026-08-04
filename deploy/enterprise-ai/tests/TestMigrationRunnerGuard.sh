@@ -36,6 +36,9 @@ case "${1:-}" in
   inspect)
     if [[ "$*" == *'.State.ExitCode'* ]]; then
       printf '%s\n' "${FAKE_MIGRATION_EXIT_CODE:-0}"
+    elif [ "${FAKE_RUNTIME_RECOVERY_UNHEALTHY:-false}" = true ] &&
+         [ -f "${FAKE_RECOVERY_PHASE_FILE:?}" ]; then
+      printf 'false|unhealthy\n'
     else
       printf 'true|healthy\n'
     fi
@@ -63,7 +66,10 @@ case "${1:-}" in
         exit 0
         ;;
       stop)
-        [ "${FAKE_RUNTIME_QUIESCE_FAIL:-false}" != true ] || exit 19
+        if [ "${FAKE_RUNTIME_QUIESCE_FAIL:-false}" = true ]; then
+          : > "${FAKE_RECOVERY_PHASE_FILE:?}"
+          exit 19
+        fi
         exit 0
         ;;
       ps)
@@ -78,6 +84,10 @@ case "${1:-}" in
         exit 0
         ;;
       up)
+        if [[ "$*" == *'-d --no-deps'* ]] &&
+           [ "${FAKE_RUNTIME_RECOVERY_UP_FAIL:-false}" = true ]; then
+          exit 23
+        fi
         if [[ "$*" == *aicopilot-migration* ]] &&
            [ -n "${AICOPILOT_MIGRATION_INVOCATION_ID:-}" ]; then
           printf '%s\n' "$AICOPILOT_MIGRATION_INVOCATION_ID" > \
@@ -141,10 +151,14 @@ make_request() {
   local sha="$2"
   local digest_character="$3"
   local services="${4:-httpapi,migration,dataworker,ragworker,web}"
+  local runner_sha256="${5:-}"
   local body="$TEST_ROOT/$invocation_id.body"
   local request="$TEST_ROOT/$invocation_id.env"
   local image_digest
   image_digest="$(printf '%064d' 0 | tr '0' "$digest_character")"
+  if [ -z "$runner_sha256" ]; then
+    runner_sha256="$(sha256sum "$SERVER_DIR/runner/iiot-release-runner.sh" | awk '{print $1}')"
+  fi
   {
     printf 'PROTOCOL=1\n'
     printf 'TARGET=AICopilot\n'
@@ -152,6 +166,7 @@ make_request() {
     printf 'GIT_SHA=%s\n' "$sha"
     printf 'RELEASE_TAG=sha-%s\n' "$sha"
     printf 'SERVICES=%s\n' "$services"
+    printf 'RUNNER_SHA256=%s\n' "$runner_sha256"
     printf 'AICOPILOT_HTTPAPI_IMAGE=registry.test/enterprise-ai/aicopilot-httpapi@sha256:%s\n' "$image_digest"
     printf 'AICOPILOT_MIGRATION_IMAGE=registry.test/enterprise-ai/aicopilot-migration@sha256:%s\n' "$image_digest"
     printf 'AICOPILOT_DATAWORKER_IMAGE=registry.test/enterprise-ai/aicopilot-dataworker@sha256:%s\n' "$image_digest"
@@ -165,9 +180,11 @@ make_request() {
 
 run_request() {
   local request="$1"
+  rm -f "$TEST_ROOT/recovery-phase"
   PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$DOCKER_LOG" \
   FAKE_MIGRATION_INVOCATION_FILE="$MIGRATION_INVOCATION_FILE" \
+  FAKE_RECOVERY_PHASE_FILE="$TEST_ROOT/recovery-phase" \
   IIOT_RUNNER_HEALTH_ATTEMPTS=1 \
   IIOT_RUNNER_HEALTH_INTERVAL_SECONDS=0 \
     "$SERVER_DIR/runner/iiot-release-runner.sh" \
@@ -192,6 +209,21 @@ grep -Eq 'pull| stop | up | start | exec ' "$DOCKER_LOG" && \
   fail 'partial AICopilot migration request wrote a started marker'
 
 : > "$DOCKER_LOG"
+runner_drift_invocation='migration-guard-runner-drift'
+runner_drift_request="$(make_request "$runner_drift_invocation" 7777777777777777777777777777777777777777 a 'web' "$(printf '%064d' 0)")"
+set +e
+FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+  run_request "$runner_drift_request" > "$TEST_ROOT/runner-drift.log" 2>&1
+runner_drift_status=$?
+set -e
+[ "$runner_drift_status" -eq 78 ] || \
+  fail 'runner byte drift was not rejected by the signed request'
+grep -Fq 'running AICopilot runner bytes do not match the prepared request' \
+  "$TEST_ROOT/runner-drift.log" || fail 'runner byte drift rejection was ambiguous'
+grep -Eq 'compose .* (pull|stop|up|start|exec)( |$)' "$DOCKER_LOG" && \
+  fail 'runner byte drift reached Docker mutation'
+
+: > "$DOCKER_LOG"
 success_invocation='migration-guard-success'
 success_request="$(make_request "$success_invocation" 1111111111111111111111111111111111111111 a)"
 FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 run_request "$success_request"
@@ -201,6 +233,17 @@ grep -Fq "INVOCATION_ID=$success_invocation" "$SERVER_DIR/releases/routine-curre
   fail 'valid migration proof did not commit the durable migration state'
 [ ! -f "$SERVER_DIR/releases/routine-history/$success_invocation.migration-started.env" ] || \
   fail 'valid migration proof left an unresolved migration-started marker'
+
+sed 's/^STATUS=migration-committed$/STATUS=migration-started/' \
+  "$SERVER_DIR/releases/routine-history/$success_invocation.migration-committed.env" > \
+  "$SERVER_DIR/releases/routine-history/$success_invocation.migration-started.env"
+FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+  run_request "$success_request" > "$TEST_ROOT/committed-reconcile.log" 2>&1
+grep -Fq 'runner_migration_state=reconciled-committed' \
+  "$TEST_ROOT/committed-reconcile.log" || \
+  fail 'exact committed migration counterpart was not reconciled'
+[ ! -f "$SERVER_DIR/releases/routine-history/$success_invocation.migration-started.env" ] || \
+  fail 'reconciled committed migration left a stale started marker'
 
 cp "$SERVER_DIR/releases/current-images.env" "$TEST_ROOT/current-images.before"
 cp "$SERVER_DIR/releases/routine-current.env" "$TEST_ROOT/routine-current.before"
@@ -224,6 +267,36 @@ cmp -s "$TEST_ROOT/routine-current.before" "$SERVER_DIR/releases/routine-current
 grep -Fq 'ROLLBACK_STATUS=completed' \
   "$SERVER_DIR/releases/routine-history/$quiesce_failure_invocation.failed.env" || \
   fail 'pre-migration quiesce failure did not restore the previous runtime'
+
+for recovery_mode in unhealthy up-failed; do
+  : > "$DOCKER_LOG"
+  recovery_invocation="migration-guard-quiesce-recovery-$recovery_mode"
+  recovery_request="$(make_request "$recovery_invocation" 6666666666666666666666666666666666666666 f)"
+  set +e
+  if [ "$recovery_mode" = unhealthy ]; then
+    FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_RUNTIME_RECOVERY_UNHEALTHY=true \
+      FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+      run_request "$recovery_request" > "$TEST_ROOT/recovery-$recovery_mode.log" 2>&1
+  else
+    FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_RUNTIME_RECOVERY_UP_FAIL=true \
+      FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+      run_request "$recovery_request" > "$TEST_ROOT/recovery-$recovery_mode.log" 2>&1
+  fi
+  recovery_status=$?
+  set -e
+  [ "$recovery_status" -eq 86 ] || \
+    fail "unverified runtime recovery was not frozen: mode=$recovery_mode status=$recovery_status"
+  grep -Fq 'STATUS=blocked-partial' \
+    "$SERVER_DIR/releases/routine-history/$recovery_invocation.failed.env" || \
+    fail "unverified runtime recovery was not marked blocked-partial: mode=$recovery_mode"
+  grep -Fq 'RESUME_ALLOWED=false' \
+    "$SERVER_DIR/releases/routine-history/$recovery_invocation.failed.env" || \
+    fail "unverified runtime recovery allowed resume: mode=$recovery_mode"
+  cmp -s "$TEST_ROOT/current-images.before" "$SERVER_DIR/releases/current-images.env" || \
+    fail "unverified runtime recovery promoted candidate images: mode=$recovery_mode"
+  cmp -s "$TEST_ROOT/routine-current.before" "$SERVER_DIR/releases/routine-current.env" || \
+    fail "unverified runtime recovery rewrote routine-current state: mode=$recovery_mode"
+done
 
 : > "$DOCKER_LOG"
 marker_failure_invocation='migration-guard-marker-failure'

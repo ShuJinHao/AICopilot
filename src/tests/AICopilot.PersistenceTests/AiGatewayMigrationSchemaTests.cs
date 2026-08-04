@@ -178,7 +178,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             AiGatewayProductionUpgradeContract.ExpectedProductionHistorySha256,
             AiGatewayProductionUpgradeContract.ProductionMigrationIds.Count,
             AiGatewayProductionUpgradeContract.ExpectedProductionSchemaSha256,
-            627));
+            741));
 
         await using var connection = new NpgsqlConnection(database.ConnectionString);
         await connection.OpenAsync();
@@ -373,6 +373,24 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         ALTER TABLE aigateway."__EFMigrationsHistory_AiGateway"
             ADD CONSTRAINT "CK_history_rejects_current_upgrade"
             CHECK ("MigrationId" <> '20260804055544_UpgradeHarnessRuntimeFromProduction');
+        """,
+        """
+        CREATE TYPE aigateway.structural_drift_enum AS ENUM ('unexpected');
+        """,
+        """
+        CREATE DOMAIN aigateway.structural_drift_domain AS text
+            CHECK (VALUE <> 'unexpected');
+        """,
+        """
+        CREATE FUNCTION aigateway.structural_drift_function(value integer)
+        RETURNS integer
+        LANGUAGE sql
+        IMMUTABLE
+        AS 'SELECT value + 1';
+        """,
+        """
+        CREATE MATERIALIZED VIEW aigateway.structural_drift_view
+        AS SELECT 1 AS value;
         """
     };
 
