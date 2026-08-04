@@ -56,24 +56,38 @@ SUPPORT_PATH_LIST="$STAGING_DIR/.support-install-paths"
 # shellcheck source=release-common.sh
 . "$COMMON_SCRIPT"
 
+find_support_install_blocker() {
+  local unsafe_marker
+  local orphan_transaction
+  local unowned_support_backup
+
+  unsafe_marker="$(release_find_unsafe_partial_marker "$DEPLOY_DIR")"
+  orphan_transaction="$(find "$DEPLOY_DIR" -maxdepth 1 -type d -name '.release-transaction.*' -print -quit 2>/dev/null || true)"
+  unowned_support_backup="$(release_find_unowned_support_backup "$DEPLOY_DIR")"
+  if [ -f "$DEPLOY_DIR/releases/blocked-release.env" ]; then
+    printf '%s\n' "$DEPLOY_DIR/releases/blocked-release.env"
+  elif [ -n "$unsafe_marker" ]; then
+    printf '%s\n' "$unsafe_marker"
+  elif [ -n "$orphan_transaction" ]; then
+    printf '%s\n' "$orphan_transaction"
+  elif [ -n "$unowned_support_backup" ]; then
+    printf '%s\n' "$unowned_support_backup"
+  fi
+}
+
 existing_lock_state="$(release_lock_value "$RELEASE_LOCK_DIR" state)"
-if [ "$existing_lock_state" != blocked ] &&
-   [ -d "$RELEASE_LOCK_DIR" ] &&
-   release_lock_is_active "$RELEASE_LOCK_DIR"; then
+if [ "$existing_lock_state" = blocked ]; then
+  blocked_reason="$(find_support_install_blocker)"
+  [ -n "$blocked_reason" ] || blocked_reason="$RELEASE_LOCK_DIR"
+  printf 'AICopilot support install is blocked by unresolved unsafe-partial state: %s\n' \
+    "$blocked_reason" >&2
+  rm -rf "$STAGING_DIR" 2>/dev/null || true
+  exit 86
+fi
+if [ -d "$RELEASE_LOCK_DIR" ] && release_lock_is_active "$RELEASE_LOCK_DIR"; then
   release_print_lock_diagnostics "$RELEASE_LOCK_DIR"
   rm -rf "$STAGING_DIR" 2>/dev/null || true
   exit 75
-fi
-
-unsafe_marker="$(release_find_unsafe_partial_marker "$DEPLOY_DIR")"
-orphan_transaction="$(find "$DEPLOY_DIR" -maxdepth 1 -type d -name '.release-transaction.*' -print -quit 2>/dev/null || true)"
-unowned_support_backup="$(release_find_unowned_support_backup "$DEPLOY_DIR")"
-if [ -f "$DEPLOY_DIR/releases/blocked-release.env" ] || [ -n "$unsafe_marker" ] ||
-   [ -n "$orphan_transaction" ] || [ -n "$unowned_support_backup" ]; then
-  printf 'AICopilot support install is blocked by unresolved unsafe-partial state: %s\n' \
-    "${unsafe_marker:-${orphan_transaction:-${unowned_support_backup:-$DEPLOY_DIR/releases/blocked-release.env}}}" >&2
-  rm -rf "$STAGING_DIR" 2>/dev/null || true
-  exit 86
 fi
 
 restore_support_backup() {
@@ -175,6 +189,12 @@ release_acquire_lock \
   support-installing \
   0
 LOCK_ACQUIRED=true
+support_install_blocker="$(find_support_install_blocker)"
+if [ -n "$support_install_blocker" ]; then
+  printf 'AICopilot support install is blocked by unresolved unsafe-partial state: %s\n' \
+    "$support_install_blocker" >&2
+  exit 86
+fi
 printf '%s\n' "$WORKSPACE_ENTRYPOINT" > "$RELEASE_LOCK_DIR/workspace-entrypoint"
 printf '%s\n' "$WORKSPACE_INVOCATION_ID" > "$RELEASE_LOCK_DIR/invocation-id"
 printf '%s\n' "$WORKSPACE_EXPECTED_SHA" > "$RELEASE_LOCK_DIR/expected-sha"
