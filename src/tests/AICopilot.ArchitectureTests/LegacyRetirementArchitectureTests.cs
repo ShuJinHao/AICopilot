@@ -299,6 +299,28 @@ public sealed class LegacyRetirementArchitectureTests
             "the destructive retired-table upgrade must not advertise an empty synthetic EF rollback");
     }
 
+    [Fact]
+    public void AiGatewayProductionFingerprint_ShouldBindInheritanceAndPartitionCatalogs()
+    {
+        var preflightSource = File.ReadAllText(Path.Combine(
+            SolutionRoot,
+            "src",
+            "infrastructure",
+            "AICopilot.EntityFrameworkCore",
+            "AiGatewayProductionUpgradePreflight.cs"));
+
+        preflightSource.Should().Contain("FROM pg_inherits AS inheritance_state");
+        preflightSource.Should().Contain("inheritance_state.inhdetachpending");
+        preflightSource.Should().Contain("child_relation.relpartbound");
+        preflightSource.Should().Contain("pg_get_partkeydef(relation_state.oid)");
+        preflightSource.Should().Contain("connected_parent_namespace.nspname = 'aigateway'");
+        preflightSource.Should().Contain("connected_child_namespace.nspname = 'aigateway'");
+        preflightSource.Should().Contain("parent_namespace.nspname = 'aigateway'");
+        preflightSource.Should().Contain(
+            "OR child_namespace.nspname = 'aigateway'",
+            "both external children and external parents change inherited query semantics");
+    }
+
     private const string FrozenProductionMigrationBytes =
         """
         b2db5032511334ec0c38bf48bd59b286816acf4787aec9d4f4e22e0015f868df 20260515030952_AiGatewayFreshBaseline.Designer.cs

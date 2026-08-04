@@ -398,6 +398,62 @@ public static class AiGatewayProductionUpgradePreflight
             WHERE relation_namespace.nspname = 'aigateway'
             ORDER BY relation_state.relname, relation_state.relkind;
 
+            SELECT 'relation-inheritance|' ||
+                   parent_namespace.nspname || '|' || parent_relation.relname || '|' ||
+                   parent_relation.relkind::text || '|' ||
+                   child_namespace.nspname || '|' || child_relation.relname || '|' ||
+                   child_relation.relkind::text || '|' ||
+                   inheritance_state.inhseqno::text || '|' ||
+                   inheritance_state.inhdetachpending::text || '|' ||
+                   child_relation.relispartition::text || '|' ||
+                   coalesce(pg_get_expr(
+                       child_relation.relpartbound,
+                       child_relation.oid,
+                       true), '')
+            FROM pg_inherits AS inheritance_state
+            JOIN pg_class AS parent_relation
+              ON parent_relation.oid = inheritance_state.inhparent
+            JOIN pg_namespace AS parent_namespace
+              ON parent_namespace.oid = parent_relation.relnamespace
+            JOIN pg_class AS child_relation
+              ON child_relation.oid = inheritance_state.inhrelid
+            JOIN pg_namespace AS child_namespace
+              ON child_namespace.oid = child_relation.relnamespace
+            WHERE parent_namespace.nspname = 'aigateway'
+               OR child_namespace.nspname = 'aigateway'
+            ORDER BY parent_namespace.nspname,
+                     parent_relation.relname,
+                     child_namespace.nspname,
+                     child_relation.relname,
+                     inheritance_state.inhseqno;
+
+            SELECT 'partition-key|' || relation_namespace.nspname || '|' ||
+                   relation_state.relname || '|' ||
+                   pg_get_partkeydef(relation_state.oid)
+            FROM pg_partitioned_table AS partition_state
+            JOIN pg_class AS relation_state
+              ON relation_state.oid = partition_state.partrelid
+            JOIN pg_namespace AS relation_namespace
+              ON relation_namespace.oid = relation_state.relnamespace
+            WHERE relation_namespace.nspname = 'aigateway'
+               OR EXISTS (
+                   SELECT 1
+                   FROM pg_inherits AS connected_inheritance
+                   JOIN pg_class AS connected_parent
+                     ON connected_parent.oid = connected_inheritance.inhparent
+                   JOIN pg_namespace AS connected_parent_namespace
+                     ON connected_parent_namespace.oid = connected_parent.relnamespace
+                   JOIN pg_class AS connected_child
+                     ON connected_child.oid = connected_inheritance.inhrelid
+                   JOIN pg_namespace AS connected_child_namespace
+                     ON connected_child_namespace.oid = connected_child.relnamespace
+                   WHERE relation_state.oid IN (
+                             connected_inheritance.inhparent,
+                             connected_inheritance.inhrelid)
+                     AND (connected_parent_namespace.nspname = 'aigateway'
+                          OR connected_child_namespace.nspname = 'aigateway'))
+            ORDER BY relation_namespace.nspname, relation_state.relname;
+
             SELECT 'relation-acl|' || relation_state.relname || '|' ||
                    relation_state.relkind::text || '|' ||
                    pg_get_userbyid(acl_state.grantor) || '|' ||

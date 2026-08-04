@@ -552,6 +552,11 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             ALTER COLUMN created_at TYPE timestamp(0) with time zone;
         """,
         """
+        CREATE SCHEMA structural_drift_external AUTHORIZATION aicopilot;
+        CREATE TABLE structural_drift_external.messages_child ()
+            INHERITS (aigateway.messages);
+        """,
+        """
         CREATE COLLATION aigateway.structural_drift_collation
             (provider = libc, locale = 'C');
         """
