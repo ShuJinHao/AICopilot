@@ -98,6 +98,7 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 - 同 request digest 已运行且目标服务健康时必须幂等成功，不重复 migration 或容器重建。cleanup、Harbor GC 和深度 attestation 不在同步应用热路径。
 - 部署行为测试入口必须根据脚本自身路径解析 AICopilot Git 根，不能依赖 AI 当前终端目录；从工作区根、AICopilot 仓库根或其它目录调用时必须测试同一固定提交/fake 外部依赖链，不能因工作区根不是 Git 仓库而误报 `128`。
 - 日常入口内部生成 invocation、远端 SHA、服务闭包、OCI digest 和 request digest，操作者不再手工复制 plan path/SHA/digest。选择 HttpApi/DataWorker/RagWorker 时必须自动包含 migration；请求 digest 是误操作和传输完整性门禁，不是抵御已控制部署账号攻击者的密码学边界。
+- migration 放行必须同时满足 compose 命令成功、`aicopilot-migration` 容器真实 `State.ExitCode=0`，以及容器日志存在 `aicopilot_migration_result=success` 且 `invocation_id` 与本次请求完全一致。应用异常但 compose 返回 `0`、标记缺失/错绑或日志不可读均视为失败；四个常驻 runtime 和 current release state 均不得更新。
 - 应用镜像必须使用 immutable `repository@sha256`；事务开始前还必须冻结 PostgreSQL、RabbitMQ、Qdrant 的真实 Config.Image、匹配仓库的 RepoDigest 和 runtime image id，并写入 transaction/release state。失败恢复只能使用冻结身份，不能重新解析可能移动的基础设施 tag。
 - no-op/commit 必须同时满足 SHA、plan/profile、support/services/image digest、全局 `.env` canonical fingerprint、应用/基础设施实际镜像身份和常驻容器稳定性。canonical fingerprint 只落 SHA-256，不得打印或落地 secret；fingerprint 漂移时禁止部分服务发布。
 - support installer、cancel、deploy 必须通过带 PID/process-start/owner/token 的原子 transition 串行化；live transition 不因 TTL 过期被回收，旧 token 不得删除新锁。恢复失败或 blocked evidence 写入失败时，残留 backup/永久 blocked lock 本身必须持续阻断并返回 `86`。

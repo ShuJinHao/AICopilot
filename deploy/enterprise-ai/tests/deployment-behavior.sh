@@ -108,6 +108,11 @@ if [ "${FAKE_INFRA_TAG_DRIFT:-false}" = true ] &&
    [ ! -f "${FAKE_REMOTE_DIR:?}/.fake-infra-tag-drift-active" ]; then
   : > "${FAKE_REMOTE_DIR:?}/.fake-infra-tag-drift-active"
 fi
+if [[ "$full" == compose*" up "*aicopilot-migration* ]] &&
+   [ -n "${AICOPILOT_MIGRATION_INVOCATION_ID:-}" ]; then
+  printf '%s\n' "$AICOPILOT_MIGRATION_INVOCATION_ID" > \
+    "${FAKE_REMOTE_DIR:?}/.fake-migration-invocation"
+fi
 case "$full" in
   "buildx version"*) printf 'github.com/docker/buildx fake\n'; exit 0 ;;
   buildx\ build*) exit 0 ;;
@@ -179,6 +184,10 @@ case "$full" in
     fi
     exit 0
     ;;
+  inspect*'.State.ExitCode'*)
+    printf '%s\n' "${FAKE_MIGRATION_CONTAINER_EXIT_CODE:-0}"
+    exit 0
+    ;;
   inspect*'.State.Running'*)
     container_id="${full##* }"
     if [ -n "${FAKE_UNHEALTHY_SERVICE:-}" ] && [[ "$container_id" == *"$FAKE_UNHEALTHY_SERVICE"* ]]; then
@@ -191,6 +200,7 @@ case "$full" in
     exit 0
     ;;
   inspect*'-f '*|inspect*'--format '*) printf 'healthy\n'; exit 0 ;;
+  compose*' ps -a -q '*) service="${full##* }"; printf 'fake-%s\n' "$service"; exit 0 ;;
   compose*' ps -q '*) service="${full##* }"; printf 'fake-%s\n' "$service"; exit 0 ;;
   compose*psql*)
     printf 'aigateway.language_models|0|0\nrag.embedding_models|0|0\n'
@@ -198,6 +208,15 @@ case "$full" in
     ;;
   compose*' exec -T aicopilot-webui '*)
     printf 'AICopilot web container non-root attestation passed: uid=1000\n'
+    exit 0
+    ;;
+  logs*)
+    if [ "${FAKE_MIGRATION_MARKER_MISSING:-false}" = true ]; then
+      printf 'aicopilot_migration_result=failure exception=InvalidOperationException\n'
+    else
+      invocation_id="$(sed -n '1p' "${FAKE_REMOTE_DIR:?}/.fake-migration-invocation")"
+      printf 'aicopilot_migration_result=success invocation_id=%s\n' "$invocation_id"
+    fi
     exit 0
     ;;
   system\ df*) printf 'TYPE TOTAL ACTIVE SIZE RECLAIMABLE\n'; exit 0 ;;

@@ -29,8 +29,7 @@ public sealed class MigrationWorkerSecretMigratorTests
             CancellationToken.None);
 
         stages.Should().Equal(
-            MigrationWorkerStage.VerifySecrets,
-            MigrationWorkerStage.StopApplication);
+            MigrationWorkerStage.VerifySecrets);
     }
 
     [Fact]
@@ -53,8 +52,7 @@ public sealed class MigrationWorkerSecretMigratorTests
             MigrationWorkerStage.SeedIdentity,
             MigrationWorkerStage.SeedAiGateway,
             MigrationWorkerStage.SeedCloudReadOnly,
-            MigrationWorkerStage.SeedSimulation,
-            MigrationWorkerStage.StopApplication);
+            MigrationWorkerStage.SeedSimulation);
     }
 
     [Fact]
@@ -80,7 +78,47 @@ public sealed class MigrationWorkerSecretMigratorTests
         stages.Should().Equal(
             MigrationWorkerStage.MigrateDatabases,
             MigrationWorkerStage.MigrateSecrets);
-        stages.Should().NotContain(MigrationWorkerStage.StopApplication);
+    }
+
+    [Fact]
+    public async Task Process_MigrationFailure_ShouldReturnNonZeroWithoutSuccessMarker()
+    {
+        var standardOutput = new StringWriter();
+        var standardError = new StringWriter();
+
+        var exitCode = await MigrationWorkAppProcess.RunAsync(
+            _ => Task.FromException(new InvalidOperationException("migration failed")),
+            "deploy-test-failure",
+            standardOutput,
+            standardError);
+
+        exitCode.Should().Be(1);
+        standardOutput.ToString().Should().NotContain(MigrationWorkAppProcess.SuccessMarker);
+        standardError.ToString().Should().Contain("aicopilot_migration_result=failure");
+    }
+
+    [Fact]
+    public async Task Process_AllStagesCompleted_ShouldReturnZeroWithBoundSuccessMarker()
+    {
+        var migrationCompleted = false;
+        var standardOutput = new StringWriter();
+        var standardError = new StringWriter();
+
+        var exitCode = await MigrationWorkAppProcess.RunAsync(
+            _ =>
+            {
+                migrationCompleted = true;
+                return Task.CompletedTask;
+            },
+            "deploy-test-success",
+            standardOutput,
+            standardError);
+
+        migrationCompleted.Should().BeTrue();
+        exitCode.Should().Be(0);
+        standardOutput.ToString().Should().Be(
+            $"{MigrationWorkAppProcess.SuccessMarker} invocation_id=deploy-test-success{Environment.NewLine}");
+        standardError.ToString().Should().BeEmpty();
     }
 
     [Fact]

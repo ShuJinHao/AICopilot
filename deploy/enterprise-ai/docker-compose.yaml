@@ -118,6 +118,7 @@ services:
       AICopilot__PrivateModel__ContextWindowTokens: ${AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS:-65536}
       AICopilot__PrivateModel__MaxOutputTokens: ${AICOPILOT_PRIVATE_MODEL_MAX_OUTPUT_TOKENS:-4096}
       AICopilot__PrivateModel__Temperature: ${AICOPILOT_PRIVATE_MODEL_TEMPERATURE:-0.2}
+      MigrationWorker__InvocationId: ${AICOPILOT_MIGRATION_INVOCATION_ID:-unbound}
       OTEL_SERVICE_NAME: aicopilot-migration
     depends_on:
       postgres:

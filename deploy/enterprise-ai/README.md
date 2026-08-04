@@ -220,7 +220,7 @@ Web/HttpApi 继续使用 HTTP 探针和 security attestation。DataWorker/RagWor
 1. 在本地 `main` 提交目标改动并保持工作树 clean，不手工选择服务或预先 push。
 2. 在工作区根运行 `pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot`；入口自动 push 当前 HEAD、读取生产 SHA，并按 Git 改动和依赖闭包计算受影响服务。
 3. 内部执行器从远端 tip 创建隔离 worktree，`build-and-push.sh` 只构建并推送计算出的不可变 OCI 镜像；HttpApi/DataWorker/RagWorker 自动加入 migration。
-4. 入口通过一次 SSH 发送私有 digest-bound request；稳定 Runner 串行执行备份、migration、`--no-deps` rollout、健康检查、失败回滚和 history。
+4. 入口通过一次 SSH 发送私有 digest-bound request；稳定 Runner 串行执行备份、migration、`--no-deps` rollout、健康检查、失败回滚和 history。migration 只有在 compose 成功、容器真实退出码为 `0`、并出现与本次 invocation 精确绑定的成功标记后才放行 runtime。
 5. 影响无法安全归属时入口必须停止，禁止操作者用 `-All` 或手工 services 把未知影响退化成全量。不要直接调用项目脚本。
 6. 构建后远端失败时，只有显式恢复场景才使用内部 `Deploy.ps1 -Deploy -ResumeInvocation <id>` 重发同一请求，不重新 build。Runner/Compose/support/cleanup/GC/深度 attestation 只在独立维护窗口执行。
 
@@ -231,7 +231,7 @@ Harbor tag retention 和 Harbor GC 需要服务器 `.env` 显式提供 `HARBOR_U
 
 `/data` 达到 80% 必须告警并输出占用摘要，达到 85% 必须先清理再继续普通部署，达到 90% 阻断非应急部署。发布后清理是主线，还必须配置周级兜底清理 cron，避免部署中断后 build cache、旧镜像和旧 Harbor blob 长期堆积。
 
-服务器必须预先具备 Harbor pull 凭据；本机构建脚本按需执行 `docker login`，服务器 `deploy-release.sh` 本身只重写所选应用镜像 tag 并执行 `docker compose pull`，不伪装成会自动登录 Harbor。全量发布时先启动基础服务、运行 `aicopilot-migration`，并在启动 HttpApi/DataWorker/RagWorker/Web 之前检查模型和 Embedding API key 已全部迁移到 `encv2:`。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被旧 tag 覆盖；如果目标机已有旧部署但还没有 `releases/current-release.env`，脚本会用服务器 `.env` 作为初始镜像基线并写入 release manifest，不需要把 `services` 留空。按需发布包含 `httpapi`、`dataworker` 或 `ragworker` 时必须同时包含 `migration`，由 migration worker 在 runtime 启动前重新迁移并验证 `encv2:` 密文可用当前密钥解密；web-only 发布可以不带 `migration`。服务启动后会探测 Web 首页、HTTP-only 安全头，并自动运行 `scripts/check-release-security-attestation.sh` 验收 Cloud OIDC 状态接口、Web 非 root 和 API key 密文迁移。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，其中 summary 会包含 release security attestation 输出。
+服务器必须预先具备 Harbor pull 凭据；本机构建脚本按需执行 `docker login`，服务器 `deploy-release.sh` 本身只重写所选应用镜像 tag 并执行 `docker compose pull`，不伪装成会自动登录 Harbor。全量发布时先启动基础服务、运行 `aicopilot-migration`，并在启动 HttpApi/DataWorker/RagWorker/Web 之前同时确认 compose 成功、migration 容器真实退出码为 `0`、与本次 invocation 绑定的成功标记存在，再检查模型和 Embedding API key 已全部迁移到 `encv2:`。按需发布会先从当前 release 读取未选服务镜像，避免 `.env` 被旧 tag 覆盖；如果目标机已有旧部署但还没有 `releases/current-release.env`，脚本会用服务器 `.env` 作为初始镜像基线并写入 release manifest，不需要把 `services` 留空。按需发布包含 `httpapi`、`dataworker` 或 `ragworker` 时必须同时包含 `migration`，由 migration worker 在 runtime 启动前重新迁移并验证 `encv2:` 密文可用当前密钥解密；web-only 发布可以不带 `migration`。服务启动后会探测 Web 首页、HTTP-only 安全头，并自动运行 `scripts/check-release-security-attestation.sh` 验收 Cloud OIDC 状态接口、Web 非 root 和 API key 密文迁移。部署完成后会写入 `releases/current-release.env`、`previous-release.env`、`staged-release.env`、`current-release.summary.md` 和 `history/`，其中 summary 会包含 release security attestation 输出。
 
 ## 单独本机构建
 

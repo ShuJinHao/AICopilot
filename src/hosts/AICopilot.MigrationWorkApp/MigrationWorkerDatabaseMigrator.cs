@@ -28,6 +28,14 @@ internal static class MigrationWorkerDatabaseMigrator
         IReadOnlyList<MigrationHistoryBootstrapper.MigrationContext> migrationContexts,
         CancellationToken cancellationToken)
     {
+        var aiGateway = migrationContexts.Single(context =>
+            context.DbContext is AiGatewayDbContext);
+        var connectionString = aiGateway.DbContext.Database.GetConnectionString()
+            ?? aiGateway.DbContext.Database.GetDbConnection().ConnectionString;
+        await AiGatewayProductionUpgradePreflight.InspectAsync(
+            connectionString,
+            cancellationToken);
+
         await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(migrationContexts, cancellationToken);
 
         foreach (var migrationContext in migrationContexts)

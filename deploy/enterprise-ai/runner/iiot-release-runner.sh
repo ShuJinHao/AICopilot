@@ -220,11 +220,34 @@ doctor_common() {
 compose_with_images() {
   local images_file="$1"
   shift
-  docker compose --env-file "$ENV_FILE" --env-file "$images_file" -f "$COMPOSE_FILE" "$@"
+  if [ "$TARGET" = aicopilot ]; then
+    AICOPILOT_MIGRATION_INVOCATION_ID="${INVOCATION_ID:-unbound}" \
+      docker compose --env-file "$ENV_FILE" --env-file "$images_file" -f "$COMPOSE_FILE" "$@"
+  else
+    docker compose --env-file "$ENV_FILE" --env-file "$images_file" -f "$COMPOSE_FILE" "$@"
+  fi
 }
 
 compose_without_images() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
+verify_aicopilot_migration_completion() {
+  local images_file="$1"
+  local container exit_code logs expected_marker
+  [ "$TARGET" = aicopilot ] || return 0
+
+  container="$(compose_with_images "$images_file" ps -a -q "$MIGRATION_SERVICE" 2>/dev/null || true)"
+  [[ "$container" =~ ^[A-Za-z0-9._-]+$ ]] || \
+    fail "migration container identity is missing or ambiguous" 70
+  exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || true)"
+  [ "$exit_code" = 0 ] || fail "migration container exit code is not zero: ${exit_code:-unknown}" 70
+  logs="$(docker logs "$container" 2>&1)" || fail "migration container logs are unreadable" 70
+  expected_marker="aicopilot_migration_result=success invocation_id=$INVOCATION_ID"
+  grep -Fqx "$expected_marker" <<< "$logs" || \
+    fail "migration success marker is missing for invocation $INVOCATION_ID" 70
+  printf 'runner_migration=verified container=%s exit_code=0 invocation_id=%s\n' \
+    "$container" "$INVOCATION_ID"
 }
 
 if [ "$MODE" = doctor ]; then
@@ -546,8 +569,11 @@ if [[ "$SELECTED" == *" migration "* ]]; then
   (cd "$backup_dir" && sha256sum "$(basename "$BACKUP_FILE")" > "$(basename "$BACKUP_FILE").sha256")
 
   printf 'runner_phase=migration target=%s\n' "$TARGET_NAME"
-  compose_with_images "$CANDIDATE_IMAGES_FILE" up --no-deps --abort-on-container-exit \
-    --exit-code-from "$MIGRATION_SERVICE" "$MIGRATION_SERVICE"
+  if ! compose_with_images "$CANDIDATE_IMAGES_FILE" up --no-deps --abort-on-container-exit \
+    --exit-code-from "$MIGRATION_SERVICE" "$MIGRATION_SERVICE"; then
+    fail "compose migration command failed" 70
+  fi
+  verify_aicopilot_migration_completion "$CANDIDATE_IMAGES_FILE"
 fi
 
 if [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ]; then

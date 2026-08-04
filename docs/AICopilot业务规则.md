@@ -186,6 +186,7 @@ Cloud AiRead 设备契约：
 - 内网 HTTP Harbor 推送后的不可变镜像解析必须选择唯一 `linux/amd64` manifest digest；`buildx` HTTPS inspection 失败时可使用 `docker manifest inspect --insecure --verbose`，但不得退化为 tag、attestation digest 或跳过 digest-bound request。
 - AICopilot 后端多服务在同一候选内顺序 publish 时，源码 detached worktree 与按 service 隔离的 .NET SDK artifacts 根都必须放在工作区统一 deployment artifacts 根；不得落入 macOS `TMPDIR=/private/var/folders/...`、共享 `bin/obj`、混用 `/private/var` 与 `/var` 路径别名或靠调整服务顺序规避依赖图污染。
 - support release 必须包含 compose、执行 staging/SHA256 校验，并让 support reservation、全局 release lock 和 deploy 使用同一 token/digest；`.env`、release state、锁和备份不得进入同步包。健康前失败必须恢复持久状态；active/stale lock、真实退出码、timeout、信号释放锁和同 SHA 健康幂等必须有行为回归。
+- AICopilot migration 只有在 compose 命令成功、migration 容器真实退出码为 `0`、且容器日志存在与本次 invocation 精确绑定的成功标记时才算完成；任一条件失败不得启动 HttpApi/DataWorker/RagWorker/Web，不得提交 current release state。MigrationWorkApp 只能在数据库 migration、secret 迁移和全部 seed 完成后输出成功标记，任一异常必须以非零进程码终止。
 - 正式发布和健康 no-op 必须绑定 workspace plan/profile、固定 Git SHA、显式服务闭包、immutable OCI、全局配置 fingerprint 与实际运行容器身份；配置 fingerprint 漂移时普通部署停止并要求独立配置维护或从零部署，不得自动扩大成全量服务发布。后端服务闭包仍显式包含 migration。
 - support、compose、release state、三项基础设施和全部常驻 runtime 必须一起恢复并验证；基础设施身份以事务前冻结的 RepoDigest/runtime image id 为准，不得用可变 tag 冒充旧运行态。恢复或阻断证据不确定统一返回 `86` 并永久 fail-closed；reservation 原子 transition 与断联对账失败/active/unknown 返回 `87`，禁止自动取消或重试。
 - 模型 smoke 的 `AICOPILOT_MODEL_SMOKE_API_KEY=dummy-key` 只允许作为真实模型网关的显式兼容例外，必须同时设置 `AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=true` 或手工 smoke 命令传 `--allow-dummy-key`；默认 preflight 必须拒绝该弱值。

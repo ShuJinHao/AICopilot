@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AICopilot.EntityFrameworkCore.Migrations.AiGatewayDbContext
 {
     [DbContext(typeof(global::AICopilot.EntityFrameworkCore.AiGatewayDbContext))]
-    [Migration("20260802032046_AiGatewayHarnessBaseline")]
-    partial class AiGatewayHarnessBaseline
+    [Migration("20260804055544_UpgradeHarnessRuntimeFromProduction")]
+    partial class UpgradeHarnessRuntimeFromProduction
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

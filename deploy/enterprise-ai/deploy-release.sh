@@ -88,7 +88,40 @@ INFRA_IMAGE_KEYS=(
 )
 
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  AICOPILOT_MIGRATION_INVOCATION_ID="${WORKSPACE_INVOCATION_ID:-unbound}" \
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
+run_migration_and_verify() {
+  local invocation_id container exit_code logs expected_marker
+  invocation_id="${WORKSPACE_INVOCATION_ID:-unbound}"
+
+  if ! compose up --no-deps --abort-on-container-exit \
+    --exit-code-from aicopilot-migration aicopilot-migration; then
+    printf 'AICopilot migration compose command failed.\n' >&2
+    return 70
+  fi
+  container="$(compose ps -a -q aicopilot-migration 2>/dev/null || true)"
+  if [[ ! "$container" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf 'AICopilot migration container identity is missing or ambiguous.\n' >&2
+    return 70
+  fi
+  exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || true)"
+  if [ "$exit_code" != 0 ]; then
+    printf 'AICopilot migration container exit code is not zero: %s\n' "${exit_code:-unknown}" >&2
+    return 70
+  fi
+  if ! logs="$(docker logs "$container" 2>&1)"; then
+    printf 'AICopilot migration container logs are unreadable.\n' >&2
+    return 70
+  fi
+  expected_marker="aicopilot_migration_result=success invocation_id=$invocation_id"
+  if ! grep -Fqx "$expected_marker" <<< "$logs"; then
+    printf 'AICopilot migration success marker is missing for invocation %s.\n' "$invocation_id" >&2
+    return 70
+  fi
+  printf 'AICopilot migration verified: container=%s exit_code=0 invocation_id=%s\n' \
+    "$container" "$invocation_id"
 }
 
 ensure_release_tag() {
@@ -2069,7 +2102,7 @@ if [ -z "$REQUESTED_SERVICES" ]; then
   compose up -d --remove-orphans postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
   MIGRATION_EXECUTED=true
-  compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+  run_migration_and_verify
   check_model_secret_migration_preflight
   compose up -d aicopilot-httpapi aicopilot-dataworker aicopilot-ragworker aicopilot-webui
 else
@@ -2079,7 +2112,7 @@ else
   wait_for_compose_service_healthy postgres 180
   if [ "$RUN_MIGRATION" = "true" ]; then
     MIGRATION_EXECUTED=true
-    compose up --no-deps --abort-on-container-exit --exit-code-from aicopilot-migration aicopilot-migration
+    run_migration_and_verify
     check_model_secret_migration_preflight
   elif [ "$BACKEND_RUNTIME_SELECTED" = "true" ]; then
     check_model_secret_migration_preflight

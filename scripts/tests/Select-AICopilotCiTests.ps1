@@ -737,6 +737,23 @@ if ($Mode -eq 'Quality') {
         Sort-Object @{ Expression = { $_.RelativeDirectory.Length }; Descending = $true })
 
     foreach ($file in $changed) {
+        if ($file -ceq '.gitattributes') {
+            $deploymentAffected = $true
+            $architectureProjects = @($testProjects | Where-Object Category -ceq 'Architecture')
+            $deploymentProject = @($testProjects |
+                Where-Object Name -ceq 'AICopilot.DeploymentTests')
+            if ($architectureProjects.Count -eq 0 -or $deploymentProject.Count -ne 1) {
+                $unclassified.Add($file)
+            } else {
+                foreach ($architectureProject in $architectureProjects) {
+                    Add-SelectedProject -Selected $selected -Project $architectureProject `
+                        -Category Architecture -Reason "repository-byte-policy:$file"
+                }
+                Add-SelectedProject -Selected $selected -Project $deploymentProject[0] `
+                    -Category DeploymentContract -Reason "repository-byte-policy:$file"
+            }
+            continue
+        }
         if ($file.StartsWith($webRoot, [StringComparison]::Ordinal)) {
             if ($Mode -eq 'Deployment') {
                 continue

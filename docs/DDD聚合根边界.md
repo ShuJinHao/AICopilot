@@ -57,7 +57,7 @@
 |---|---|---|
 | `AiCopilotDbContext` | `AuditLogEntry`、`OutboxMessage`、`PersistenceCommitMarker` | 主基础设施 migration owner；唯一拥有 Outbox 与 persistence commit marker 迁移 |
 | `IdentityStoreDbContext` | Identity 记录、`ExternalIdentityBinding`；审计只作为事务参与者 | 拥有 Identity 迁移；审计映射使用 `ExcludeFromMigrations` |
-| `AiGatewayDbContext` | 上述七个 AiGateway 集合 | 拥有当前单一 Harness baseline |
+| `AiGatewayDbContext` | 上述七个 AiGateway 集合 | 拥有已投产的 append-only migration 历史和当前增量升级 |
 | `RagDbContext` | RAG 聚合、`Document`、`DocumentChunk` | 拥有 RAG 迁移 |
 | `DataAnalysisDbContext` | `BusinessDatabase`、`DataSourcePermissionGrant` | 拥有 DataAnalysis 迁移 |
 | `McpServerDbContext` | `McpServerInfo` | 拥有 MCP 迁移 |
@@ -66,7 +66,8 @@
 | `PersistenceCommitMarkerDbContext` | fresh verification 与 marker 维护 | 无独立 migration，映射使用 `ExcludeFromMigrations` |
 
 - 六个 migration owner 必须使用各自隔离的 `__EFMigrationsHistory_*`；不得让单一 Context 的迁移或回滚污染其它 Context。
-- 修改 `AiGatewayDbContext` 只能重新生成当前 Harness baseline；不得修改其它 DbContext 迁移链来伪造一致。
+- AiGateway 尚未首次投产的空库可以在投产前整理 fresh baseline；一旦 migration ID 进入生产，历史文件名、ID 和字节全部 append-only，后续模型变化只能新增 migration，不得压缩、改写或用新 baseline 覆盖生产升级链。
+- 生产升级前必须对真实 `__EFMigrationsHistory_AiGateway` 和 schema 元数据做冻结指纹核对；未知 history/schema 不得猜测、补写虚假 history 或继续 migration。退役表只能来自显式 allowlist，删除前必须生成完整 PostgreSQL dump 与 SHA-256；其它表和业务记录必须保留。
 - `PostgresModelQuotaReservationStore` 是模型配额唯一生产 store，只能经 `AiGatewayTransactionRunner` 写入 `AiGatewayDbContext`；模型调用预约、结算、回收的事务语义不得复制到其它 Context。
 - 没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描。DataAnalysis 与 MCP 不写 Outbox；AiGateway 只从 `Session` 领域事件物化 Outbox，RAG 只使用 delayed integration-event factory，业务 Context 不映射共享 Outbox。
 
