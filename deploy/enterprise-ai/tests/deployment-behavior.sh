@@ -202,6 +202,7 @@ case "$full" in
   inspect*'-f '*|inspect*'--format '*) printf 'healthy\n'; exit 0 ;;
   compose*' ps -a -q '*) service="${full##* }"; printf 'fake-%s\n' "$service"; exit 0 ;;
   compose*' ps -q '*) service="${full##* }"; printf 'fake-%s\n' "$service"; exit 0 ;;
+  compose*pg_dump*) printf 'fake-complete-postgresql-dump\n'; exit 0 ;;
   compose*psql*)
     printf 'aigateway.language_models|0|0\nrag.embedding_models|0|0\n'
     exit 0
@@ -554,6 +555,12 @@ TEST_WORKSPACE_PLAN_FILE="$ALL_PLAN_FILE" \
 TEST_WORKSPACE_PLAN_DIGEST="$ALL_PLAN_DIGEST" \
 TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-all \
   run_local_release > "$TEST_ROOT/config-fingerprint-full-release.log" 2>&1
+full_database_backup="$(find "$REMOTE_DIR/backups/postgres" -maxdepth 1 -type f \
+  -name 'aicopilot-deployment-behavior-all-*.dump' -print -quit)"
+[ -s "$full_database_backup" ] || fail "full migration path did not create a complete database backup"
+[ -s "$full_database_backup.sha256" ] || fail "full migration path did not create a backup checksum"
+(cd "$(dirname "$full_database_backup")" && sha256sum -c "$(basename "$full_database_backup").sha256" >/dev/null) || \
+  fail "full migration path database backup checksum did not verify"
 if grep -Fq 'QdRotatedStrongSecretValue5678' "$REMOTE_DIR/releases/current-release.env" "$REMOTE_DIR/releases/current-release.summary.md"; then
   fail "full config deployment recorded a secret value instead of only its fingerprint"
 fi

@@ -69,6 +69,8 @@ RUNTIME_RABBITMQ_IMAGE_DIGEST=""
 RUNTIME_QDRANT_IMAGE_REF=""
 RUNTIME_QDRANT_IMAGE_DIGEST=""
 MIGRATION_COMPLETED=false
+DATABASE_BACKUP_FILE=""
+DATABASE_BACKUP_SHA256=""
 UNSAFE_PARTIAL_EXIT=86
 INVOCATION_STATE_INITIALIZED=false
 INVOCATION_STATE_FILE=""
@@ -122,6 +124,50 @@ run_migration_and_verify() {
   fi
   printf 'AICopilot migration verified: container=%s exit_code=0 invocation_id=%s\n' \
     "$container" "$invocation_id"
+}
+
+backup_database_before_migration() {
+  local backup_dir backup_id backup_file backup_temp checksum_temp
+  backup_dir="$DEPLOY_DIR/backups/postgres"
+  backup_id="${WORKSPACE_INVOCATION_ID:-$DEPLOY_LOCK_TOKEN}"
+  [[ "$backup_id" =~ ^[A-Za-z0-9._-]{1,96}$ ]] || {
+    printf 'AICopilot migration backup identity is invalid.\n' >&2
+    return 64
+  }
+  [ -n "${POSTGRES_USER:-}" ] && [ -n "${POSTGRES_DB:-}" ] && \
+    [ -n "${POSTGRES_PASSWORD:-}" ] || {
+      printf 'AICopilot migration backup requires POSTGRES_USER/POSTGRES_DB/POSTGRES_PASSWORD.\n' >&2
+      return 66
+    }
+  mkdir -p "$backup_dir"
+  umask 077
+  backup_file="$backup_dir/aicopilot-${backup_id}-$(date -u +%Y%m%dT%H%M%SZ)-$$.dump"
+  backup_temp="$backup_file.partial"
+  checksum_temp="$backup_file.sha256.partial"
+  [ ! -e "$backup_file" ] && [ ! -e "$backup_temp" ] && [ ! -e "$checksum_temp" ] || {
+    printf 'AICopilot migration backup path already exists: %s\n' "$backup_file" >&2
+    return 65
+  }
+  printf 'AICopilot migration database backup: %s\n' "$backup_file"
+  if ! compose exec -T -e "PGPASSWORD=$POSTGRES_PASSWORD" postgres \
+    pg_dump -h 127.0.0.1 -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$backup_temp"; then
+    rm -f "$backup_temp" "$checksum_temp"
+    printf 'AICopilot migration database backup command failed.\n' >&2
+    return 74
+  fi
+  if [ ! -s "$backup_temp" ]; then
+    rm -f "$backup_temp" "$checksum_temp"
+    printf 'AICopilot migration database backup is empty.\n' >&2
+    return 74
+  fi
+  mv "$backup_temp" "$backup_file"
+  chmod 600 "$backup_file"
+  DATABASE_BACKUP_SHA256="$(release_sha256_file "$backup_file")"
+  printf '%s  %s\n' "$DATABASE_BACKUP_SHA256" "$(basename "$backup_file")" > "$checksum_temp"
+  chmod 600 "$checksum_temp"
+  mv "$checksum_temp" "$backup_file.sha256"
+  DATABASE_BACKUP_FILE="$backup_file"
+  printf 'AICopilot migration database backup verified: sha256=%s\n' "$DATABASE_BACKUP_SHA256"
 }
 
 ensure_release_tag() {
@@ -563,6 +609,8 @@ persist_blocked_release() {
     printf 'DEPLOY_FAILURE_EXIT_CODE=%s\n' "$original_status"
     printf 'DEPLOY_FAILURE_REASON=%s\n' "$reason"
     printf 'DEPLOY_MIGRATION_EXECUTED=%s\n' "$MIGRATION_EXECUTED"
+    printf 'DEPLOY_DATABASE_BACKUP=%s\n' "${DATABASE_BACKUP_FILE:-none}"
+    printf 'DEPLOY_DATABASE_BACKUP_SHA256=%s\n' "${DATABASE_BACKUP_SHA256:-none}"
     printf 'DEPLOY_TRANSACTION_BACKUP=%s\n' "$STATE_TRANSACTION_DIR"
     printf 'DEPLOY_BLOCKED_AT_UTC=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   } > "$temp_file"
@@ -2101,6 +2149,7 @@ if [ -z "$REQUESTED_SERVICES" ]; then
   CONTAINER_UPDATE_STARTED=true
   compose up -d --remove-orphans postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
+  backup_database_before_migration
   MIGRATION_EXECUTED=true
   run_migration_and_verify
   check_model_secret_migration_preflight
@@ -2111,6 +2160,7 @@ else
   compose up -d postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
   if [ "$RUN_MIGRATION" = "true" ]; then
+    backup_database_before_migration
     MIGRATION_EXECUTED=true
     run_migration_and_verify
     check_model_secret_migration_preflight

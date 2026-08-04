@@ -113,6 +113,64 @@ public static class AiGatewayProductionUpgradePreflight
               AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
             ORDER BY table_class.relname, constraint_state.conname;
 
+            SELECT 'table-security|' || table_class.relname || '|' ||
+                   table_class.relrowsecurity::text || '|' ||
+                   table_class.relforcerowsecurity::text || '|' ||
+                   table_class.relreplident::text
+            FROM pg_class AS table_class
+            JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
+            WHERE table_namespace.nspname = 'aigateway'
+              AND table_class.relkind IN ('r', 'p')
+              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
+            ORDER BY table_class.relname;
+
+            SELECT 'trigger|' || table_class.relname || '|' || trigger_state.tgname || '|' ||
+                   trigger_state.tgenabled::text || '|' || pg_get_triggerdef(trigger_state.oid, true)
+            FROM pg_trigger AS trigger_state
+            JOIN pg_class AS table_class ON table_class.oid = trigger_state.tgrelid
+            JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
+            WHERE table_namespace.nspname = 'aigateway'
+              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
+              AND NOT trigger_state.tgisinternal
+            ORDER BY table_class.relname, trigger_state.tgname;
+
+            SELECT 'trigger-function|' || function_namespace.nspname || '|' ||
+                   function_state.proname || '|' ||
+                   pg_get_function_identity_arguments(function_state.oid) || '|' ||
+                   pg_get_functiondef(function_state.oid)
+            FROM pg_proc AS function_state
+            JOIN pg_namespace AS function_namespace ON function_namespace.oid = function_state.pronamespace
+            WHERE function_state.oid IN (
+                SELECT DISTINCT trigger_state.tgfoid
+                FROM pg_trigger AS trigger_state
+                JOIN pg_class AS table_class ON table_class.oid = trigger_state.tgrelid
+                JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
+                WHERE table_namespace.nspname = 'aigateway'
+                  AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
+                  AND NOT trigger_state.tgisinternal)
+            ORDER BY function_namespace.nspname, function_state.proname,
+                     pg_get_function_identity_arguments(function_state.oid);
+
+            SELECT 'policy|' || table_class.relname || '|' || policy_state.polname || '|' ||
+                   policy_state.polpermissive::text || '|' || policy_state.polcmd::text || '|' ||
+                   coalesce((
+                       SELECT string_agg(policy_role.role_name, ',' ORDER BY policy_role.role_name)
+                       FROM (
+                           SELECT CASE WHEN role_oid = 0
+                                       THEN 'public'
+                                       ELSE pg_get_userbyid(role_oid)
+                                  END AS role_name
+                           FROM unnest(policy_state.polroles) AS expanded_role(role_oid)
+                       ) AS policy_role), '') || '|' ||
+                   coalesce(pg_get_expr(policy_state.polqual, policy_state.polrelid, true), '') || '|' ||
+                   coalesce(pg_get_expr(policy_state.polwithcheck, policy_state.polrelid, true), '')
+            FROM pg_policy AS policy_state
+            JOIN pg_class AS table_class ON table_class.oid = policy_state.polrelid
+            JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
+            WHERE table_namespace.nspname = 'aigateway'
+              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
+            ORDER BY table_class.relname, policy_state.polname;
+
             SELECT 'sequence|' || sequence_name || '|' || data_type || '|' ||
                    start_value || '|' || minimum_value || '|' || maximum_value || '|' ||
                    increment || '|' || cycle_option

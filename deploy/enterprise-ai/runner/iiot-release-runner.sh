@@ -183,6 +183,51 @@ atomic_copy() {
   mv -f "$temp" "$destination"
 }
 
+write_migration_started_state() {
+  local temp
+  [ "$TARGET" = aicopilot ] || return 0
+  MIGRATION_STATE_FILE="$HISTORY_DIR/${INVOCATION_ID}.migration-started.env"
+  temp="$(mktemp "$HISTORY_DIR/.migration-started.XXXXXX")"
+  {
+    printf 'RUNNER_PROTOCOL=%s\n' "$RUNNER_PROTOCOL_VERSION"
+    printf 'TARGET=%s\n' "$TARGET_NAME"
+    printf 'INVOCATION_ID=%s\n' "$INVOCATION_ID"
+    printf 'GIT_SHA=%s\n' "$GIT_SHA"
+    printf 'REQUEST_DIGEST=%s\n' "$REQUEST_DIGEST"
+    printf 'DATABASE_BACKUP=%s\n' "$BACKUP_FILE"
+    printf 'DATABASE_BACKUP_SHA256=%s\n' "$BACKUP_SHA256"
+    printf 'STATUS=migration-started\n'
+    printf 'RESUME_ALLOWED=false\n'
+    printf 'STARTED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$temp"
+  chmod 600 "$temp"
+  mv -f "$temp" "$MIGRATION_STATE_FILE"
+  MIGRATION_STARTED=1
+}
+
+commit_migration_state() {
+  local committed temp
+  [ "$TARGET" = aicopilot ] && [ "$MIGRATION_STARTED" -eq 1 ] || return 0
+  committed="$HISTORY_DIR/${INVOCATION_ID}.migration-committed.env"
+  temp="$(mktemp "$HISTORY_DIR/.migration-committed.XXXXXX")"
+  {
+    printf 'RUNNER_PROTOCOL=%s\n' "$RUNNER_PROTOCOL_VERSION"
+    printf 'TARGET=%s\n' "$TARGET_NAME"
+    printf 'INVOCATION_ID=%s\n' "$INVOCATION_ID"
+    printf 'GIT_SHA=%s\n' "$GIT_SHA"
+    printf 'REQUEST_DIGEST=%s\n' "$REQUEST_DIGEST"
+    printf 'DATABASE_BACKUP=%s\n' "$BACKUP_FILE"
+    printf 'DATABASE_BACKUP_SHA256=%s\n' "$BACKUP_SHA256"
+    printf 'STATUS=migration-committed\n'
+    printf 'RESUME_ALLOWED=false\n'
+    printf 'COMMITTED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$temp"
+  chmod 600 "$temp"
+  mv -f "$temp" "$committed"
+  rm -f "$MIGRATION_STATE_FILE"
+  MIGRATION_STATE_FILE="$committed"
+}
+
 validate_general_image_ref() {
   local value="$1"
   [[ "$value" =~ ^[A-Za-z0-9._:/@-]+$ ]] || return 1
@@ -276,6 +321,11 @@ PREVIOUS_IMAGES_FILE="$(mktemp "$INCOMING_DIR/.previous-images.XXXXXX")"
 FAILURE_STATE_FILE=""
 ROLLOUT_STARTED=0
 ROLLBACK_REQUIRED=0
+MIGRATION_STARTED=0
+MIGRATION_COMPLETED=0
+MIGRATION_STATE_FILE=""
+BACKUP_FILE=none
+BACKUP_SHA256=none
 RUNTIME_COMPOSE_SERVICES=()
 REQUEST_PROTOCOL=""
 REQUEST_TARGET=""
@@ -292,9 +342,16 @@ cleanup_files() {
 }
 
 write_failure_state() {
-  local status="$1"
-  local rollback_status="$2"
+  local original_status="$1"
+  local runner_status="$2"
+  local rollback_status="$3"
   local invocation="${INVOCATION_ID:-unknown}"
+  local failure_status=failed
+  local resume_allowed=true
+  if [ "$TARGET" = aicopilot ] && [ "$MIGRATION_STARTED" -eq 1 ]; then
+    failure_status=blocked-partial
+    resume_allowed=false
+  fi
   FAILURE_STATE_FILE="$HISTORY_DIR/${invocation}.failed.env"
   {
     printf 'RUNNER_PROTOCOL=%s\n' "$RUNNER_PROTOCOL_VERSION"
@@ -303,9 +360,15 @@ write_failure_state() {
     printf 'GIT_SHA=%s\n' "${GIT_SHA:-unknown}"
     printf 'SERVICES=%s\n' "${SERVICES:-unknown}"
     printf 'REQUEST_DIGEST=%s\n' "${REQUEST_DIGEST:-unknown}"
-    printf 'STATUS=failed\n'
-    printf 'EXIT_CODE=%s\n' "$status"
+    printf 'STATUS=%s\n' "$failure_status"
+    printf 'EXIT_CODE=%s\n' "$original_status"
+    printf 'RUNNER_EXIT_CODE=%s\n' "$runner_status"
     printf 'ROLLBACK_STATUS=%s\n' "$rollback_status"
+    printf 'RESUME_ALLOWED=%s\n' "$resume_allowed"
+    printf 'MIGRATION_STARTED=%s\n' "$MIGRATION_STARTED"
+    printf 'MIGRATION_COMPLETED=%s\n' "$MIGRATION_COMPLETED"
+    printf 'DATABASE_BACKUP=%s\n' "${BACKUP_FILE:-none}"
+    printf 'DATABASE_BACKUP_SHA256=%s\n' "${BACKUP_SHA256:-none}"
     printf 'FINISHED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$FAILURE_STATE_FILE"
   chmod 600 "$FAILURE_STATE_FILE"
@@ -313,10 +376,14 @@ write_failure_state() {
 
 on_exit() {
   local status=$?
+  local runner_status=$status
   local rollback_status=not-required
   trap - EXIT HUP INT TERM
   set +e
-  if [ "$status" -ne 0 ] && [ "$ROLLBACK_REQUIRED" -eq 1 ] && [ "$ROLLOUT_STARTED" -eq 1 ]; then
+  if [ "$status" -ne 0 ] && [ "$TARGET" = aicopilot ] && [ "$MIGRATION_STARTED" -eq 1 ]; then
+    runner_status=86
+    rollback_status=blocked-migration-started
+  elif [ "$status" -ne 0 ] && [ "$ROLLBACK_REQUIRED" -eq 1 ] && [ "$ROLLOUT_STARTED" -eq 1 ]; then
     rollback_status=failed
     if [ -s "$PREVIOUS_IMAGES_FILE" ]; then
       printf 'runner_phase=rollback target=%s\n' "$TARGET_NAME" >&2
@@ -327,12 +394,12 @@ on_exit() {
     fi
   fi
   if [ "$status" -ne 0 ]; then
-    write_failure_state "$status" "$rollback_status"
+    write_failure_state "$status" "$runner_status" "$rollback_status"
     printf 'runner_result=failed target=%s exit_code=%s rollback=%s evidence=%s\n' \
-      "$TARGET_NAME" "$status" "$rollback_status" "$FAILURE_STATE_FILE" >&2
+      "$TARGET_NAME" "$runner_status" "$rollback_status" "$FAILURE_STATE_FILE" >&2
   fi
   cleanup_files
-  exit "$status"
+  exit "$runner_status"
 }
 trap on_exit EXIT
 trap 'exit 129' HUP
@@ -423,6 +490,14 @@ flock -n 9 || fail "another routine deployment is active: $LOCK_FILE" 75
 for legacy_lock in "${LEGACY_LOCKS[@]}"; do
   [ ! -d "$legacy_lock" ] || fail "legacy deployment lock is present: $legacy_lock" 75
 done
+unresolved_migration="$(find "$HISTORY_DIR" -maxdepth 1 -type f -name '*.migration-started.env' -print -quit 2>/dev/null || true)"
+if [ -n "$unresolved_migration" ]; then
+  MIGRATION_STATE_FILE="$unresolved_migration"
+  MIGRATION_STARTED=1
+  BACKUP_FILE="$(read_env_value "$unresolved_migration" DATABASE_BACKUP || printf none)"
+  BACKUP_SHA256="$(read_env_value "$unresolved_migration" DATABASE_BACKUP_SHA256 || printf none)"
+  fail "unresolved AICopilot migration state blocks automatic retry: $unresolved_migration" 86
+fi
 
 : > "$PREVIOUS_IMAGES_FILE"
 : > "$CANDIDATE_IMAGES_FILE"
@@ -544,7 +619,6 @@ done
 printf 'runner_phase=pull target=%s\n' "$TARGET_NAME"
 compose_with_images "$CANDIDATE_IMAGES_FILE" pull "${SELECTED_COMPOSE_SERVICES[@]}"
 
-BACKUP_FILE=none
 if [[ "$SELECTED" == *" migration "* ]]; then
   backup_dir="$DEPLOY_DIR/backups/postgres"
   BACKUP_FILE="$backup_dir/${TARGET}-${INVOCATION_ID}.dump"
@@ -566,7 +640,18 @@ if [[ "$SELECTED" == *" migration "* ]]; then
   [ -s "$backup_temp" ] || fail "database backup is empty" 74
   mv "$backup_temp" "$BACKUP_FILE"
   chmod 600 "$BACKUP_FILE"
-  (cd "$backup_dir" && sha256sum "$(basename "$BACKUP_FILE")" > "$(basename "$BACKUP_FILE").sha256")
+  BACKUP_SHA256="$(sha256sum "$BACKUP_FILE" | awk '{print $1}')"
+  printf '%s  %s\n' "$BACKUP_SHA256" "$(basename "$BACKUP_FILE")" > "$BACKUP_FILE.sha256"
+  chmod 600 "$BACKUP_FILE.sha256"
+
+  if [ "$TARGET" = aicopilot ] && [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ]; then
+    printf 'runner_phase=runtime-quiesce target=%s services=%s\n' \
+      "$TARGET_NAME" "${RUNTIME_COMPOSE_SERVICES[*]}"
+    ROLLOUT_STARTED=1
+    ROLLBACK_REQUIRED=1
+    compose_with_images "$PREVIOUS_IMAGES_FILE" stop "${RUNTIME_COMPOSE_SERVICES[@]}"
+  fi
+  write_migration_started_state
 
   printf 'runner_phase=migration target=%s\n' "$TARGET_NAME"
   if ! compose_with_images "$CANDIDATE_IMAGES_FILE" up --no-deps --abort-on-container-exit \
@@ -574,6 +659,9 @@ if [[ "$SELECTED" == *" migration "* ]]; then
     fail "compose migration command failed" 70
   fi
   verify_aicopilot_migration_completion "$CANDIDATE_IMAGES_FILE"
+  if [ "$TARGET" = aicopilot ]; then
+    MIGRATION_COMPLETED=1
+  fi
 fi
 
 if [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ]; then
@@ -605,6 +693,7 @@ state_temp="$(mktemp "$RELEASES_DIR/.routine-state.XXXXXX")"
   printf 'SERVICES=%s\n' "$SERVICES"
   printf 'REQUEST_DIGEST=%s\n' "$REQUEST_DIGEST"
   printf 'DATABASE_BACKUP=%s\n' "$BACKUP_FILE"
+  printf 'DATABASE_BACKUP_SHA256=%s\n' "$BACKUP_SHA256"
   printf 'STATUS=healthy\n'
   printf 'FINISHED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$state_temp"
@@ -615,6 +704,7 @@ atomic_copy "$state_temp" "$CURRENT_STATE_FILE"
 atomic_copy "$state_temp" "$HISTORY_DIR/${INVOCATION_ID}.env"
 rm -f "$state_temp"
 ROLLBACK_REQUIRED=0
+commit_migration_state
 
 printf 'runner_result=success target=%s sha=%s services=%s state=%s\n' \
   "$TARGET_NAME" "$GIT_SHA" "$SERVICES" "$CURRENT_STATE_FILE"

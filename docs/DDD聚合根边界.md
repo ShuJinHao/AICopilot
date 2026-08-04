@@ -67,7 +67,7 @@
 
 - 六个 migration owner 必须使用各自隔离的 `__EFMigrationsHistory_*`；不得让单一 Context 的迁移或回滚污染其它 Context。
 - AiGateway 尚未首次投产的空库可以在投产前整理 fresh baseline；一旦 migration ID 进入生产，历史文件名、ID 和字节全部 append-only，后续模型变化只能新增 migration，不得压缩、改写或用新 baseline 覆盖生产升级链。
-- 生产升级前必须对真实 `__EFMigrationsHistory_AiGateway` 和 schema 元数据做冻结指纹核对；未知 history/schema 不得猜测、补写虚假 history 或继续 migration。退役表只能来自显式 allowlist，删除前必须生成完整 PostgreSQL dump 与 SHA-256；其它表和业务记录必须保留。
+- 生产升级前必须对真实 `__EFMigrationsHistory_AiGateway` 和 schema 元数据做冻结指纹核对；指纹必须绑定列、索引完整定义、约束、sequence、非内部 trigger/trigger function、表 RLS 开关和 policy，未知 history/schema 不得猜测、补写虚假 history 或继续 migration。退役表只能来自显式 allowlist；任何可到达生产 migration 的发布入口都必须在 migration 启动前生成完整 PostgreSQL dump 与 SHA-256，其它表和业务记录必须保留。
 - `PostgresModelQuotaReservationStore` 是模型配额唯一生产 store，只能经 `AiGatewayTransactionRunner` 写入 `AiGatewayDbContext`；模型调用预约、结算、回收的事务语义不得复制到其它 Context。
 - 没有真实事件生产者的 DbContext 不得复制 Outbox `DbSet`、映射或 `SaveChangesAsync` 领域事件扫描。DataAnalysis 与 MCP 不写 Outbox；AiGateway 只从 `Session` 领域事件物化 Outbox，RAG 只使用 delayed integration-event factory，业务 Context 不映射共享 Outbox。
 

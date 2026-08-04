@@ -62,6 +62,10 @@ case "${1:-}" in
       version|config|pull|start)
         exit 0
         ;;
+      stop)
+        [ "${FAKE_RUNTIME_QUIESCE_FAIL:-false}" != true ] || exit 19
+        exit 0
+        ;;
       ps)
         while [ "${1:-}" = -a ] || [ "${1:-}" = -q ]; do shift; done
         printf 'container-%s\n' "${1:?service required}"
@@ -174,9 +178,34 @@ success_request="$(make_request "$success_invocation" 11111111111111111111111111
 FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 run_request "$success_request"
 grep -Fq "INVOCATION_ID=$success_invocation" "$SERVER_DIR/releases/routine-current.env" || \
   fail 'valid migration proof did not commit current state'
+[ -f "$SERVER_DIR/releases/routine-history/$success_invocation.migration-committed.env" ] || \
+  fail 'valid migration proof did not commit the durable migration state'
+[ ! -f "$SERVER_DIR/releases/routine-history/$success_invocation.migration-started.env" ] || \
+  fail 'valid migration proof left an unresolved migration-started marker'
 
 cp "$SERVER_DIR/releases/current-images.env" "$TEST_ROOT/current-images.before"
 cp "$SERVER_DIR/releases/routine-current.env" "$TEST_ROOT/routine-current.before"
+
+: > "$DOCKER_LOG"
+quiesce_failure_invocation='migration-guard-quiesce-failure'
+quiesce_failure_request="$(make_request "$quiesce_failure_invocation" 4444444444444444444444444444444444444444 d)"
+set +e
+FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+  run_request "$quiesce_failure_request" > "$TEST_ROOT/quiesce-failure.log" 2>&1
+quiesce_failure_status=$?
+set -e
+[ "$quiesce_failure_status" -ne 0 ] && [ "$quiesce_failure_status" -ne 86 ] || \
+  fail 'pre-migration quiesce failure was misclassified as an unsafe migration partial'
+cmp -s "$TEST_ROOT/current-images.before" "$SERVER_DIR/releases/current-images.env" || \
+  fail 'pre-migration quiesce failure promoted candidate images'
+cmp -s "$TEST_ROOT/routine-current.before" "$SERVER_DIR/releases/routine-current.env" || \
+  fail 'pre-migration quiesce failure rewrote routine-current state'
+[ ! -f "$SERVER_DIR/releases/routine-history/$quiesce_failure_invocation.migration-started.env" ] || \
+  fail 'pre-migration quiesce failure wrote a migration-started marker'
+grep -Fq 'ROLLBACK_STATUS=completed' \
+  "$SERVER_DIR/releases/routine-history/$quiesce_failure_invocation.failed.env" || \
+  fail 'pre-migration quiesce failure did not restore the previous runtime'
+
 : > "$DOCKER_LOG"
 marker_failure_invocation='migration-guard-marker-failure'
 marker_failure_request="$(make_request "$marker_failure_invocation" 2222222222222222222222222222222222222222 b)"
@@ -185,17 +214,40 @@ FAKE_MIGRATION_MARKER_MODE=failure FAKE_MIGRATION_EXIT_CODE=0 \
   run_request "$marker_failure_request" > "$TEST_ROOT/marker-failure.log" 2>&1
 marker_failure_status=$?
 set -e
-[ "$marker_failure_status" -ne 0 ] || fail 'compose zero without success marker was accepted'
+[ "$marker_failure_status" -eq 86 ] || fail 'compose zero without success marker was not blocked as partial'
 cmp -s "$TEST_ROOT/current-images.before" "$SERVER_DIR/releases/current-images.env" || \
   fail 'missing marker promoted candidate images'
 cmp -s "$TEST_ROOT/routine-current.before" "$SERVER_DIR/releases/routine-current.env" || \
   fail 'missing marker rewrote routine-current state'
 grep -Fq 'up -d --no-deps' "$DOCKER_LOG" && fail 'missing marker updated a runtime service'
-grep -Fq 'ROLLBACK_STATUS=not-required' \
+grep -Fq 'STATUS=blocked-partial' \
   "$SERVER_DIR/releases/routine-history/$marker_failure_invocation.failed.env" || \
-  fail 'missing marker failure evidence did not preserve the old runtime'
+  fail 'missing marker failure evidence was not marked blocked-partial'
+grep -Fq 'ROLLBACK_STATUS=blocked-migration-started' \
+  "$SERVER_DIR/releases/routine-history/$marker_failure_invocation.failed.env" || \
+  fail 'missing marker failure evidence claimed an unsafe runtime rollback'
+grep -Fq 'RESUME_ALLOWED=false' \
+  "$SERVER_DIR/releases/routine-history/$marker_failure_invocation.failed.env" || \
+  fail 'missing marker failure evidence allowed automatic resume'
+[ -f "$SERVER_DIR/releases/routine-history/$marker_failure_invocation.migration-started.env" ] || \
+  fail 'missing marker failure did not retain the durable migration-started state'
 [ "$(sed -n '1p' "$MIGRATION_INVOCATION_FILE")" = "$marker_failure_invocation" ] || \
   fail 'compose did not receive the exact migration invocation id'
+
+: > "$DOCKER_LOG"
+set +e
+FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+  run_request "$marker_failure_request" > "$TEST_ROOT/blocked-retry.log" 2>&1
+blocked_retry_status=$?
+set -e
+[ "$blocked_retry_status" -eq 86 ] || fail 'unresolved migration state allowed automatic retry'
+grep -Fq 'unresolved AICopilot migration state blocks automatic retry' \
+  "$TEST_ROOT/blocked-retry.log" || fail 'blocked retry did not identify the unresolved migration state'
+grep -Eq 'pull| stop | up ' "$DOCKER_LOG" && fail 'blocked retry mutated containers'
+grep -Fq 'STATUS=blocked-partial' \
+  "$SERVER_DIR/releases/routine-history/$marker_failure_invocation.failed.env" || \
+  fail 'blocked retry weakened the original blocked-partial failure evidence'
+rm -f "$SERVER_DIR/releases/routine-history/$marker_failure_invocation.migration-started.env"
 
 : > "$DOCKER_LOG"
 exit_failure_invocation='migration-guard-exit-failure'
@@ -205,11 +257,13 @@ FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=17 \
   run_request "$exit_failure_request" > "$TEST_ROOT/exit-failure.log" 2>&1
 exit_failure_status=$?
 set -e
-[ "$exit_failure_status" -ne 0 ] || fail 'nonzero migration container exit code was accepted'
+[ "$exit_failure_status" -eq 86 ] || fail 'nonzero migration exit was not blocked as partial'
 cmp -s "$TEST_ROOT/current-images.before" "$SERVER_DIR/releases/current-images.env" || \
   fail 'nonzero migration exit promoted candidate images'
 cmp -s "$TEST_ROOT/routine-current.before" "$SERVER_DIR/releases/routine-current.env" || \
   fail 'nonzero migration exit rewrote routine-current state'
 grep -Fq 'up -d --no-deps' "$DOCKER_LOG" && fail 'nonzero migration exit updated a runtime service'
+[ -f "$SERVER_DIR/releases/routine-history/$exit_failure_invocation.migration-started.env" ] || \
+  fail 'nonzero migration exit did not retain the durable migration-started state'
 
 printf 'AICopilot migration runner guard tests passed.\n'

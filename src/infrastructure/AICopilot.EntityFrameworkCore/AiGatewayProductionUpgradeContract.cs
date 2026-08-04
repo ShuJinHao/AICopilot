@@ -12,10 +12,10 @@ public static class AiGatewayProductionUpgradeContract
     public const string ExpectedProductionHistorySha256 =
         "c58def891d65a2134be511380cf99640ab4f132db9fffa9adfa7928dc827c8cc";
     public const string ExpectedProductionSchemaSha256 =
-        "8ef8a0740f32e80af2fbe77b5a1bb199e4d2b817584aa49d82a78578634bc471";
+        "c649cf3a9e142add9e4bfe7917cf90aecf276113151f0857df54c3ba9d435673";
 
     public const string ExpectedCurrentSchemaSha256 =
-        "ed0133f957a07ea16988cbd2563b7e58fa53cb42ff21de7351c6783103237194";
+        "ed1a044a1b6b49873c49bff70f8e8b5791fa02692647381889ce5e7c2fdc83f4";
 
     public static IReadOnlyList<string> ProductionMigrationIds { get; } =
     [

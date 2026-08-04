@@ -155,7 +155,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             AiGatewayProductionUpgradeContract.ExpectedProductionHistorySha256,
             AiGatewayProductionUpgradeContract.ProductionMigrationIds.Count,
             AiGatewayProductionUpgradeContract.ExpectedProductionSchemaSha256,
-            596));
+            621));
 
         await using var connection = new NpgsqlConnection(database.ConnectionString);
         await connection.OpenAsync();
@@ -325,6 +325,26 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             DROP CONSTRAINT "PK_model_quota_reservations";
         ALTER TABLE aigateway.model_quota_reservations
             ADD CONSTRAINT "PK_model_quota_reservations" PRIMARY KEY (correlation_hash);
+        """,
+        """
+        CREATE FUNCTION aigateway.structural_drift_trigger_function()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            NEW.correlation_hash := NEW.correlation_hash;
+            RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER structural_drift_trigger
+            BEFORE UPDATE ON aigateway.model_quota_reservations
+            FOR EACH ROW EXECUTE FUNCTION aigateway.structural_drift_trigger_function();
+        """,
+        """
+        ALTER TABLE aigateway.model_quota_reservations ENABLE ROW LEVEL SECURITY;
+        CREATE POLICY structural_drift_policy
+            ON aigateway.model_quota_reservations
+            USING (true);
         """
     };
 
