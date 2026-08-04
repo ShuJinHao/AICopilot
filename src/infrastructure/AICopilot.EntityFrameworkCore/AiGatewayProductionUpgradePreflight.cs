@@ -574,12 +574,21 @@ public static class AiGatewayProductionUpgradePreflight
             WHERE table_namespace.nspname = 'aigateway'
             ORDER BY table_class.relname, policy_state.polname;
 
-            SELECT 'sequence|' || sequence_name || '|' || data_type || '|' ||
-                   start_value || '|' || minimum_value || '|' || maximum_value || '|' ||
-                   increment || '|' || cycle_option
-            FROM information_schema.sequences
-            WHERE sequence_schema = 'aigateway'
-            ORDER BY sequence_name;
+            SELECT 'sequence|' || sequence_state.relname || '|' ||
+                   format_type(sequence_parameters.seqtypid, null) || '|' ||
+                   sequence_parameters.seqstart::text || '|' ||
+                   sequence_parameters.seqmin::text || '|' ||
+                   sequence_parameters.seqmax::text || '|' ||
+                   sequence_parameters.seqincrement::text || '|' ||
+                   CASE WHEN sequence_parameters.seqcycle THEN 'YES' ELSE 'NO' END || '|' ||
+                   sequence_parameters.seqcache::text
+            FROM pg_sequence AS sequence_parameters
+            JOIN pg_class AS sequence_state
+              ON sequence_state.oid = sequence_parameters.seqrelid
+            JOIN pg_namespace AS sequence_namespace
+              ON sequence_namespace.oid = sequence_state.relnamespace
+            WHERE sequence_namespace.nspname = 'aigateway'
+            ORDER BY sequence_state.relname;
 
             SELECT 'sequence-owned-by|' || sequence_state.relname || '|' ||
                    referenced_namespace.nspname || '|' ||

@@ -181,7 +181,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             AiGatewayProductionUpgradeContract.ExpectedProductionHistorySha256,
             AiGatewayProductionUpgradeContract.ProductionMigrationIds.Count,
             AiGatewayProductionUpgradeContract.ExpectedProductionSchemaSha256,
-            955));
+            956));
 
         await using var connection = new NpgsqlConnection(productionConnectionString);
         await connection.OpenAsync();
@@ -479,6 +479,9 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         """
         ALTER SEQUENCE aigateway.model_quota_fencing_seq
             OWNED BY aigateway.agent_tasks.id;
+        """,
+        """
+        ALTER SEQUENCE aigateway.model_quota_fencing_seq CACHE 100;
         """,
         """
         ALTER DEFAULT PRIVILEGES IN SCHEMA aigateway
