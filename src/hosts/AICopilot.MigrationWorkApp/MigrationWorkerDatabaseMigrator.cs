@@ -61,9 +61,11 @@ internal static class MigrationWorkerDatabaseMigrator
             {
                 if (ReferenceEquals(migrationContext, aiGateway))
                 {
-                    await AiGatewayProductionUpgradePreflight.InspectAsync(
+                    await RunAiGatewayMigrationUnderDdlFenceAsync(
+                        (AiGatewayDbContext)migrationContext.DbContext,
                         connection,
                         cancellationToken);
+                    continue;
                 }
 
                 await RunMigrationAsync(migrationContext.DbContext, cancellationToken);
@@ -87,6 +89,43 @@ internal static class MigrationWorkerDatabaseMigrator
                     await database.CloseConnectionAsync();
                 }
             }
+        }
+    }
+
+    internal static async Task AcquireAiGatewaySchemaDdlFenceAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        var relations = await ReadSchemaLockTargetsAsync(
+            connection,
+            """
+            SELECT format('%I.%I', namespace_state.nspname, relation_state.relname)
+            FROM pg_class AS relation_state
+            JOIN pg_namespace AS namespace_state
+              ON namespace_state.oid = relation_state.relnamespace
+            WHERE namespace_state.nspname = 'aigateway'
+              AND relation_state.relkind IN ('r', 'p', 'v', 'm', 'f')
+            ORDER BY relation_state.oid;
+            """,
+            cancellationToken);
+        foreach (var relation in relations)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"LOCK TABLE {relation} IN SHARE ROW EXCLUSIVE MODE;";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var sequences = await ReadSequenceLockTargetsAsync(connection, cancellationToken);
+        foreach (var (sequence, cacheSize) in sequences)
+        {
+            await using var command = connection.CreateCommand();
+            // PostgreSQL does not support LOCK TABLE for sequences. Re-applying the
+            // canonical cache value takes a transactional ShareRowExclusiveLock
+            // without advancing or resetting the sequence.
+            command.CommandText = $"ALTER SEQUENCE {sequence} CACHE {cacheSize};";
+            await command.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 
@@ -121,5 +160,80 @@ internal static class MigrationWorkerDatabaseMigrator
     {
         var strategy = dbContext.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () => { await dbContext.Database.MigrateAsync(cancellationToken); });
+    }
+
+    private static async Task RunAiGatewayMigrationUnderDdlFenceAsync(
+        AiGatewayDbContext dbContext,
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(
+                cancellationToken);
+            await AcquireAiGatewaySchemaDdlFenceAsync(connection, cancellationToken);
+
+            await AiGatewayProductionUpgradePreflight.InspectAsync(
+                connection,
+                cancellationToken);
+            await dbContext.Database.MigrateAsync(cancellationToken);
+
+            var migrated = await AiGatewayProductionUpgradePreflight.InspectAsync(
+                connection,
+                cancellationToken);
+            if (migrated.State != AiGatewayProductionUpgradeState.Current)
+            {
+                throw new InvalidOperationException(
+                    "AiGateway migration did not produce the frozen current schema/history fingerprint.");
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        });
+    }
+
+    private static async Task<string[]> ReadSchemaLockTargetsAsync(
+        NpgsqlConnection connection,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var targets = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            targets.Add(reader.GetString(0));
+        }
+
+        return targets.ToArray();
+    }
+
+    private static async Task<(string Sequence, long CacheSize)[]> ReadSequenceLockTargetsAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT format('%I.%I', namespace_state.nspname, sequence_state.relname),
+                   sequence_metadata.seqcache
+            FROM pg_class AS sequence_state
+            JOIN pg_namespace AS namespace_state
+              ON namespace_state.oid = sequence_state.relnamespace
+            JOIN pg_sequence AS sequence_metadata
+              ON sequence_metadata.seqrelid = sequence_state.oid
+            WHERE namespace_state.nspname = 'aigateway'
+              AND sequence_state.relkind = 'S'
+            ORDER BY sequence_state.oid;
+            """;
+        var targets = new List<(string Sequence, long CacheSize)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            targets.Add((reader.GetString(0), reader.GetInt64(1)));
+        }
+
+        return targets.ToArray();
     }
 }

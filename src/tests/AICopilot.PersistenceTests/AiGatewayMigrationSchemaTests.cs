@@ -259,7 +259,11 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
 
         await using (var upgradeContext = CreateDbContext(productionConnectionString))
         {
-            await upgradeContext.Database.MigrateAsync();
+            await MigrationWorkerDatabaseMigrator.RunMigrationsAsync(
+                [new MigrationHistoryBootstrapper.MigrationContext(
+                    upgradeContext,
+                    MigrationHistoryTables.AiGateway)],
+                CancellationToken.None);
         }
 
         var current = await AiGatewayProductionUpgradePreflight.InspectAsync(
@@ -528,6 +532,53 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             ("lock_id", MigrationWorkerDatabaseMigrator.AiGatewayProductionUpgradeLockId));
     }
 
+    [Fact]
+    public async Task ProductionDdlFence_ShouldBlockConcurrentTableAndSequenceChanges()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_ddl_fence");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using (var baselineContext = CreateDbContext(productionConnectionString))
+        {
+            await baselineContext.Database.MigrateAsync(
+                AiGatewayProductionUpgradeContract.LastProductionMigrationId);
+        }
+
+        await using var ownerContext = CreateDbContext(productionConnectionString);
+        await ownerContext.Database.OpenConnectionAsync();
+        await using var transaction = await ownerContext.Database.BeginTransactionAsync();
+        var ownerConnection = (NpgsqlConnection)ownerContext.Database.GetDbConnection();
+        await MigrationWorkerDatabaseMigrator.AcquireAiGatewaySchemaDdlFenceAsync(
+            ownerConnection,
+            CancellationToken.None);
+
+        await using var contender = new NpgsqlConnection(productionConnectionString);
+        await contender.OpenAsync();
+        await ExecuteNonQueryAsync(contender, "SET lock_timeout = '250ms';");
+
+        var alterTable = () => ExecuteNonQueryAsync(
+            contender,
+            "ALTER TABLE aigateway.sessions ADD COLUMN concurrent_drift text;");
+        var tableFailure = await alterTable.Should().ThrowAsync<PostgresException>();
+        tableFailure.Which.SqlState.Should().Be(PostgresErrorCodes.LockNotAvailable);
+
+        var alterSequence = () => ExecuteNonQueryAsync(
+            contender,
+            "ALTER SEQUENCE aigateway.model_quota_fencing_seq CACHE 100;");
+        var sequenceFailure = await alterSequence.Should().ThrowAsync<PostgresException>();
+        sequenceFailure.Which.SqlState.Should().Be(PostgresErrorCodes.LockNotAvailable);
+
+        await transaction.RollbackAsync();
+
+        await ExecuteNonQueryAsync(
+            contender,
+            "ALTER TABLE aigateway.sessions ADD COLUMN concurrent_drift text;");
+        await ExecuteNonQueryAsync(
+            contender,
+            "ALTER SEQUENCE aigateway.model_quota_fencing_seq CACHE 100;");
+    }
+
     [Theory]
     [MemberData(nameof(StructuralDriftCommands))]
     public async Task ProductionHistoryWithSameNamedStructuralDrift_ShouldFailPreflight(
@@ -666,6 +717,13 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
                     END IF;
                 END
                 $role$;
+                DO $grant$
+                BEGIN
+                    EXECUTE format(
+                        'GRANT CREATE ON DATABASE %I TO aicopilot',
+                        current_database());
+                END
+                $grant$;
                 CREATE SCHEMA aigateway AUTHORIZATION aicopilot;
                 """);
         }
