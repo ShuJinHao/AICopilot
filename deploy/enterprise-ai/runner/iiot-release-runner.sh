@@ -573,16 +573,39 @@ done
 chmod 600 "$PREVIOUS_IMAGES_FILE" "$CANDIDATE_IMAGES_FILE"
 compose_with_images "$CANDIDATE_IMAGES_FILE" config --quiet
 
-service_running_and_healthy() {
+runtime_health_snapshot() {
   local images_file="$1"
   local service_name="$2"
-  local container state running health
+  local container state running restarting oom_killed restart_count health
   container="$(compose_with_images "$images_file" ps -q "$service_name" 2>/dev/null || true)"
   [ -n "$container" ] || return 1
-  state="$(docker inspect --format '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || true)"
-  IFS='|' read -r running health <<< "$state"
-  [ "$running" = true ] || return 1
-  [ "$health" = none ] || [ "$health" = healthy ]
+  state="$(docker inspect --format '{{.State.Running}}|{{.State.Restarting}}|{{.State.OOMKilled}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || true)"
+  IFS='|' read -r running restarting oom_killed restart_count health <<< "$state"
+  [ "$running" = true ] && [ "$restarting" = false ] && [ "$oom_killed" = false ] || return 1
+  [[ "$restart_count" =~ ^[0-9]+$ ]] || return 1
+  { [ "$health" = none ] || [ "$health" = healthy ]; } || return 1
+  printf '%s|%s\n' "$container" "$restart_count"
+}
+
+service_running_and_healthy() {
+  runtime_health_snapshot "$1" "$2" >/dev/null
+}
+
+recovery_http_endpoint_stable() {
+  local url="$1"
+  local health_attempts="$2"
+  local health_interval="$3"
+  local attempt first_status second_status
+  for attempt in $(seq 1 "$health_attempts"); do
+    first_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 5 "$url" || true)"
+    if [ "$first_status" = 200 ]; then
+      sleep "$health_interval"
+      second_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 5 "$url" || true)"
+      [ "$second_status" = 200 ] && return 0
+    fi
+    sleep "$health_interval"
+  done
+  return 1
 }
 
 wait_service() {
@@ -607,7 +630,7 @@ wait_service() {
 
 verify_runtime_recovery() {
   local images_file="$1"
-  local service_name attempt recovered
+  local service_name attempt recovered snapshot_before snapshot_after ai_port
   local health_attempts="${IIOT_RUNNER_HEALTH_ATTEMPTS:-90}"
   local health_interval="${IIOT_RUNNER_HEALTH_INTERVAL_SECONDS:-2}"
   [[ "$health_attempts" =~ ^[1-9][0-9]*$ ]] || return 1
@@ -617,9 +640,10 @@ verify_runtime_recovery() {
   for service_name in "${RUNTIME_COMPOSE_SERVICES[@]}"; do
     recovered=0
     for attempt in $(seq 1 "$health_attempts"); do
-      if service_running_and_healthy "$images_file" "$service_name"; then
+      if snapshot_before="$(runtime_health_snapshot "$images_file" "$service_name")"; then
         sleep "$health_interval"
-        if service_running_and_healthy "$images_file" "$service_name"; then
+        if snapshot_after="$(runtime_health_snapshot "$images_file" "$service_name")" &&
+           [ "$snapshot_after" = "$snapshot_before" ]; then
           recovered=1
           break
         fi
@@ -628,6 +652,14 @@ verify_runtime_recovery() {
     done
     [ "$recovered" -eq 1 ] || return 1
   done
+  if [ "$TARGET" = aicopilot ]; then
+    ai_port="$(read_env_value "$ENV_FILE" AICOPILOT_WEB_PORT || true)"
+    recovery_http_endpoint_stable \
+      "http://127.0.0.1:${ai_port:-82}/" "$health_attempts" "$health_interval" || return 1
+    recovery_http_endpoint_stable \
+      "http://127.0.0.1:${ai_port:-82}/api/identity/cloud-oidc/status" \
+      "$health_attempts" "$health_interval" || return 1
+  fi
 }
 
 probe_http() {

@@ -46,21 +46,22 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         await using var database = await PostgresScratchDatabase.CreateAsync(
             fixture.ConnectionString,
             "aicopilot_gateway_harness_schema");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
 
         var initial = await AiGatewayProductionUpgradePreflight.InspectAsync(
-            database.ConnectionString);
+            productionConnectionString);
         initial.State.Should().Be(AiGatewayProductionUpgradeState.Fresh);
 
-        await using (var dbContext = CreateDbContext(database.ConnectionString))
+        await using (var dbContext = CreateDbContext(productionConnectionString))
         {
             await dbContext.Database.MigrateAsync();
         }
 
         var migrated = await AiGatewayProductionUpgradePreflight.InspectAsync(
-            database.ConnectionString);
+            productionConnectionString);
         migrated.State.Should().Be(AiGatewayProductionUpgradeState.Current);
 
-        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await using var connection = new NpgsqlConnection(productionConnectionString);
         await connection.OpenAsync();
 
         var actualTables = await QueryTableNamesAsync(connection, "aigateway");
@@ -165,22 +166,23 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         await using var database = await PostgresScratchDatabase.CreateAsync(
             fixture.ConnectionString,
             "aicopilot_gateway_production_upgrade");
-        await using (var baselineContext = CreateDbContext(database.ConnectionString))
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using (var baselineContext = CreateDbContext(productionConnectionString))
         {
             await baselineContext.Database.MigrateAsync(
                 AiGatewayProductionUpgradeContract.LastProductionMigrationId);
         }
 
         var baseline = await AiGatewayProductionUpgradePreflight.InspectAsync(
-            database.ConnectionString);
+            productionConnectionString);
         baseline.Should().BeEquivalentTo(new AiGatewayProductionUpgradeInspection(
             AiGatewayProductionUpgradeState.ProductionBaseline,
             AiGatewayProductionUpgradeContract.ExpectedProductionHistorySha256,
             AiGatewayProductionUpgradeContract.ProductionMigrationIds.Count,
             AiGatewayProductionUpgradeContract.ExpectedProductionSchemaSha256,
-            741));
+            954));
 
-        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await using var connection = new NpgsqlConnection(productionConnectionString);
         await connection.OpenAsync();
         var tablesBefore = await QueryTableNamesAsync(connection, "aigateway");
         var sequenceBefore = await ReadInt64Async(
@@ -189,7 +191,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
 
         var now = DateTimeOffset.UtcNow;
         var userId = Guid.NewGuid();
-        await using (var seedContext = CreateDbContext(database.ConnectionString))
+        await using (var seedContext = CreateDbContext(productionConnectionString))
         {
             var model = new LanguageModel(
                 "production-upgrade-test",
@@ -252,13 +254,13 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             await seedContext.SaveChangesAsync();
         }
 
-        await using (var upgradeContext = CreateDbContext(database.ConnectionString))
+        await using (var upgradeContext = CreateDbContext(productionConnectionString))
         {
             await upgradeContext.Database.MigrateAsync();
         }
 
         var current = await AiGatewayProductionUpgradePreflight.InspectAsync(
-            database.ConnectionString);
+            productionConnectionString);
         current.State.Should().Be(AiGatewayProductionUpgradeState.Current);
 
         var tablesAfter = await QueryTableNamesAsync(connection, "aigateway");
@@ -267,7 +269,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         tablesAfter.Should().Contain(CurrentTables);
         tablesAfter.Should().NotContain(RetiredTables);
 
-        await using (var verifyContext = CreateDbContext(database.ConnectionString))
+        await using (var verifyContext = CreateDbContext(productionConnectionString))
         {
             (await verifyContext.LanguageModels.CountAsync(model =>
                     model.Name == "preserved-model"))
@@ -311,13 +313,14 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         await using var database = await PostgresScratchDatabase.CreateAsync(
             fixture.ConnectionString,
             "aicopilot_gateway_unknown_production_state");
-        await using (var baselineContext = CreateDbContext(database.ConnectionString))
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using (var baselineContext = CreateDbContext(productionConnectionString))
         {
             await baselineContext.Database.MigrateAsync(
                 AiGatewayProductionUpgradeContract.LastProductionMigrationId);
         }
 
-        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await using var connection = new NpgsqlConnection(productionConnectionString);
         await connection.OpenAsync();
         await using (var driftCommand = connection.CreateCommand())
         {
@@ -327,7 +330,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         }
 
         var action = () => AiGatewayProductionUpgradePreflight.InspectAsync(
-            database.ConnectionString);
+            productionConnectionString);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*unknown schema/history state*Do not infer or insert migration history*");
@@ -391,6 +394,15 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         """
         CREATE MATERIALIZED VIEW aigateway.structural_drift_view
         AS SELECT 1 AS value;
+        """,
+        """
+        GRANT USAGE ON SCHEMA aigateway TO PUBLIC;
+        """,
+        """
+        GRANT SELECT ON TABLE aigateway.model_quota_reservations TO PUBLIC;
+        """,
+        """
+        GRANT USAGE ON SEQUENCE aigateway.model_quota_fencing_seq TO PUBLIC;
         """
     };
 
@@ -402,13 +414,14 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         await using var database = await PostgresScratchDatabase.CreateAsync(
             fixture.ConnectionString,
             "aicopilot_gateway_structural_drift");
-        await using (var baselineContext = CreateDbContext(database.ConnectionString))
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using (var baselineContext = CreateDbContext(productionConnectionString))
         {
             await baselineContext.Database.MigrateAsync(
                 AiGatewayProductionUpgradeContract.LastProductionMigrationId);
         }
 
-        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await using var connection = new NpgsqlConnection(productionConnectionString);
         await connection.OpenAsync();
         await using (var driftCommand = connection.CreateCommand())
         {
@@ -417,7 +430,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         }
 
         var action = () => AiGatewayProductionUpgradePreflight.InspectAsync(
-            database.ConnectionString);
+            productionConnectionString);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*unknown schema/history state*Do not infer or insert migration history*");
@@ -433,6 +446,33 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
                 MigrationHistoryTables.AiGateway)
             .Options;
         return new AiGatewayDbContext(options);
+    }
+
+    private static async Task<string> PrepareProductionOwnedSchemaAsync(
+        PostgresScratchDatabase database)
+    {
+        await using (var connection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await ExecuteNonQueryAsync(
+                connection,
+                """
+                DO $role$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_roles WHERE rolname = 'aicopilot') THEN
+                        CREATE ROLE aicopilot NOLOGIN;
+                    END IF;
+                END
+                $role$;
+                CREATE SCHEMA aigateway AUTHORIZATION aicopilot;
+                """);
+        }
+
+        return new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            Options = "-c role=aicopilot"
+        }.ConnectionString;
     }
 
     private static async Task<string[]> QueryTableNamesAsync(

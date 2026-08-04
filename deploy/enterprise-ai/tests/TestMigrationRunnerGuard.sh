@@ -38,9 +38,17 @@ case "${1:-}" in
       printf '%s\n' "${FAKE_MIGRATION_EXIT_CODE:-0}"
     elif [ "${FAKE_RUNTIME_RECOVERY_UNHEALTHY:-false}" = true ] &&
          [ -f "${FAKE_RECOVERY_PHASE_FILE:?}" ]; then
-      printf 'false|unhealthy\n'
+      printf 'false|false|false|0|unhealthy\n'
+    elif [ "${FAKE_RUNTIME_RECOVERY_RESTART_UNSTABLE:-false}" = true ] &&
+         [ -f "${FAKE_RECOVERY_PHASE_FILE:?}" ]; then
+      count=0
+      [ ! -f "${FAKE_RECOVERY_INSPECT_COUNT_FILE:?}" ] ||
+        count="$(cat "$FAKE_RECOVERY_INSPECT_COUNT_FILE")"
+      count=$((count + 1))
+      printf '%s\n' "$count" > "$FAKE_RECOVERY_INSPECT_COUNT_FILE"
+      printf 'true|false|false|%s|healthy\n' "$count"
     else
-      printf 'true|healthy\n'
+      printf 'true|false|false|0|healthy\n'
     fi
     exit 0
     ;;
@@ -104,7 +112,12 @@ EOF
 
 cat > "$BIN_DIR/curl" <<'EOF'
 #!/usr/bin/env bash
-printf '200'
+if [ "${FAKE_RUNTIME_RECOVERY_HTTP_FAIL:-false}" = true ] &&
+   [ -f "${FAKE_RECOVERY_PHASE_FILE:?}" ]; then
+  printf '503'
+else
+  printf '200'
+fi
 EOF
 cat > "$BIN_DIR/flock" <<'EOF'
 #!/usr/bin/env bash
@@ -180,11 +193,12 @@ make_request() {
 
 run_request() {
   local request="$1"
-  rm -f "$TEST_ROOT/recovery-phase"
+  rm -f "$TEST_ROOT/recovery-phase" "$TEST_ROOT/recovery-inspect-count"
   PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$DOCKER_LOG" \
   FAKE_MIGRATION_INVOCATION_FILE="$MIGRATION_INVOCATION_FILE" \
   FAKE_RECOVERY_PHASE_FILE="$TEST_ROOT/recovery-phase" \
+  FAKE_RECOVERY_INSPECT_COUNT_FILE="$TEST_ROOT/recovery-inspect-count" \
   IIOT_RUNNER_HEALTH_ATTEMPTS=1 \
   IIOT_RUNNER_HEALTH_INTERVAL_SECONDS=0 \
     "$SERVER_DIR/runner/iiot-release-runner.sh" \
@@ -268,20 +282,33 @@ grep -Fq 'ROLLBACK_STATUS=completed' \
   "$SERVER_DIR/releases/routine-history/$quiesce_failure_invocation.failed.env" || \
   fail 'pre-migration quiesce failure did not restore the previous runtime'
 
-for recovery_mode in unhealthy up-failed; do
+for recovery_mode in unhealthy up-failed http-failed restart-unstable; do
   : > "$DOCKER_LOG"
   recovery_invocation="migration-guard-quiesce-recovery-$recovery_mode"
   recovery_request="$(make_request "$recovery_invocation" 6666666666666666666666666666666666666666 f)"
   set +e
-  if [ "$recovery_mode" = unhealthy ]; then
-    FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_RUNTIME_RECOVERY_UNHEALTHY=true \
-      FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
-      run_request "$recovery_request" > "$TEST_ROOT/recovery-$recovery_mode.log" 2>&1
-  else
-    FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_RUNTIME_RECOVERY_UP_FAIL=true \
-      FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
-      run_request "$recovery_request" > "$TEST_ROOT/recovery-$recovery_mode.log" 2>&1
-  fi
+  case "$recovery_mode" in
+    unhealthy)
+      FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_RUNTIME_RECOVERY_UNHEALTHY=true \
+        FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+        run_request "$recovery_request" > "$TEST_ROOT/recovery-$recovery_mode.log" 2>&1
+      ;;
+    up-failed)
+      FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_RUNTIME_RECOVERY_UP_FAIL=true \
+        FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+        run_request "$recovery_request" > "$TEST_ROOT/recovery-$recovery_mode.log" 2>&1
+      ;;
+    http-failed)
+      FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_RUNTIME_RECOVERY_HTTP_FAIL=true \
+        FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+        run_request "$recovery_request" > "$TEST_ROOT/recovery-$recovery_mode.log" 2>&1
+      ;;
+    restart-unstable)
+      FAKE_RUNTIME_QUIESCE_FAIL=true FAKE_RUNTIME_RECOVERY_RESTART_UNSTABLE=true \
+        FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+        run_request "$recovery_request" > "$TEST_ROOT/recovery-$recovery_mode.log" 2>&1
+      ;;
+  esac
   recovery_status=$?
   set -e
   [ "$recovery_status" -eq 86 ] || \

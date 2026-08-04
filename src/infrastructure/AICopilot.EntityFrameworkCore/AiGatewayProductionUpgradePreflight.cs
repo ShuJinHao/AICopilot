@@ -81,6 +81,31 @@ public static class AiGatewayProductionUpgradePreflight
         var schemaLines = await ReadLinesAsync(
             connection,
             """
+            SELECT 'schema-security|' || schema_state.nspname || '|' ||
+                   pg_get_userbyid(schema_state.nspowner)
+            FROM pg_namespace AS schema_state
+            WHERE schema_state.nspname = 'aigateway';
+
+            SELECT 'schema-acl|' || schema_state.nspname || '|' ||
+                   pg_get_userbyid(acl_state.grantor) || '|' ||
+                   CASE WHEN acl_state.grantee = 0
+                        THEN 'PUBLIC'
+                        ELSE pg_get_userbyid(acl_state.grantee)
+                   END || '|' ||
+                   acl_state.privilege_type || '|' || acl_state.is_grantable::text
+            FROM pg_namespace AS schema_state
+            CROSS JOIN LATERAL aclexplode(coalesce(
+                schema_state.nspacl,
+                acldefault('n'::"char", schema_state.nspowner))) AS acl_state
+            WHERE schema_state.nspname = 'aigateway'
+            ORDER BY pg_get_userbyid(acl_state.grantor),
+                     CASE WHEN acl_state.grantee = 0
+                          THEN 'PUBLIC'
+                          ELSE pg_get_userbyid(acl_state.grantee)
+                     END,
+                     acl_state.privilege_type,
+                     acl_state.is_grantable;
+
             SELECT 'table|' || table_name
             FROM information_schema.tables
             WHERE table_schema = 'aigateway'
@@ -135,6 +160,7 @@ public static class AiGatewayProductionUpgradePreflight
                    relation_state.relkind::text || '|' ||
                    relation_state.relpersistence::text || '|' ||
                    relation_state.relispartition::text || '|' ||
+                   pg_get_userbyid(relation_state.relowner) || '|' ||
                    coalesce((
                        SELECT string_agg(relation_option.option, ',' ORDER BY relation_option.option)
                        FROM unnest(relation_state.reloptions) AS relation_option(option)), '')
@@ -143,6 +169,37 @@ public static class AiGatewayProductionUpgradePreflight
               ON relation_namespace.oid = relation_state.relnamespace
             WHERE relation_namespace.nspname = 'aigateway'
             ORDER BY relation_state.relname, relation_state.relkind;
+
+            SELECT 'relation-acl|' || relation_state.relname || '|' ||
+                   relation_state.relkind::text || '|' ||
+                   pg_get_userbyid(acl_state.grantor) || '|' ||
+                   CASE WHEN acl_state.grantee = 0
+                        THEN 'PUBLIC'
+                        ELSE pg_get_userbyid(acl_state.grantee)
+                   END || '|' ||
+                   acl_state.privilege_type || '|' || acl_state.is_grantable::text
+            FROM pg_class AS relation_state
+            JOIN pg_namespace AS relation_namespace
+              ON relation_namespace.oid = relation_state.relnamespace
+            CROSS JOIN LATERAL aclexplode(coalesce(
+                relation_state.relacl,
+                acldefault(
+                    CASE WHEN relation_state.relkind = 'S'
+                         THEN 'S'::"char"
+                         ELSE 'r'::"char"
+                    END,
+                    relation_state.relowner))) AS acl_state
+            WHERE relation_namespace.nspname = 'aigateway'
+              AND relation_state.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+            ORDER BY relation_state.relname,
+                     relation_state.relkind,
+                     pg_get_userbyid(acl_state.grantor),
+                     CASE WHEN acl_state.grantee = 0
+                          THEN 'PUBLIC'
+                          ELSE pg_get_userbyid(acl_state.grantee)
+                     END,
+                     acl_state.privilege_type,
+                     acl_state.is_grantable;
 
             SELECT 'view|' || view_state.relname || '|' ||
                    view_state.relkind::text || '|' ||
@@ -166,6 +223,7 @@ public static class AiGatewayProductionUpgradePreflight
             SELECT 'function|' || function_namespace.nspname || '|' ||
                    function_state.proname || '|' ||
                    pg_get_function_identity_arguments(function_state.oid) || '|' ||
+                   pg_get_userbyid(function_state.proowner) || '|' ||
                    function_state.prokind::text || '|' ||
                    function_state.provolatile::text || '|' ||
                    function_state.proisstrict::text || '|' ||
@@ -182,8 +240,34 @@ public static class AiGatewayProductionUpgradePreflight
             ORDER BY function_namespace.nspname, function_state.proname,
                      pg_get_function_identity_arguments(function_state.oid);
 
+            SELECT 'function-acl|' || function_state.proname || '|' ||
+                   pg_get_function_identity_arguments(function_state.oid) || '|' ||
+                   pg_get_userbyid(acl_state.grantor) || '|' ||
+                   CASE WHEN acl_state.grantee = 0
+                        THEN 'PUBLIC'
+                        ELSE pg_get_userbyid(acl_state.grantee)
+                   END || '|' ||
+                   acl_state.privilege_type || '|' || acl_state.is_grantable::text
+            FROM pg_proc AS function_state
+            JOIN pg_namespace AS function_namespace
+              ON function_namespace.oid = function_state.pronamespace
+            CROSS JOIN LATERAL aclexplode(coalesce(
+                function_state.proacl,
+                acldefault('f'::"char", function_state.proowner))) AS acl_state
+            WHERE function_namespace.nspname = 'aigateway'
+            ORDER BY function_state.proname,
+                     pg_get_function_identity_arguments(function_state.oid),
+                     pg_get_userbyid(acl_state.grantor),
+                     CASE WHEN acl_state.grantee = 0
+                          THEN 'PUBLIC'
+                          ELSE pg_get_userbyid(acl_state.grantee)
+                     END,
+                     acl_state.privilege_type,
+                     acl_state.is_grantable;
+
             SELECT 'type|' || type_state.typname || '|' ||
                    type_state.typtype::text || '|' ||
+                   pg_get_userbyid(type_state.typowner) || '|' ||
                    type_state.typcategory::text || '|' ||
                    type_state.typispreferred::text || '|' ||
                    type_state.typnotnull::text || '|' ||
@@ -217,13 +301,44 @@ public static class AiGatewayProductionUpgradePreflight
               ON type_namespace.oid = type_state.typnamespace
             WHERE type_namespace.nspname = 'aigateway'
               AND (
-                  type_state.typtype IN ('e', 'd', 'r', 'm') OR
+                      type_state.typtype IN ('e', 'd', 'r', 'm') OR
                   (type_state.typtype = 'c' AND EXISTS (
                       SELECT 1
                       FROM pg_class AS composite_relation
                       WHERE composite_relation.oid = type_state.typrelid
                         AND composite_relation.relkind = 'c')))
             ORDER BY type_state.typname;
+
+            SELECT 'type-acl|' || type_state.typname || '|' ||
+                   type_state.typtype::text || '|' ||
+                   pg_get_userbyid(acl_state.grantor) || '|' ||
+                   CASE WHEN acl_state.grantee = 0
+                        THEN 'PUBLIC'
+                        ELSE pg_get_userbyid(acl_state.grantee)
+                   END || '|' ||
+                   acl_state.privilege_type || '|' || acl_state.is_grantable::text
+            FROM pg_type AS type_state
+            JOIN pg_namespace AS type_namespace
+              ON type_namespace.oid = type_state.typnamespace
+            CROSS JOIN LATERAL aclexplode(coalesce(
+                type_state.typacl,
+                acldefault('T'::"char", type_state.typowner))) AS acl_state
+            WHERE type_namespace.nspname = 'aigateway'
+              AND (
+                  type_state.typtype IN ('e', 'd', 'r', 'm') OR
+                  (type_state.typtype = 'c' AND EXISTS (
+                      SELECT 1
+                      FROM pg_class AS composite_relation
+                      WHERE composite_relation.oid = type_state.typrelid
+                        AND composite_relation.relkind = 'c')))
+            ORDER BY type_state.typname,
+                     pg_get_userbyid(acl_state.grantor),
+                     CASE WHEN acl_state.grantee = 0
+                          THEN 'PUBLIC'
+                          ELSE pg_get_userbyid(acl_state.grantee)
+                     END,
+                     acl_state.privilege_type,
+                     acl_state.is_grantable;
 
             SELECT 'composite-attribute|' || type_state.typname || '|' ||
                    lpad(attribute_state.attnum::text, 4, '0') || '|' ||
