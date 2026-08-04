@@ -85,7 +85,6 @@ public static class AiGatewayProductionUpgradePreflight
             FROM information_schema.tables
             WHERE table_schema = 'aigateway'
               AND table_type = 'BASE TABLE'
-              AND table_name <> '__EFMigrationsHistory_AiGateway'
             ORDER BY table_name;
 
             SELECT 'column|' || table_name || '|' || lpad(ordinal_position::text, 4, '0') || '|' ||
@@ -97,7 +96,6 @@ public static class AiGatewayProductionUpgradePreflight
                    is_generated || '|' || coalesce(generation_expression, '')
             FROM information_schema.columns
             WHERE table_schema = 'aigateway'
-              AND table_name <> '__EFMigrationsHistory_AiGateway'
             ORDER BY table_name, ordinal_position;
 
             SELECT 'index|' || table_class.relname || '|' || index_class.relname || '|' ||
@@ -111,7 +109,6 @@ public static class AiGatewayProductionUpgradePreflight
             JOIN pg_class AS index_class ON index_class.oid = index_state.indexrelid
             JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
             WHERE table_namespace.nspname = 'aigateway'
-              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
             ORDER BY table_class.relname, index_class.relname;
 
             SELECT 'constraint|' || table_class.relname || '|' || constraint_state.conname || '|' ||
@@ -122,7 +119,6 @@ public static class AiGatewayProductionUpgradePreflight
             JOIN pg_class AS table_class ON table_class.oid = constraint_state.conrelid
             JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
             WHERE table_namespace.nspname = 'aigateway'
-              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
             ORDER BY table_class.relname, constraint_state.conname;
 
             SELECT 'table-security|' || table_class.relname || '|' ||
@@ -133,7 +129,6 @@ public static class AiGatewayProductionUpgradePreflight
             JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
             WHERE table_namespace.nspname = 'aigateway'
               AND table_class.relkind IN ('r', 'p')
-              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
             ORDER BY table_class.relname;
 
             SELECT 'trigger|' || table_class.relname || '|' || trigger_state.tgname || '|' ||
@@ -142,7 +137,6 @@ public static class AiGatewayProductionUpgradePreflight
             JOIN pg_class AS table_class ON table_class.oid = trigger_state.tgrelid
             JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
             WHERE table_namespace.nspname = 'aigateway'
-              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
               AND NOT trigger_state.tgisinternal
             ORDER BY table_class.relname, trigger_state.tgname;
 
@@ -158,7 +152,6 @@ public static class AiGatewayProductionUpgradePreflight
                 JOIN pg_class AS table_class ON table_class.oid = trigger_state.tgrelid
                 JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
                 WHERE table_namespace.nspname = 'aigateway'
-                  AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
                   AND NOT trigger_state.tgisinternal)
             ORDER BY function_namespace.nspname, function_state.proname,
                      pg_get_function_identity_arguments(function_state.oid);
@@ -180,7 +173,6 @@ public static class AiGatewayProductionUpgradePreflight
             JOIN pg_class AS table_class ON table_class.oid = policy_state.polrelid
             JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
             WHERE table_namespace.nspname = 'aigateway'
-              AND table_class.relname <> '__EFMigrationsHistory_AiGateway'
             ORDER BY table_class.relname, policy_state.polname;
 
             SELECT 'sequence|' || sequence_name || '|' || data_type || '|' ||

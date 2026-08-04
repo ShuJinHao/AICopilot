@@ -178,7 +178,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             AiGatewayProductionUpgradeContract.ExpectedProductionHistorySha256,
             AiGatewayProductionUpgradeContract.ProductionMigrationIds.Count,
             AiGatewayProductionUpgradeContract.ExpectedProductionSchemaSha256,
-            621));
+            627));
 
         await using var connection = new NpgsqlConnection(database.ConnectionString);
         await connection.OpenAsync();
@@ -368,6 +368,11 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         CREATE POLICY structural_drift_policy
             ON aigateway.model_quota_reservations
             USING (true);
+        """,
+        """
+        ALTER TABLE aigateway."__EFMigrationsHistory_AiGateway"
+            ADD CONSTRAINT "CK_history_rejects_current_upgrade"
+            CHECK ("MigrationId" <> '20260804055544_UpgradeHarnessRuntimeFromProduction');
         """
     };
 
