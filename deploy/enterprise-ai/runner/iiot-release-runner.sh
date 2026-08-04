@@ -319,6 +319,20 @@ verify_aicopilot_migration_completion() {
     "$container" "$INVOCATION_ID"
 }
 
+verify_aicopilot_catalog_fence_preflight() {
+  local output expected_marker
+  [ "$TARGET" = aicopilot ] || return 0
+  expected_marker="aicopilot_catalog_fence_preflight=success invocation_id=$INVOCATION_ID"
+  if ! output="$(compose_with_images "$CANDIDATE_IMAGES_FILE" run --rm --no-deps \
+      -e MigrationWorker__CatalogFencePreflightOnly=true \
+      "$MIGRATION_SERVICE" 2>&1)"; then
+    fail "AiGateway catalog-fence preflight failed before runtime quiesce" 77
+  fi
+  grep -Fqx "$expected_marker" <<< "$output" || \
+    fail "AiGateway catalog-fence preflight success marker is missing" 77
+  printf 'runner_migration_preflight=verified invocation_id=%s\n' "$INVOCATION_ID"
+}
+
 if [ "$MODE" = doctor ]; then
   doctor_common
   if [ -f "$CURRENT_IMAGES_FILE" ]; then
@@ -737,6 +751,10 @@ done
 
 printf 'runner_phase=pull target=%s\n' "$TARGET_NAME"
 compose_with_images "$CANDIDATE_IMAGES_FILE" pull "${SELECTED_COMPOSE_SERVICES[@]}"
+
+if [ "$TARGET" = aicopilot ] && [[ "$SELECTED" == *" migration "* ]]; then
+  verify_aicopilot_catalog_fence_preflight
+fi
 
 if [[ "$SELECTED" == *" migration "* ]]; then
   if [ "$TARGET" = aicopilot ]; then

@@ -130,6 +130,23 @@ run_migration_and_verify() {
     "$container" "$invocation_id"
 }
 
+run_catalog_fence_preflight() {
+  local invocation_id output expected_marker
+  invocation_id="${WORKSPACE_INVOCATION_ID:-unbound}"
+  expected_marker="aicopilot_catalog_fence_preflight=success invocation_id=$invocation_id"
+  if ! output="$(compose run --rm --no-deps \
+      -e MigrationWorker__CatalogFencePreflightOnly=true \
+      aicopilot-migration 2>&1)"; then
+    printf 'AiGateway catalog-fence preflight failed before runtime quiesce.\n' >&2
+    return 77
+  fi
+  if ! grep -Fqx "$expected_marker" <<< "$output"; then
+    printf 'AiGateway catalog-fence preflight success marker is missing.\n' >&2
+    return 77
+  fi
+  printf 'AiGateway catalog-fence preflight verified: invocation_id=%s\n' "$invocation_id"
+}
+
 backup_database_before_migration() {
   local backup_dir backup_id backup_file backup_temp checksum_temp
   backup_dir="$DEPLOY_DIR/backups/postgres"
@@ -2284,6 +2301,7 @@ if [ -z "$REQUESTED_SERVICES" ]; then
   CONTAINER_UPDATE_STARTED=true
   compose up -d --remove-orphans postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
+  run_catalog_fence_preflight
   quiesce_schema_dependent_runtimes
   backup_database_before_migration
   persist_migration_started_state
@@ -2297,6 +2315,7 @@ else
   compose up -d postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
   if [ "$RUN_MIGRATION" = "true" ]; then
+    run_catalog_fence_preflight
     quiesce_schema_dependent_runtimes
     backup_database_before_migration
     persist_migration_started_state

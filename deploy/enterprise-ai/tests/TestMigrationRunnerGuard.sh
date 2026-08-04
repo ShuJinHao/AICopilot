@@ -99,6 +99,14 @@ case "${1:-}" in
         fi
         exit 0
         ;;
+      run)
+        if [ "${FAKE_CATALOG_FENCE_PREFLIGHT_FAIL:-false}" = true ]; then
+          exit 29
+        fi
+        printf 'aicopilot_catalog_fence_preflight=success invocation_id=%s\n' \
+          "${AICOPILOT_MIGRATION_INVOCATION_ID:-unbound}"
+        exit 0
+        ;;
       up)
         if [[ "$*" == *'-d --no-deps'* ]] &&
            [ "${FAKE_RUNTIME_RECOVERY_UP_FAIL:-false}" = true ]; then
@@ -211,6 +219,7 @@ run_request() {
   FAKE_MIGRATION_INVOCATION_FILE="$MIGRATION_INVOCATION_FILE" \
   FAKE_RECOVERY_PHASE_FILE="$TEST_ROOT/recovery-phase" \
   FAKE_RECOVERY_INSPECT_COUNT_FILE="$TEST_ROOT/recovery-inspect-count" \
+  FAKE_CATALOG_FENCE_PREFLIGHT_FAIL="${FAKE_CATALOG_FENCE_PREFLIGHT_FAIL:-false}" \
   IIOT_RUNNER_HEALTH_ATTEMPTS=1 \
   IIOT_RUNNER_HEALTH_INTERVAL_SECONDS=0 \
     "$SERVER_DIR/runner/iiot-release-runner.sh" \
@@ -248,6 +257,32 @@ grep -Fq 'running AICopilot runner bytes do not match the prepared request' \
   "$TEST_ROOT/runner-drift.log" || fail 'runner byte drift rejection was ambiguous'
 grep -Eq 'compose .* (pull|stop|up|start|exec)( |$)' "$DOCKER_LOG" && \
   fail 'runner byte drift reached Docker mutation'
+
+cp "$SERVER_DIR/releases/current-images.env" "$TEST_ROOT/current-images.preflight-before"
+cp "$SERVER_DIR/releases/routine-current.env" "$TEST_ROOT/routine-current.preflight-before"
+: > "$DOCKER_LOG"
+preflight_failure_invocation='migration-guard-catalog-fence-preflight'
+preflight_failure_request="$(make_request "$preflight_failure_invocation" 8888888888888888888888888888888888888888 b)"
+set +e
+FAKE_CATALOG_FENCE_PREFLIGHT_FAIL=true \
+  run_request "$preflight_failure_request" > "$TEST_ROOT/catalog-fence-preflight.log" 2>&1
+preflight_failure_status=$?
+set -e
+[ "$preflight_failure_status" -eq 77 ] || \
+  fail 'catalog-fence authority failure was not rejected as a pre-mutation permission failure'
+grep -Fq 'CatalogFencePreflightOnly=true' "$DOCKER_LOG" || \
+  fail 'migration request did not run the catalog-fence authority preflight'
+grep -Eq 'compose .* (stop|exec .*pg_dump|up .*aicopilot-migration)' "$DOCKER_LOG" && \
+  fail 'catalog-fence authority failure reached runtime quiesce, backup, or migration'
+[ ! -f "$SERVER_DIR/releases/routine-history/$preflight_failure_invocation.migration-started.env" ] || \
+  fail 'catalog-fence authority failure wrote a migration-started marker'
+cmp -s "$TEST_ROOT/current-images.preflight-before" "$SERVER_DIR/releases/current-images.env" || \
+  fail 'catalog-fence authority failure promoted candidate images'
+cmp -s "$TEST_ROOT/routine-current.preflight-before" "$SERVER_DIR/releases/routine-current.env" || \
+  fail 'catalog-fence authority failure rewrote routine-current state'
+grep -Fq 'RESUME_ALLOWED=true' \
+  "$SERVER_DIR/releases/routine-history/$preflight_failure_invocation.failed.env" || \
+  fail 'catalog-fence authority failure was not retained as safely retryable'
 
 : > "$DOCKER_LOG"
 success_invocation='migration-guard-success'

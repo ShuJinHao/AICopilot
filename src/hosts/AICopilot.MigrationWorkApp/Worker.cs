@@ -23,6 +23,24 @@ public class Worker(
         try
         {
             using var scope = serviceProvider.CreateScope();
+            var catalogFencePreflightOnly = configuration.GetValue<bool>(
+                "MigrationWorker:CatalogFencePreflightOnly");
+            if (catalogFencePreflightOnly)
+            {
+                if (configuration.GetValue<bool>("MigrationWorker:CheckSecretsOnly"))
+                {
+                    throw new InvalidOperationException(
+                        "Catalog-fence preflight cannot be combined with secret-only migration mode.");
+                }
+
+                var preflightDbContext = scope.ServiceProvider
+                    .GetRequiredService<AiGatewayDbContext>();
+                await MigrationWorkerDatabaseMigrator.RunAiGatewayPreDeploymentPreflightAsync(
+                    preflightDbContext,
+                    cancellationToken);
+                return;
+            }
+
             var dbContext = scope.ServiceProvider.GetRequiredService<AiCopilotDbContext>();
             var identityStoreDbContext = scope.ServiceProvider.GetRequiredService<IdentityStoreDbContext>();
             var aiGatewayDbContext = scope.ServiceProvider.GetRequiredService<AiGatewayDbContext>();

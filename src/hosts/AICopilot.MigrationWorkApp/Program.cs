@@ -25,13 +25,18 @@ try
     var worker = scope.ServiceProvider.GetRequiredService<Worker>();
     var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
     var invocationId = builder.Configuration["MigrationWorker:InvocationId"] ?? "unbound";
+    var catalogFencePreflightOnly = builder.Configuration.GetValue<bool>(
+        "MigrationWorker:CatalogFencePreflightOnly");
 
     return await MigrationWorkAppProcess.RunAsync(
         worker.RunAsync,
         invocationId,
         Console.Out,
         Console.Error,
-        lifetime.ApplicationStopping);
+        lifetime.ApplicationStopping,
+        catalogFencePreflightOnly
+            ? MigrationWorkAppProcess.CatalogFencePreflightSuccessMarker
+            : MigrationWorkAppProcess.SuccessMarker);
 }
 finally
 {

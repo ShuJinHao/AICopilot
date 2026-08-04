@@ -596,6 +596,45 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             "CREATE FUNCTION aigateway.concurrent_function() RETURNS integer LANGUAGE sql AS 'SELECT 1';");
     }
 
+    [Fact]
+    public async Task PreDeploymentFencePreflight_ShouldRejectLimitedRoleWithoutWritingHistory()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_limited_fence_preflight");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using (var baselineContext = CreateDbContext(productionConnectionString))
+        {
+            await baselineContext.Database.MigrateAsync(
+                AiGatewayProductionUpgradeContract.LastProductionMigrationId);
+        }
+        var before = await AiGatewayProductionUpgradePreflight.InspectAsync(
+            productionConnectionString);
+        before.State.Should().Be(AiGatewayProductionUpgradeState.ProductionBaseline);
+
+        await using var adminConnection = new NpgsqlConnection(database.ConnectionString);
+        await adminConnection.OpenAsync();
+        await ExecuteNonQueryAsync(adminConnection, "ALTER ROLE aicopilot NOSUPERUSER;");
+        try
+        {
+            await using var limitedContext = CreateDbContext(productionConnectionString);
+            var action = () => MigrationWorkerDatabaseMigrator
+                .RunAiGatewayPreDeploymentPreflightAsync(
+                    limitedContext,
+                    CancellationToken.None);
+
+            var failure = await action.Should().ThrowAsync<PostgresException>();
+            failure.Which.SqlState.Should().Be(PostgresErrorCodes.InsufficientPrivilege);
+            var unchanged = await AiGatewayProductionUpgradePreflight.InspectAsync(
+                productionConnectionString);
+            unchanged.Should().Be(before);
+        }
+        finally
+        {
+            await ExecuteNonQueryAsync(adminConnection, "ALTER ROLE aicopilot SUPERUSER;");
+        }
+    }
+
     [Theory]
     [MemberData(nameof(StructuralDriftCommands))]
     public async Task ProductionHistoryWithSameNamedStructuralDrift_ShouldFailPreflight(

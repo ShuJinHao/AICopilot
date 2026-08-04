@@ -122,6 +122,25 @@ public sealed class MigrationWorkerSecretMigratorTests
     }
 
     [Fact]
+    public async Task Process_CatalogFencePreflight_ShouldUseDistinctBoundSuccessMarker()
+    {
+        var standardOutput = new StringWriter();
+        var standardError = new StringWriter();
+
+        var exitCode = await MigrationWorkAppProcess.RunAsync(
+            _ => Task.CompletedTask,
+            "deploy-test-preflight",
+            standardOutput,
+            standardError,
+            successMarker: MigrationWorkAppProcess.CatalogFencePreflightSuccessMarker);
+
+        exitCode.Should().Be(0);
+        standardOutput.ToString().Should().Be(
+            $"{MigrationWorkAppProcess.CatalogFencePreflightSuccessMarker} invocation_id=deploy-test-preflight{Environment.NewLine}");
+        standardError.ToString().Should().BeEmpty();
+    }
+
+    [Fact]
     public void MigrateLanguageModelApiKeys_ShouldProtectLegacyCipherAndPlaintextSecrets()
     {
         var original = Environment.GetEnvironmentVariable(EnvVarName);

@@ -92,6 +92,39 @@ internal static class MigrationWorkerDatabaseMigrator
         }
     }
 
+    internal static async Task RunAiGatewayPreDeploymentPreflightAsync(
+        AiGatewayDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+        var database = dbContext.Database;
+        var connection = database.GetDbConnection() as NpgsqlConnection
+            ?? throw new InvalidOperationException(
+                "AiGateway pre-deployment migration check requires an Npgsql connection.");
+        var openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
+        {
+            await database.OpenConnectionAsync(cancellationToken);
+        }
+
+        try
+        {
+            await using var transaction = await database.BeginTransactionAsync(cancellationToken);
+            await AcquireAiGatewaySchemaDdlFenceAsync(connection, cancellationToken);
+            await AiGatewayProductionUpgradePreflight.InspectAsync(
+                connection,
+                cancellationToken);
+            await transaction.RollbackAsync(cancellationToken);
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await database.CloseConnectionAsync();
+            }
+        }
+    }
+
     internal static async Task AcquireAiGatewaySchemaDdlFenceAsync(
         NpgsqlConnection connection,
         CancellationToken cancellationToken)

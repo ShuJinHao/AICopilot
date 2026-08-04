@@ -113,6 +113,14 @@ if [[ "$full" == compose*" up "*aicopilot-migration* ]] &&
   printf '%s\n' "$AICOPILOT_MIGRATION_INVOCATION_ID" > \
     "${FAKE_REMOTE_DIR:?}/.fake-migration-invocation"
 fi
+if [[ "$full" == compose*" run "*MigrationWorker__CatalogFencePreflightOnly=true* ]]; then
+  if [ "${FAKE_CATALOG_FENCE_PREFLIGHT_FAIL:-false}" = true ]; then
+    exit 29
+  fi
+  printf 'aicopilot_catalog_fence_preflight=success invocation_id=%s\n' \
+    "${AICOPILOT_MIGRATION_INVOCATION_ID:-unbound}"
+  exit 0
+fi
 case "$full" in
   "buildx version"*) printf 'github.com/docker/buildx fake\n'; exit 0 ;;
   buildx\ build*) exit 0 ;;
@@ -1038,6 +1046,33 @@ assert_eq 64 "$worker_partial_status" "partial migration runtime group rejection
 assert_file_contains "$TEST_ROOT/worker-partial-group.log" "migration requires the complete runtime group"
 [ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || \
   fail "partial migration group created unsafe-partial evidence before migration"
+
+printf 'TEST catalog-fence authority failure stops before runtime quiesce or migration state\n'
+current_release_hash_before_preflight="$(sha256_file "$REMOTE_DIR/releases/current-release.env")"
+: > "$DOCKER_LOG"
+set +e
+AICOPILOT_ALLOW_REDEPLOY_SAME_SHA=true \
+FAKE_CATALOG_FENCE_PREFLIGHT_FAIL=true \
+TEST_SERVICES='httpapi,migration,dataworker,ragworker,web' \
+TEST_WORKSPACE_PLAN_FILE="$FULL_WORKER_PLAN_FILE" \
+TEST_WORKSPACE_PLAN_DIGEST="$FULL_WORKER_PLAN_DIGEST" \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-catalog-fence-preflight \
+  run_local_release > "$TEST_ROOT/catalog-fence-preflight.log" 2>&1
+catalog_fence_preflight_status=$?
+set -e
+assert_eq 77 "$catalog_fence_preflight_status" "catalog-fence preflight exit code"
+assert_file_contains "$TEST_ROOT/catalog-fence-preflight.log" \
+  "catalog-fence preflight failed before runtime quiesce"
+if grep -Eq 'compose .* (stop aicopilot-httpapi|exec .*pg_dump|up .*aicopilot-migration)' "$DOCKER_LOG"; then
+  fail "catalog-fence preflight failure reached runtime quiesce, backup, or migration"
+fi
+[ ! -f "$REMOTE_DIR/releases/migration-states/deployment-behavior-catalog-fence-preflight.env" ] || \
+  fail "catalog-fence preflight failure wrote migration-started state"
+[ ! -f "$REMOTE_DIR/releases/blocked-release.env" ] || \
+  fail "catalog-fence preflight failure was misclassified as unsafe-partial"
+assert_eq "$current_release_hash_before_preflight" \
+  "$(sha256_file "$REMOTE_DIR/releases/current-release.env")" \
+  "current release after catalog-fence preflight failure"
 
 printf 'TEST abnormal worker process state blocks commit and records migration partial state\n'
 : > "$DOCKER_LOG"

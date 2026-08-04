@@ -3,17 +3,27 @@ namespace AICopilot.MigrationWorkApp;
 public static class MigrationWorkAppProcess
 {
     public const string SuccessMarker = "aicopilot_migration_result=success";
+    public const string CatalogFencePreflightSuccessMarker =
+        "aicopilot_catalog_fence_preflight=success";
 
     public static async Task<int> RunAsync(
         Func<CancellationToken, Task> runMigrationAsync,
         string invocationId,
         TextWriter standardOutput,
         TextWriter standardError,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string successMarker = SuccessMarker)
     {
         ArgumentNullException.ThrowIfNull(runMigrationAsync);
         ArgumentNullException.ThrowIfNull(standardOutput);
         ArgumentNullException.ThrowIfNull(standardError);
+        if (successMarker is not SuccessMarker and not CatalogFencePreflightSuccessMarker)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(successMarker),
+                successMarker,
+                "Unsupported MigrationWorkApp success marker.");
+        }
 
         if (string.IsNullOrWhiteSpace(invocationId) ||
             invocationId.Any(character =>
@@ -27,7 +37,7 @@ public static class MigrationWorkAppProcess
         try
         {
             await runMigrationAsync(cancellationToken);
-            await standardOutput.WriteLineAsync($"{SuccessMarker} invocation_id={invocationId}");
+            await standardOutput.WriteLineAsync($"{successMarker} invocation_id={invocationId}");
             await standardOutput.FlushAsync(cancellationToken);
             return 0;
         }

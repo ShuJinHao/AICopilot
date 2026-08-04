@@ -471,6 +471,23 @@ public sealed class SecurityDeploymentTests
         deployRelease.Should().Contain("docker inspect --format '{{.State.ExitCode}}'");
         deployRelease.Should().Contain(
             "expected_marker=\"aicopilot_migration_result=success invocation_id=$invocation_id\"");
+        deployRelease.Should().Contain("MigrationWorker__CatalogFencePreflightOnly=true");
+        deployRelease.Should().Contain(
+            "expected_marker=\"aicopilot_catalog_fence_preflight=success invocation_id=$invocation_id\"");
+        var fullDeployCatalogFenceBeforeQuiesce = """
+          run_catalog_fence_preflight
+          quiesce_schema_dependent_runtimes
+          backup_database_before_migration
+          persist_migration_started_state
+        """;
+        var selectedDeployCatalogFenceBeforeQuiesce = """
+            run_catalog_fence_preflight
+            quiesce_schema_dependent_runtimes
+            backup_database_before_migration
+            persist_migration_started_state
+        """;
+        deployRelease.Should().Contain(fullDeployCatalogFenceBeforeQuiesce);
+        deployRelease.Should().Contain(selectedDeployCatalogFenceBeforeQuiesce);
         var fullDeployMigrationThenPreflight = """
           run_migration_and_verify
           check_model_secret_migration_preflight
