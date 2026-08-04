@@ -26,13 +26,20 @@ if (appHostOptions.EnableDockerComposeEnvironment)
     builder.AddDockerComposeEnvironment("compose");
 }
 
+var postgresUserName = builder.AddParameter(
+    "pg-username",
+    builder.Configuration["Parameters:pg-username"] ?? "postgres",
+    publishValueAsDefault: true);
 var password = builder.AddParameter("pg-password", secret: true);
 var apiKeyEncryptionKey = builder.AddParameter("aicopilot-api-key-encryption-key", secret: true);
 var jwtSecretKey = builder.AddParameter("jwt-secret-key", secret: true);
 var bootstrapAdminUserName = builder.AddParameter("bootstrap-admin-username", secret: true);
 var bootstrapAdminPassword = builder.AddParameter("bootstrap-admin-password", secret: true);
 
-var postgresdb = builder.AddPostgres("postgres", password: password);
+var postgresdb = builder.AddPostgres(
+    "postgres",
+    userName: postgresUserName,
+    password: password);
 
 if (appHostOptions.PersistentContainers)
 {

@@ -3,6 +3,7 @@ using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Persistence;
+using AICopilot.MigrationWorkApp;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -176,19 +177,20 @@ public sealed class MigrationSafetyTests(PostgresPersistenceFixture fixture)
     public async Task FreshDatabaseMigration_ShouldCreateEverySplitHistoryTable_WithRows()
     {
         await using var database = await PostgresScratchDatabase.CreateAsync(fixture.ConnectionString, "aicopilot_migration");
+        var migrationConnectionString = await PrepareProductionMigrationRoleAsync(database);
 
         await using var aiCopilotDbContext = new AiCopilotDbContext(
-            CreateOptions<AiCopilotDbContext>(database.ConnectionString, MigrationHistoryTables.AiCopilot));
+            CreateOptions<AiCopilotDbContext>(migrationConnectionString, MigrationHistoryTables.AiCopilot));
         await using var identityStoreDbContext = new IdentityStoreDbContext(
-            CreateOptions<IdentityStoreDbContext>(database.ConnectionString, MigrationHistoryTables.IdentityStore));
+            CreateOptions<IdentityStoreDbContext>(migrationConnectionString, MigrationHistoryTables.IdentityStore));
         await using var aiGatewayDbContext = new AiGatewayDbContext(
-            CreateOptions<AiGatewayDbContext>(database.ConnectionString, MigrationHistoryTables.AiGateway));
+            CreateOptions<AiGatewayDbContext>(migrationConnectionString, MigrationHistoryTables.AiGateway));
         await using var ragDbContext = new RagDbContext(
-            CreateOptions<RagDbContext>(database.ConnectionString, MigrationHistoryTables.Rag));
+            CreateOptions<RagDbContext>(migrationConnectionString, MigrationHistoryTables.Rag));
         await using var dataAnalysisDbContext = new DataAnalysisDbContext(
-            CreateOptions<DataAnalysisDbContext>(database.ConnectionString, MigrationHistoryTables.DataAnalysis));
+            CreateOptions<DataAnalysisDbContext>(migrationConnectionString, MigrationHistoryTables.DataAnalysis));
         await using var mcpServerDbContext = new McpServerDbContext(
-            CreateOptions<McpServerDbContext>(database.ConnectionString, MigrationHistoryTables.McpServer));
+            CreateOptions<McpServerDbContext>(migrationConnectionString, MigrationHistoryTables.McpServer));
 
         var migrationContexts = new[]
         {
@@ -200,12 +202,9 @@ public sealed class MigrationSafetyTests(PostgresPersistenceFixture fixture)
             new MigrationHistoryBootstrapper.MigrationContext(mcpServerDbContext, MigrationHistoryTables.McpServer)
         };
 
-        await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(migrationContexts, CancellationToken.None);
-
-        foreach (var migrationContext in migrationContexts)
-        {
-            await migrationContext.DbContext.Database.MigrateAsync();
-        }
+        await MigrationWorkerDatabaseMigrator.RunMigrationsAsync(
+            migrationContexts,
+            CancellationToken.None);
 
         foreach (var historyTable in MigrationHistoryTables.MigratedContexts)
         {
@@ -341,6 +340,37 @@ public sealed class MigrationSafetyTests(PostgresPersistenceFixture fixture)
         return new DbContextOptionsBuilder<TContext>()
             .UseNpgsqlWithMigrationHistory(connectionString, historyTable)
             .Options;
+    }
+
+    private static async Task<string> PrepareProductionMigrationRoleAsync(
+        PostgresScratchDatabase database)
+    {
+        await ExecuteNonQueryAsync(
+            database.ConnectionString,
+            """
+            DO $role$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_roles WHERE rolname = 'aicopilot') THEN
+                    CREATE ROLE aicopilot NOLOGIN SUPERUSER;
+                END IF;
+                ALTER ROLE aicopilot SUPERUSER;
+            END
+            $role$;
+            DO $grant$
+            BEGIN
+                EXECUTE format(
+                    'GRANT CREATE ON DATABASE %I TO aicopilot',
+                    current_database());
+            END
+            $grant$;
+            CREATE SCHEMA aigateway AUTHORIZATION aicopilot;
+            """);
+
+        return new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            Options = "-c role=aicopilot"
+        }.ConnectionString;
     }
 
     private static async Task CreateLegacyHistoryAsync(

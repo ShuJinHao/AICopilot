@@ -58,7 +58,11 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
 
         await using (var dbContext = CreateDbContext(productionConnectionString))
         {
-            await dbContext.Database.MigrateAsync();
+            await MigrationWorkerDatabaseMigrator.RunMigrationsAsync(
+                [new MigrationHistoryBootstrapper.MigrationContext(
+                    dbContext,
+                    MigrationHistoryTables.AiGateway)],
+                CancellationToken.None);
         }
 
         var migrated = await AiGatewayProductionUpgradePreflight.InspectAsync(
