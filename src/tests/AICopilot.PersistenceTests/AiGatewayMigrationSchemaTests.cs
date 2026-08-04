@@ -181,7 +181,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             AiGatewayProductionUpgradeContract.ExpectedProductionHistorySha256,
             AiGatewayProductionUpgradeContract.ProductionMigrationIds.Count,
             AiGatewayProductionUpgradeContract.ExpectedProductionSchemaSha256,
-            954));
+            955));
 
         await using var connection = new NpgsqlConnection(productionConnectionString);
         await connection.OpenAsync();
@@ -477,6 +477,10 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         GRANT USAGE ON SEQUENCE aigateway.model_quota_fencing_seq TO PUBLIC;
         """,
         """
+        ALTER SEQUENCE aigateway.model_quota_fencing_seq
+            OWNED BY aigateway.agent_tasks.id;
+        """,
+        """
         ALTER DEFAULT PRIVILEGES IN SCHEMA aigateway
             GRANT SELECT ON TABLES TO PUBLIC;
         """
@@ -547,6 +551,70 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         history.Should().Equal(AiGatewayProductionUpgradeContract.ProductionMigrationIds);
     }
 
+    [Fact]
+    public async Task ExternalTriggerFunctionBodyDrift_ShouldChangeFrozenSchemaFingerprint()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_external_trigger_function_drift");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using (var baselineContext = CreateDbContext(productionConnectionString))
+        {
+            await baselineContext.Database.MigrateAsync(
+                AiGatewayProductionUpgradeContract.LastProductionMigrationId);
+        }
+
+        await using (var adminConnection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await adminConnection.OpenAsync();
+            await ExecuteNonQueryAsync(
+                adminConnection,
+                "CREATE SCHEMA trigger_external AUTHORIZATION aicopilot;");
+        }
+
+        await using var connection = new NpgsqlConnection(productionConnectionString);
+        await connection.OpenAsync();
+        await ExecuteNonQueryAsync(
+            connection,
+            """
+            CREATE FUNCTION trigger_external.guard_language_model()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            SECURITY DEFINER
+            SET search_path = pg_catalog
+            AS $function$
+            BEGIN
+                RETURN NEW;
+            END
+            $function$;
+            CREATE TRIGGER guard_language_model
+                BEFORE UPDATE ON aigateway.language_models
+                FOR EACH ROW
+                EXECUTE FUNCTION trigger_external.guard_language_model();
+            """);
+
+        var firstHash = await ReadRejectedSchemaHashAsync(productionConnectionString);
+        await ExecuteNonQueryAsync(
+            connection,
+            """
+            CREATE OR REPLACE FUNCTION trigger_external.guard_language_model()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            SECURITY DEFINER
+            SET search_path = pg_catalog
+            AS $function$
+            BEGIN
+                NEW.name := NEW.name;
+                RETURN NEW;
+            END
+            $function$;
+            """);
+        var secondHash = await ReadRejectedSchemaHashAsync(productionConnectionString);
+
+        secondHash.Should().NotBe(firstHash,
+            "an external function used by an aigateway trigger is executable schema state");
+    }
+
     private static AiGatewayDbContext CreateDbContext(string connectionString)
     {
         var options = new DbContextOptionsBuilder<AiGatewayDbContext>()
@@ -555,6 +623,21 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
                 MigrationHistoryTables.AiGateway)
             .Options;
         return new AiGatewayDbContext(options);
+    }
+
+    private static async Task<string> ReadRejectedSchemaHashAsync(string connectionString)
+    {
+        var action = () => AiGatewayProductionUpgradePreflight.InspectAsync(connectionString);
+        var failure = await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*unknown schema/history state*schemaSha256=*");
+        var marker = "schemaSha256=";
+        var message = failure.Which.Message;
+        var start = message.IndexOf(marker, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0);
+        start += marker.Length;
+        var end = message.IndexOf(' ', start);
+        end.Should().BeGreaterThan(start);
+        return message[start..end];
     }
 
     private static async Task<string> PrepareProductionOwnedSchemaAsync(

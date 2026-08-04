@@ -366,6 +366,38 @@ public static class AiGatewayProductionUpgradePreflight
             ORDER BY function_namespace.nspname, function_state.proname,
                      pg_get_function_identity_arguments(function_state.oid);
 
+            SELECT 'external-trigger-function|' || function_namespace.nspname || '|' ||
+                   function_state.proname || '|' ||
+                   pg_get_function_identity_arguments(function_state.oid) || '|' ||
+                   pg_get_userbyid(function_state.proowner) || '|' ||
+                   function_state.prokind::text || '|' ||
+                   function_state.provolatile::text || '|' ||
+                   function_state.proisstrict::text || '|' ||
+                   function_state.prosecdef::text || '|' ||
+                   function_state.proleakproof::text || '|' ||
+                   function_state.proparallel::text || '|' ||
+                   coalesce((
+                       SELECT string_agg(function_option.option, ',' ORDER BY function_option.option)
+                       FROM unnest(function_state.proconfig) AS function_option(option)), '') || '|' ||
+                   pg_get_functiondef(function_state.oid)
+            FROM pg_proc AS function_state
+            JOIN pg_namespace AS function_namespace
+              ON function_namespace.oid = function_state.pronamespace
+            WHERE function_namespace.nspname <> 'aigateway'
+              AND EXISTS (
+                  SELECT 1
+                  FROM pg_trigger AS trigger_state
+                  JOIN pg_class AS table_class
+                    ON table_class.oid = trigger_state.tgrelid
+                  JOIN pg_namespace AS table_namespace
+                    ON table_namespace.oid = table_class.relnamespace
+                  WHERE table_namespace.nspname = 'aigateway'
+                    AND NOT trigger_state.tgisinternal
+                    AND trigger_state.tgfoid = function_state.oid)
+            ORDER BY function_namespace.nspname,
+                     function_state.proname,
+                     pg_get_function_identity_arguments(function_state.oid);
+
             SELECT 'function-acl|' || function_state.proname || '|' ||
                    pg_get_function_identity_arguments(function_state.oid) || '|' ||
                    pg_get_userbyid(acl_state.grantor) || '|' ||
@@ -382,6 +414,43 @@ public static class AiGatewayProductionUpgradePreflight
                 acldefault('f'::"char", function_state.proowner))) AS acl_state
             WHERE function_namespace.nspname = 'aigateway'
             ORDER BY function_state.proname,
+                     pg_get_function_identity_arguments(function_state.oid),
+                     pg_get_userbyid(acl_state.grantor),
+                     CASE WHEN acl_state.grantee = 0
+                          THEN 'PUBLIC'
+                          ELSE pg_get_userbyid(acl_state.grantee)
+                     END,
+                     acl_state.privilege_type,
+                     acl_state.is_grantable;
+
+            SELECT 'external-trigger-function-acl|' || function_namespace.nspname || '|' ||
+                   function_state.proname || '|' ||
+                   pg_get_function_identity_arguments(function_state.oid) || '|' ||
+                   pg_get_userbyid(acl_state.grantor) || '|' ||
+                   CASE WHEN acl_state.grantee = 0
+                        THEN 'PUBLIC'
+                        ELSE pg_get_userbyid(acl_state.grantee)
+                   END || '|' ||
+                   acl_state.privilege_type || '|' || acl_state.is_grantable::text
+            FROM pg_proc AS function_state
+            JOIN pg_namespace AS function_namespace
+              ON function_namespace.oid = function_state.pronamespace
+            CROSS JOIN LATERAL aclexplode(coalesce(
+                function_state.proacl,
+                acldefault('f'::"char", function_state.proowner))) AS acl_state
+            WHERE function_namespace.nspname <> 'aigateway'
+              AND EXISTS (
+                  SELECT 1
+                  FROM pg_trigger AS trigger_state
+                  JOIN pg_class AS table_class
+                    ON table_class.oid = trigger_state.tgrelid
+                  JOIN pg_namespace AS table_namespace
+                    ON table_namespace.oid = table_class.relnamespace
+                  WHERE table_namespace.nspname = 'aigateway'
+                    AND NOT trigger_state.tgisinternal
+                    AND trigger_state.tgfoid = function_state.oid)
+            ORDER BY function_namespace.nspname,
+                     function_state.proname,
                      pg_get_function_identity_arguments(function_state.oid),
                      pg_get_userbyid(acl_state.grantor),
                      CASE WHEN acl_state.grantee = 0
@@ -511,6 +580,37 @@ public static class AiGatewayProductionUpgradePreflight
             FROM information_schema.sequences
             WHERE sequence_schema = 'aigateway'
             ORDER BY sequence_name;
+
+            SELECT 'sequence-owned-by|' || sequence_state.relname || '|' ||
+                   referenced_namespace.nspname || '|' ||
+                   referenced_relation.relname || '|' ||
+                   referenced_column.attname || '|' ||
+                   dependency_state.deptype::text
+            FROM pg_class AS sequence_state
+            JOIN pg_namespace AS sequence_namespace
+              ON sequence_namespace.oid = sequence_state.relnamespace
+            JOIN pg_depend AS dependency_state
+              ON dependency_state.classid = 'pg_class'::regclass
+             AND dependency_state.objid = sequence_state.oid
+             AND dependency_state.objsubid = 0
+             AND dependency_state.refclassid = 'pg_class'::regclass
+             AND dependency_state.refobjsubid > 0
+             AND dependency_state.deptype IN ('a', 'i')
+            JOIN pg_class AS referenced_relation
+              ON referenced_relation.oid = dependency_state.refobjid
+            JOIN pg_namespace AS referenced_namespace
+              ON referenced_namespace.oid = referenced_relation.relnamespace
+            JOIN pg_attribute AS referenced_column
+              ON referenced_column.attrelid = referenced_relation.oid
+             AND referenced_column.attnum = dependency_state.refobjsubid
+             AND NOT referenced_column.attisdropped
+            WHERE sequence_namespace.nspname = 'aigateway'
+              AND sequence_state.relkind = 'S'
+            ORDER BY sequence_state.relname,
+                     referenced_namespace.nspname,
+                     referenced_relation.relname,
+                     referenced_column.attname,
+                     dependency_state.deptype;
             """,
             cancellationToken);
 
