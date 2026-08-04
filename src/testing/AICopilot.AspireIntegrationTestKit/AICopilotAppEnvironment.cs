@@ -206,6 +206,7 @@ public class AICopilotAppEnvironment : IAsyncDisposable
         ConfigureLocalProxyEnvironment();
         SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
         SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+        SetEnvironmentVariable("Parameters__pg-username", "aicopilot");
         SetEnvironmentVariable("Parameters__pg-password", TestPostgresPassword);
         SetEnvironmentVariable("Parameters__aicopilot-api-key-encryption-key", "test-aicopilot-api-key-encryption-key");
         SetEnvironmentVariable("Parameters__jwt-secret-key", "test-aicopilot-jwt-secret-key-at-least-64-characters-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ");

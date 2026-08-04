@@ -49,9 +49,9 @@ internal static class MigrationWorkerDatabaseMigrator
         {
             await AcquireAiGatewayProductionUpgradeLockAsync(connection, cancellationToken);
             lockAcquired = true;
-            await AiGatewayProductionUpgradePreflight.InspectAsync(
+            var initialAiGatewayState = (await AiGatewayProductionUpgradePreflight.InspectAsync(
                 connection,
-                cancellationToken);
+                cancellationToken)).State;
 
             await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(
                 migrationContexts,
@@ -64,6 +64,7 @@ internal static class MigrationWorkerDatabaseMigrator
                     await RunAiGatewayMigrationUnderDdlFenceAsync(
                         (AiGatewayDbContext)migrationContext.DbContext,
                         connection,
+                        initialAiGatewayState,
                         cancellationToken);
                     continue;
                 }
@@ -222,6 +223,7 @@ internal static class MigrationWorkerDatabaseMigrator
     private static async Task RunAiGatewayMigrationUnderDdlFenceAsync(
         AiGatewayDbContext dbContext,
         NpgsqlConnection connection,
+        AiGatewayProductionUpgradeState expectedState,
         CancellationToken cancellationToken)
     {
         var strategy = dbContext.Database.CreateExecutionStrategy();
@@ -231,9 +233,20 @@ internal static class MigrationWorkerDatabaseMigrator
                 cancellationToken);
             await AcquireAiGatewaySchemaDdlFenceAsync(connection, cancellationToken);
 
-            await AiGatewayProductionUpgradePreflight.InspectAsync(
+            var fencedInspection = await AiGatewayProductionUpgradePreflight.InspectAsync(
                 connection,
                 cancellationToken);
+            if (fencedInspection.State != expectedState)
+            {
+                throw new InvalidOperationException(
+                    "AiGateway schema/history state changed before the migration DDL fence was acquired.");
+            }
+
+            if (fencedInspection.State == AiGatewayProductionUpgradeState.Fresh)
+            {
+                await CreateEmptyAiGatewayHistoryTableAsync(connection, cancellationToken);
+            }
+
             await dbContext.Database.MigrateAsync(cancellationToken);
 
             var migrated = await AiGatewayProductionUpgradePreflight.InspectAsync(
@@ -247,6 +260,22 @@ internal static class MigrationWorkerDatabaseMigrator
 
             await transaction.CommitAsync(cancellationToken);
         });
+    }
+
+    private static async Task CreateEmptyAiGatewayHistoryTableAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            CREATE TABLE aigateway."__EFMigrationsHistory_AiGateway" (
+                "MigrationId" character varying(150) NOT NULL,
+                "ProductVersion" character varying(32) NOT NULL,
+                CONSTRAINT "PK___EFMigrationsHistory_AiGateway" PRIMARY KEY ("MigrationId")
+            );
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<string[]> ReadSchemaLockTargetsAsync(
