@@ -127,6 +127,29 @@ internal static class MigrationWorkerDatabaseMigrator
             command.CommandText = $"ALTER SEQUENCE {sequence} CACHE {cacheSize};";
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        var catalogs = await ReadSchemaLockTargetsAsync(
+            connection,
+            """
+            SELECT format('%I.%I', namespace_state.nspname, catalog_state.relname)
+            FROM pg_class AS catalog_state
+            JOIN pg_namespace AS namespace_state
+              ON namespace_state.oid = catalog_state.relnamespace
+            WHERE namespace_state.nspname = 'pg_catalog'
+              AND catalog_state.relkind IN ('r', 'p')
+              AND (NOT catalog_state.relisshared OR catalog_state.relname = 'pg_authid')
+            ORDER BY catalog_state.oid;
+            """,
+            cancellationToken);
+        foreach (var catalog in catalogs)
+        {
+            await using var command = connection.CreateCommand();
+            // Every database-local namespace DDL path writes at least one system
+            // catalog. Holding these write-conflicting locks closes the gap for
+            // functions, types, collations, ACLs, and newly created objects too.
+            command.CommandText = $"LOCK TABLE {catalog} IN SHARE ROW EXCLUSIVE MODE;";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     internal static async Task AcquireAiGatewayProductionUpgradeLockAsync(

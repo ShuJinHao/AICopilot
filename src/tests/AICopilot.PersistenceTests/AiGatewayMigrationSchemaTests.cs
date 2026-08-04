@@ -533,7 +533,7 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
     }
 
     [Fact]
-    public async Task ProductionDdlFence_ShouldBlockConcurrentTableAndSequenceChanges()
+    public async Task ProductionDdlFence_ShouldBlockConcurrentRelationAndNamespaceChanges()
     {
         await using var database = await PostgresScratchDatabase.CreateAsync(
             fixture.ConnectionString,
@@ -569,6 +569,20 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         var sequenceFailure = await alterSequence.Should().ThrowAsync<PostgresException>();
         sequenceFailure.Which.SqlState.Should().Be(PostgresErrorCodes.LockNotAvailable);
 
+        foreach (var namespaceDdl in new[]
+                 {
+                     "CREATE FUNCTION aigateway.concurrent_function() RETURNS integer LANGUAGE sql AS 'SELECT 1';",
+                     "CREATE TYPE aigateway.concurrent_type AS ENUM ('unexpected');",
+                     "CREATE COLLATION aigateway.concurrent_collation (provider = libc, locale = 'C');",
+                     "ALTER DEFAULT PRIVILEGES IN SCHEMA aigateway GRANT SELECT ON TABLES TO PUBLIC;",
+                     "ALTER SCHEMA aigateway RENAME TO concurrent_aigateway;"
+                 })
+        {
+            var alterNamespace = () => ExecuteNonQueryAsync(contender, namespaceDdl);
+            var namespaceFailure = await alterNamespace.Should().ThrowAsync<PostgresException>();
+            namespaceFailure.Which.SqlState.Should().Be(PostgresErrorCodes.LockNotAvailable);
+        }
+
         await transaction.RollbackAsync();
 
         await ExecuteNonQueryAsync(
@@ -577,6 +591,9 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         await ExecuteNonQueryAsync(
             contender,
             "ALTER SEQUENCE aigateway.model_quota_fencing_seq CACHE 100;");
+        await ExecuteNonQueryAsync(
+            contender,
+            "CREATE FUNCTION aigateway.concurrent_function() RETURNS integer LANGUAGE sql AS 'SELECT 1';");
     }
 
     [Theory]
@@ -713,8 +730,9 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
                 BEGIN
                     IF NOT EXISTS (
                         SELECT 1 FROM pg_roles WHERE rolname = 'aicopilot') THEN
-                        CREATE ROLE aicopilot NOLOGIN;
+                        CREATE ROLE aicopilot NOLOGIN SUPERUSER;
                     END IF;
+                    ALTER ROLE aicopilot SUPERUSER;
                 END
                 $role$;
                 DO $grant$
