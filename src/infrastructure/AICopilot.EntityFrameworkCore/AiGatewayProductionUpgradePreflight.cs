@@ -53,23 +53,20 @@ public static class AiGatewayProductionUpgradePreflight
         var schemaObjectCount = await ReadInt32Async(
             connection,
             """
-            SELECT (
-                (SELECT count(*)
-                 FROM pg_class AS object_class
-                 JOIN pg_namespace AS object_namespace
-                   ON object_namespace.oid = object_class.relnamespace
-                 WHERE object_namespace.nspname = 'aigateway') +
-                (SELECT count(*)
-                 FROM pg_proc AS object_function
-                 JOIN pg_namespace AS object_namespace
-                   ON object_namespace.oid = object_function.pronamespace
-                 WHERE object_namespace.nspname = 'aigateway') +
-                (SELECT count(*)
-                 FROM pg_type AS object_type
-                 JOIN pg_namespace AS object_namespace
-                   ON object_namespace.oid = object_type.typnamespace
-                 WHERE object_namespace.nspname = 'aigateway')
-            )::integer;
+            SELECT count(*)::integer
+            FROM (
+                SELECT dependency_state.classid,
+                       dependency_state.objid,
+                       dependency_state.objsubid
+                FROM pg_depend AS dependency_state
+                JOIN pg_namespace AS dependency_namespace
+                  ON dependency_namespace.oid = dependency_state.refobjid
+                WHERE dependency_state.refclassid = 'pg_namespace'::regclass
+                  AND dependency_namespace.nspname = 'aigateway'
+                GROUP BY dependency_state.classid,
+                         dependency_state.objid,
+                         dependency_state.objsubid
+            ) AS namespace_object;
             """,
             cancellationToken);
         var relevantDefaultAclCount = await ReadInt32Async(
@@ -202,6 +199,46 @@ public static class AiGatewayProductionUpgradePreflight
                      END,
                      acl_state.privilege_type,
                      acl_state.is_grantable;
+
+            SELECT 'unmodeled-namespace-object|' ||
+                   dependency_state.classid::regclass::text || '|' ||
+                   dependency_state.objsubid::text || '|' ||
+                   dependency_state.deptype::text || '|' ||
+                   identified_object.type || '|' ||
+                   coalesce(identified_object.schema, '') || '|' ||
+                   coalesce(identified_object.name, '') || '|' ||
+                   identified_object.identity
+            FROM pg_depend AS dependency_state
+            JOIN pg_namespace AS dependency_namespace
+              ON dependency_namespace.oid = dependency_state.refobjid
+            CROSS JOIN LATERAL pg_identify_object(
+                dependency_state.classid,
+                dependency_state.objid,
+                dependency_state.objsubid) AS identified_object
+            WHERE dependency_state.refclassid = 'pg_namespace'::regclass
+              AND dependency_namespace.nspname = 'aigateway'
+              AND dependency_state.classid <> 'pg_class'::regclass
+              AND dependency_state.classid <> 'pg_proc'::regclass
+              AND NOT (
+                  dependency_state.classid = 'pg_type'::regclass
+                  AND EXISTS (
+                      SELECT 1
+                      FROM pg_type AS modeled_type
+                      WHERE modeled_type.oid = dependency_state.objid
+                        AND (
+                            modeled_type.typtype IN ('e', 'd', 'r', 'm') OR
+                            (modeled_type.typtype = 'c' AND EXISTS (
+                                SELECT 1
+                                FROM pg_class AS composite_relation
+                                WHERE composite_relation.oid = modeled_type.typrelid
+                                  AND composite_relation.relkind = 'c')))))
+            ORDER BY dependency_state.classid::regclass::text,
+                     dependency_state.objsubid,
+                     dependency_state.deptype,
+                     identified_object.type,
+                     identified_object.schema,
+                     identified_object.name,
+                     identified_object.identity;
 
             SELECT 'table|' || table_name
             FROM information_schema.tables

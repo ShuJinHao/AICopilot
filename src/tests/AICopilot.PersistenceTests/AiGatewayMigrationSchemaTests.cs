@@ -143,6 +143,8 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
     [InlineData("CREATE VIEW aigateway.leftover_view AS SELECT 1 AS value;")]
     [InlineData("CREATE FUNCTION aigateway.leftover_function() RETURNS integer LANGUAGE sql AS 'SELECT 1';")]
     [InlineData("CREATE TYPE aigateway.leftover_type AS ENUM ('legacy');")]
+    [InlineData("CREATE COLLATION aigateway.leftover_collation (provider = libc, locale = 'C');")]
+    [InlineData("CREATE OPERATOR aigateway.=== (LEFTARG = integer, RIGHTARG = integer, FUNCTION = pg_catalog.int4eq);")]
     public async Task NonEmptySchemaWithoutHistory_ShouldNeverBeClassifiedAsFresh(
         string leftoverObjectSql)
     {
@@ -486,6 +488,10 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         """
         ALTER DEFAULT PRIVILEGES IN SCHEMA aigateway
             GRANT SELECT ON TABLES TO PUBLIC;
+        """,
+        """
+        CREATE COLLATION aigateway.structural_drift_collation
+            (provider = libc, locale = 'C');
         """
     };
 
