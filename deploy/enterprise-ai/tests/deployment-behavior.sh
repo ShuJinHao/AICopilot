@@ -566,6 +566,10 @@ full_database_backup="$(find "$REMOTE_DIR/backups/postgres" -maxdepth 1 -type f 
 [ -s "$full_database_backup.sha256" ] || fail "full migration path did not create a backup checksum"
 (cd "$(dirname "$full_database_backup")" && sha256sum -c "$(basename "$full_database_backup").sha256" >/dev/null) || \
   fail "full migration path database backup checksum did not verify"
+full_migration_state="$REMOTE_DIR/releases/migration-states/deployment-behavior-all.env"
+assert_file_contains "$full_migration_state" "DEPLOY_MIGRATION_STATUS=migration-committed"
+assert_file_contains "$full_migration_state" "DEPLOY_DATABASE_BACKUP=$full_database_backup"
+assert_file_contains "$full_migration_state" "DEPLOY_RESUME_ALLOWED=false"
 full_quiesce_line="$(grep -n 'compose .* stop aicopilot-httpapi .*aicopilot-webui' "$DOCKER_LOG" | head -n 1 | cut -d: -f1)"
 full_backup_line="$(grep -n 'compose .* exec .*pg_dump' "$DOCKER_LOG" | head -n 1 | cut -d: -f1)"
 [ -n "$full_quiesce_line" ] && [ -n "$full_backup_line" ] && \
@@ -1047,17 +1051,28 @@ set +e
 TEST_SERVICES='httpapi,migration,dataworker,ragworker,web' \
 TEST_WORKSPACE_PLAN_FILE="$FULL_WORKER_PLAN_FILE" \
 TEST_WORKSPACE_PLAN_DIGEST="$FULL_WORKER_PLAN_DIGEST" \
-TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker-full \
+TEST_WORKSPACE_INVOCATION_ID=deployment-behavior-worker-full-abnormal \
 FAKE_UNHEALTHY_SERVICE=aicopilot-dataworker \
   run_local_release > "$TEST_ROOT/worker-abnormal.log" 2>&1
 worker_abnormal_status=$?
 set -e
 assert_eq 86 "$worker_abnormal_status" "abnormal worker unsafe-partial exit code"
 assert_file_contains "$REMOTE_DIR/releases/blocked-release.env" "DEPLOY_FAILURE_REASON=migration-or-runtime-partial"
+worker_migration_state="$REMOTE_DIR/releases/migration-states/deployment-behavior-worker-full-abnormal.env"
+assert_file_contains "$worker_migration_state" "DEPLOY_MIGRATION_STATUS=migration-started"
+assert_file_contains "$worker_migration_state" "DEPLOY_INVOCATION_ID=deployment-behavior-worker-full-abnormal"
+assert_file_contains "$worker_migration_state" "DEPLOY_RESUME_ALLOWED=false"
 worker_transaction="$(sed -n 's/^DEPLOY_TRANSACTION_BACKUP=//p' "$REMOTE_DIR/releases/blocked-release.env")"
 [ -d "$worker_transaction" ] || fail "worker partial failure did not retain transaction backup"
 rm -f "$REMOTE_DIR/releases/blocked-release.env"
 rm -rf "$worker_transaction" "$REMOTE_DIR/.locks/release.lock.d" "$REMOTE_DIR/.support-backups"
+set +e
+run_local_release > "$TEST_ROOT/migration-started-retry.log" 2>&1
+migration_started_retry_status=$?
+set -e
+assert_eq 86 "$migration_started_retry_status" "migration-started retry gate exit code"
+assert_file_contains "$TEST_ROOT/migration-started-retry.log" "unresolved migration state"
+rm -f "$worker_migration_state"
 
 printf 'TEST active and stale release locks\n'
 . "$REPO_DIR/deploy/enterprise-ai/scripts/release-common.sh"
