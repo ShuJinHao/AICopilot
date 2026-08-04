@@ -9,6 +9,9 @@ using AICopilot.Core.AiGateway.Runtime.ModelQuota;
 using AICopilot.SharedKernel.Ai;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AICopilot.PersistenceTests;
 
@@ -184,6 +187,14 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             AiGatewayProductionUpgradeContract.ProductionMigrationIds.Count,
             AiGatewayProductionUpgradeContract.ExpectedProductionSchemaSha256,
             956));
+        var productionPrecision = await ReadColumnPrecisionProjectionAsync(
+            productionConnectionString);
+        productionPrecision.Sha256.Should().Be(
+            AiGatewayProductionUpgradeContract.ExpectedProductionColumnPrecisionProjectionSha256);
+        productionPrecision.ColumnCount.Should().Be(
+            AiGatewayProductionUpgradeContract.ExpectedProductionColumnCount);
+        productionPrecision.TemporalColumnCount.Should().Be(
+            AiGatewayProductionUpgradeContract.ExpectedProductionTemporalColumnCount);
 
         await using var connection = new NpgsqlConnection(productionConnectionString);
         await connection.OpenAsync();
@@ -535,6 +546,10 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         """
         ALTER DEFAULT PRIVILEGES IN SCHEMA aigateway
             GRANT SELECT ON TABLES TO PUBLIC;
+        """,
+        """
+        ALTER TABLE aigateway.messages
+            ALTER COLUMN created_at TYPE timestamp(0) with time zone;
         """,
         """
         CREATE COLLATION aigateway.structural_drift_collation
@@ -978,5 +993,53 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             result.Add(reader.GetString(0));
         }
         return result.ToArray();
+    }
+
+    private static async Task<(
+        string Sha256,
+        int ColumnCount,
+        int TemporalColumnCount)> ReadColumnPrecisionProjectionAsync(
+        string connectionString)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT table_name,
+                   ordinal_position,
+                   column_name,
+                   datetime_precision
+            FROM information_schema.columns
+            WHERE table_schema = 'aigateway'
+            ORDER BY table_name, ordinal_position;
+            """;
+        var lines = new List<string>();
+        var temporalColumnCount = 0;
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var precision = reader.IsDBNull(3)
+                ? string.Empty
+                : reader.GetInt32(3).ToString(CultureInfo.InvariantCulture);
+            if (precision.Length > 0)
+            {
+                temporalColumnCount++;
+            }
+            lines.Add(string.Join(
+                '|',
+                reader.GetString(0),
+                reader.GetInt32(1).ToString("D4", CultureInfo.InvariantCulture),
+                reader.GetString(2),
+                precision));
+        }
+
+        var canonical = lines.Count == 0
+            ? string.Empty
+            : string.Join('\n', lines) + "\n";
+        var sha256 = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))
+            .ToLowerInvariant();
+        return (sha256, lines.Count, temporalColumnCount);
     }
 }

@@ -314,6 +314,7 @@ public static class AiGatewayProductionUpgradePreflight
                    column_name || '|' || data_type || '|' || udt_name || '|' || is_nullable || '|' ||
                    coalesce(character_maximum_length::text, '') || '|' ||
                    coalesce(numeric_precision::text, '') || '|' || coalesce(numeric_scale::text, '') || '|' ||
+                   coalesce(datetime_precision::text, '') || '|' ||
                    coalesce(column_default, '') || '|' || coalesce(collation_name, '') || '|' ||
                    is_identity || '|' || coalesce(identity_generation, '') || '|' ||
                    is_generated || '|' || coalesce(generation_expression, '')
