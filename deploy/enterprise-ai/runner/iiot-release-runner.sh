@@ -289,11 +289,20 @@ doctor_common() {
 compose_with_images() {
   local images_file="$1"
   shift
+  local compose_arguments=(
+    --env-file "$ENV_FILE"
+    --env-file "$images_file"
+    -f "$COMPOSE_FILE"
+  )
+  if [ "$TARGET" = aicopilot ] &&
+     [ -n "${MIGRATION_INVOCATION_OVERRIDE_FILE:-}" ]; then
+    compose_arguments+=( -f "$MIGRATION_INVOCATION_OVERRIDE_FILE" )
+  fi
   if [ "$TARGET" = aicopilot ]; then
     AICOPILOT_MIGRATION_INVOCATION_ID="${INVOCATION_ID:-unbound}" \
-      docker compose --env-file "$ENV_FILE" --env-file "$images_file" -f "$COMPOSE_FILE" "$@"
+      docker compose "${compose_arguments[@]}" "$@"
   else
-    docker compose --env-file "$ENV_FILE" --env-file "$images_file" -f "$COMPOSE_FILE" "$@"
+    docker compose "${compose_arguments[@]}" "$@"
   fi
 }
 
@@ -356,6 +365,7 @@ REQUEST_FILE="$(mktemp "$INCOMING_DIR/.request.XXXXXX")"
 REQUEST_BODY_FILE="$(mktemp "$INCOMING_DIR/.request-body.XXXXXX")"
 CANDIDATE_IMAGES_FILE="$(mktemp "$INCOMING_DIR/.candidate-images.XXXXXX")"
 PREVIOUS_IMAGES_FILE="$(mktemp "$INCOMING_DIR/.previous-images.XXXXXX")"
+MIGRATION_INVOCATION_OVERRIDE_FILE=""
 FAILURE_STATE_FILE=""
 ROLLOUT_STARTED=0
 ROLLBACK_REQUIRED=0
@@ -378,6 +388,9 @@ SELECTED=" "
 
 cleanup_files() {
   rm -f "$REQUEST_FILE" "$REQUEST_BODY_FILE" "$CANDIDATE_IMAGES_FILE" "$PREVIOUS_IMAGES_FILE"
+  if [ -n "$MIGRATION_INVOCATION_OVERRIDE_FILE" ]; then
+    rm -f "$MIGRATION_INVOCATION_OVERRIDE_FILE"
+  fi
 }
 
 write_failure_state() {
@@ -573,6 +586,18 @@ if [ -n "$unresolved_migration" ]; then
   BACKUP_FILE="$(read_env_value "$unresolved_migration" DATABASE_BACKUP || printf none)"
   BACKUP_SHA256="$(read_env_value "$unresolved_migration" DATABASE_BACKUP_SHA256 || printf none)"
   fail "unresolved AICopilot migration state blocks automatic retry: $unresolved_migration" 86
+fi
+
+if [ "$TARGET" = aicopilot ] && [[ "$SELECTED" == *" migration "* ]]; then
+  MIGRATION_INVOCATION_OVERRIDE_FILE="$(
+    mktemp "$INCOMING_DIR/.migration-invocation-override.XXXXXX.yaml")"
+  printf '%s\n' \
+    'services:' \
+    '  aicopilot-migration:' \
+    '    environment:' \
+    "      MigrationWorker__InvocationId: \"$INVOCATION_ID\"" \
+    > "$MIGRATION_INVOCATION_OVERRIDE_FILE"
+  chmod 600 "$MIGRATION_INVOCATION_OVERRIDE_FILE"
 fi
 
 : > "$PREVIOUS_IMAGES_FILE"
