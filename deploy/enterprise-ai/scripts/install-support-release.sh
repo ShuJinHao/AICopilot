@@ -56,6 +56,15 @@ SUPPORT_PATH_LIST="$STAGING_DIR/.support-install-paths"
 # shellcheck source=release-common.sh
 . "$COMMON_SCRIPT"
 
+existing_lock_state="$(release_lock_value "$RELEASE_LOCK_DIR" state)"
+if [ "$existing_lock_state" != blocked ] &&
+   [ -d "$RELEASE_LOCK_DIR" ] &&
+   release_lock_is_active "$RELEASE_LOCK_DIR"; then
+  release_print_lock_diagnostics "$RELEASE_LOCK_DIR"
+  rm -rf "$STAGING_DIR" 2>/dev/null || true
+  exit 75
+fi
+
 unsafe_marker="$(release_find_unsafe_partial_marker "$DEPLOY_DIR")"
 orphan_transaction="$(find "$DEPLOY_DIR" -maxdepth 1 -type d -name '.release-transaction.*' -print -quit 2>/dev/null || true)"
 unowned_support_backup="$(release_find_unowned_support_backup "$DEPLOY_DIR")"
