@@ -414,6 +414,49 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         history.Should().NotContain(AiGatewayProductionUpgradeContract.CurrentUpgradeMigrationId);
     }
 
+    [Fact]
+    public async Task ProductionRoleMembershipDrift_ShouldFailFrozenPreflight()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_role_membership_drift");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using (var baselineContext = CreateDbContext(productionConnectionString))
+        {
+            await baselineContext.Database.MigrateAsync(
+                AiGatewayProductionUpgradeContract.LastProductionMigrationId);
+        }
+
+        const string inheritorRole = "aicopilot_fingerprint_inheritor";
+        await using var adminConnection = new NpgsqlConnection(database.ConnectionString);
+        await adminConnection.OpenAsync();
+        await ExecuteNonQueryAsync(
+            adminConnection,
+            $"DROP ROLE IF EXISTS {inheritorRole}; CREATE ROLE {inheritorRole} NOLOGIN;");
+        try
+        {
+            await ExecuteNonQueryAsync(
+                adminConnection,
+                $"GRANT aicopilot TO {inheritorRole};");
+
+            var action = () => AiGatewayProductionUpgradePreflight.InspectAsync(
+                productionConnectionString);
+
+            await action.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*unknown schema/history state*Do not infer or insert migration history*");
+            await using var productionConnection = new NpgsqlConnection(productionConnectionString);
+            await productionConnection.OpenAsync();
+            (await QueryMigrationIdsAsync(productionConnection)).Should()
+                .Equal(AiGatewayProductionUpgradeContract.ProductionMigrationIds);
+        }
+        finally
+        {
+            await ExecuteNonQueryAsync(
+                adminConnection,
+                $"REVOKE aicopilot FROM {inheritorRole}; DROP ROLE {inheritorRole};");
+        }
+    }
+
     public static TheoryData<string> StructuralDriftCommands => new()
     {
         """
@@ -545,6 +588,13 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
                 AiGatewayProductionUpgradeContract.LastProductionMigrationId);
         }
 
+        await using var contender = new NpgsqlConnection(productionConnectionString);
+        await contender.OpenAsync();
+        const string inheritorRole = "aicopilot_fence_inheritor";
+        await ExecuteNonQueryAsync(
+            contender,
+            $"DROP ROLE IF EXISTS {inheritorRole}; CREATE ROLE {inheritorRole} NOLOGIN;");
+
         await using var ownerContext = CreateDbContext(productionConnectionString);
         await ownerContext.Database.OpenConnectionAsync();
         await using var transaction = await ownerContext.Database.BeginTransactionAsync();
@@ -553,8 +603,6 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             ownerConnection,
             CancellationToken.None);
 
-        await using var contender = new NpgsqlConnection(productionConnectionString);
-        await contender.OpenAsync();
         await ExecuteNonQueryAsync(contender, "SET lock_timeout = '250ms';");
 
         var alterTable = () => ExecuteNonQueryAsync(
@@ -583,6 +631,12 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
             namespaceFailure.Which.SqlState.Should().Be(PostgresErrorCodes.LockNotAvailable);
         }
 
+        var grantOwnerRole = () => ExecuteNonQueryAsync(
+            contender,
+            $"GRANT aicopilot TO {inheritorRole};");
+        var membershipFailure = await grantOwnerRole.Should().ThrowAsync<PostgresException>();
+        membershipFailure.Which.SqlState.Should().Be(PostgresErrorCodes.LockNotAvailable);
+
         await transaction.RollbackAsync();
 
         await ExecuteNonQueryAsync(
@@ -594,6 +648,10 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         await ExecuteNonQueryAsync(
             contender,
             "CREATE FUNCTION aigateway.concurrent_function() RETURNS integer LANGUAGE sql AS 'SELECT 1';");
+        await ExecuteNonQueryAsync(
+            contender,
+            $"GRANT aicopilot TO {inheritorRole}; REVOKE aicopilot FROM {inheritorRole}; " +
+            $"DROP ROLE {inheritorRole};");
     }
 
     [Fact]

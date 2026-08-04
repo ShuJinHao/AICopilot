@@ -84,6 +84,34 @@ public static class AiGatewayProductionUpgradePreflight
                    default_namespace.nspname = 'aigateway');
             """,
             cancellationToken);
+        var relevantRoleMembershipCount = await ReadInt32Async(
+            connection,
+            """
+            WITH RECURSIVE relevant_roles(role_oid) AS (
+                SELECT role_state.oid
+                FROM pg_roles AS role_state
+                WHERE role_state.rolname = current_user
+                UNION
+                SELECT neighbor.role_oid
+                FROM relevant_roles AS relevant_role
+                CROSS JOIN LATERAL (
+                    SELECT membership.roleid AS role_oid
+                    FROM pg_auth_members AS membership
+                    WHERE membership.member = relevant_role.role_oid
+                    UNION
+                    SELECT membership.member AS role_oid
+                    FROM pg_auth_members AS membership
+                    WHERE membership.roleid = relevant_role.role_oid
+                ) AS neighbor
+            )
+            SELECT count(*)::integer
+            FROM pg_auth_members AS membership
+            WHERE membership.roleid IN (
+                      SELECT relevant_role.role_oid FROM relevant_roles AS relevant_role)
+               OR membership.member IN (
+                      SELECT relevant_role.role_oid FROM relevant_roles AS relevant_role);
+            """,
+            cancellationToken);
         var freshSchemaSecurityIsExpected = await ReadBooleanAsync(
             connection,
             """
@@ -117,6 +145,7 @@ public static class AiGatewayProductionUpgradePreflight
         if (!historyExists &&
             schemaObjectCount == 0 &&
             relevantDefaultAclCount == 0 &&
+            relevantRoleMembershipCount == 0 &&
             freshSchemaSecurityIsExpected)
         {
             return new AiGatewayProductionUpgradeInspection(
@@ -144,6 +173,41 @@ public static class AiGatewayProductionUpgradePreflight
                    pg_get_userbyid(schema_state.nspowner)
             FROM pg_namespace AS schema_state
             WHERE schema_state.nspname = 'aigateway';
+
+            WITH RECURSIVE relevant_roles(role_oid) AS (
+                SELECT role_state.oid
+                FROM pg_roles AS role_state
+                WHERE role_state.rolname = current_user
+                UNION
+                SELECT neighbor.role_oid
+                FROM relevant_roles AS relevant_role
+                CROSS JOIN LATERAL (
+                    SELECT membership.roleid AS role_oid
+                    FROM pg_auth_members AS membership
+                    WHERE membership.member = relevant_role.role_oid
+                    UNION
+                    SELECT membership.member AS role_oid
+                    FROM pg_auth_members AS membership
+                    WHERE membership.roleid = relevant_role.role_oid
+                ) AS neighbor
+            )
+            SELECT 'role-membership|' || pg_get_userbyid(membership.roleid) || '|' ||
+                   pg_get_userbyid(membership.member) || '|' ||
+                   pg_get_userbyid(membership.grantor) || '|' ||
+                   membership.admin_option::text || '|' ||
+                   membership.inherit_option::text || '|' ||
+                   membership.set_option::text
+            FROM pg_auth_members AS membership
+            WHERE membership.roleid IN (
+                      SELECT relevant_role.role_oid FROM relevant_roles AS relevant_role)
+               OR membership.member IN (
+                      SELECT relevant_role.role_oid FROM relevant_roles AS relevant_role)
+            ORDER BY pg_get_userbyid(membership.roleid),
+                     pg_get_userbyid(membership.member),
+                     pg_get_userbyid(membership.grantor),
+                     membership.admin_option,
+                     membership.inherit_option,
+                     membership.set_option;
 
             SELECT 'schema-acl|' || schema_state.nspname || '|' ||
                    pg_get_userbyid(acl_state.grantor) || '|' ||

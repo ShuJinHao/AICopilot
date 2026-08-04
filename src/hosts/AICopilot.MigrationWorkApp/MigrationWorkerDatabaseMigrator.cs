@@ -170,7 +170,8 @@ internal static class MigrationWorkerDatabaseMigrator
               ON namespace_state.oid = catalog_state.relnamespace
             WHERE namespace_state.nspname = 'pg_catalog'
               AND catalog_state.relkind IN ('r', 'p')
-              AND (NOT catalog_state.relisshared OR catalog_state.relname = 'pg_authid')
+              AND (NOT catalog_state.relisshared OR
+                   catalog_state.relname IN ('pg_authid', 'pg_auth_members'))
             ORDER BY catalog_state.oid;
             """,
             cancellationToken);
