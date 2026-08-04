@@ -806,6 +806,8 @@ if [ "${#RUNTIME_COMPOSE_SERVICES[@]}" -gt 0 ]; then
        { [[ "$SELECTED" == *" httpapi "* ]] || [[ "$SELECTED" == *" web "* ]]; }; then
     ai_port="$(read_env_value "$ENV_FILE" AICOPILOT_WEB_PORT || true)"
     probe_http "http://127.0.0.1:${ai_port:-82}/"
+    probe_http \
+      "http://127.0.0.1:${ai_port:-82}/api/identity/cloud-oidc/status"
   fi
 fi
 

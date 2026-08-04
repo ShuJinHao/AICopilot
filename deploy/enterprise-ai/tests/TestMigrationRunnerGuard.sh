@@ -120,7 +120,11 @@ EOF
 
 cat > "$BIN_DIR/curl" <<'EOF'
 #!/usr/bin/env bash
-if [ "${FAKE_RUNTIME_RECOVERY_HTTP_FAIL:-false}" = true ] &&
+if [ "${FAKE_CANDIDATE_OIDC_FAIL:-false}" = true ] &&
+   [[ "$*" == *'/api/identity/cloud-oidc/status'* ]] &&
+   [ ! -f "${FAKE_RECOVERY_PHASE_FILE:?}" ]; then
+  printf '503'
+elif [ "${FAKE_RUNTIME_RECOVERY_HTTP_FAIL:-false}" = true ] &&
    [ -f "${FAKE_RECOVERY_PHASE_FILE:?}" ]; then
   printf '503'
 else
@@ -273,6 +277,30 @@ grep -Fq 'runner_migration_state=reconciled-committed' \
 
 cp "$SERVER_DIR/releases/current-images.env" "$TEST_ROOT/current-images.before"
 cp "$SERVER_DIR/releases/routine-current.env" "$TEST_ROOT/routine-current.before"
+
+: > "$DOCKER_LOG"
+candidate_oidc_failure_invocation='migration-guard-candidate-oidc-failure'
+candidate_oidc_failure_request="$(make_request "$candidate_oidc_failure_invocation" 9999999999999999999999999999999999999999 e)"
+set +e
+FAKE_CANDIDATE_OIDC_FAIL=true FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+  run_request "$candidate_oidc_failure_request" > "$TEST_ROOT/candidate-oidc-failure.log" 2>&1
+candidate_oidc_failure_status=$?
+set -e
+[ "$candidate_oidc_failure_status" -eq 86 ] || \
+  fail 'candidate OIDC/API failure did not freeze the migrated release'
+grep -Fq '/api/identity/cloud-oidc/status' "$TEST_ROOT/candidate-oidc-failure.log" || \
+  fail 'candidate runtime acceptance did not probe the OIDC/API route'
+cmp -s "$TEST_ROOT/current-images.before" "$SERVER_DIR/releases/current-images.env" || \
+  fail 'candidate OIDC/API failure promoted candidate images'
+cmp -s "$TEST_ROOT/routine-current.before" "$SERVER_DIR/releases/routine-current.env" || \
+  fail 'candidate OIDC/API failure rewrote routine-current state'
+[ ! -f "$SERVER_DIR/releases/routine-history/$candidate_oidc_failure_invocation.env" ] || \
+  fail 'candidate OIDC/API failure wrote healthy history'
+[ ! -f "$SERVER_DIR/releases/routine-history/$candidate_oidc_failure_invocation.migration-committed.env" ] || \
+  fail 'candidate OIDC/API failure committed migration state'
+[ -f "$SERVER_DIR/releases/routine-history/$candidate_oidc_failure_invocation.migration-started.env" ] || \
+  fail 'candidate OIDC/API failure lost the unresolved migration marker'
+rm -f "$SERVER_DIR/releases/routine-history/$candidate_oidc_failure_invocation.migration-started.env"
 
 : > "$DOCKER_LOG"
 quiesce_failure_invocation='migration-guard-quiesce-failure'
