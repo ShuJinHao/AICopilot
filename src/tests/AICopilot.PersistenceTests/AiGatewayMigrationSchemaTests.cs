@@ -332,6 +332,51 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
     }
 
     [Fact]
+    public async Task EmptyDatabaseWithForeignSchemaOwner_ShouldFailPreflight()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_fresh_schema_owner_drift");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using (var adminConnection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await adminConnection.OpenAsync();
+            await ExecuteNonQueryAsync(
+                adminConnection,
+                """
+                ALTER SCHEMA aigateway OWNER TO CURRENT_USER;
+                GRANT USAGE ON SCHEMA aigateway TO aicopilot;
+                """);
+        }
+
+        var action = () => AiGatewayProductionUpgradePreflight.InspectAsync(
+            productionConnectionString);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*unknown schema/history state*Do not infer or insert migration history*");
+    }
+
+    [Fact]
+    public async Task EmptyDatabaseWithPermissiveSchemaAcl_ShouldFailPreflight()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_fresh_schema_acl_drift");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using var connection = new NpgsqlConnection(productionConnectionString);
+        await connection.OpenAsync();
+        await ExecuteNonQueryAsync(
+            connection,
+            "GRANT USAGE ON SCHEMA aigateway TO PUBLIC;");
+
+        var action = () => AiGatewayProductionUpgradePreflight.InspectAsync(
+            productionConnectionString);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*unknown schema/history state*Do not infer or insert migration history*");
+    }
+
+    [Fact]
     public async Task ProductionHistoryWithSchemaDrift_ShouldFailPreflightWithoutWritingHistory()
     {
         await using var database = await PostgresScratchDatabase.CreateAsync(
@@ -424,6 +469,9 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         """,
         """
         GRANT SELECT ON TABLE aigateway.model_quota_reservations TO PUBLIC;
+        """,
+        """
+        GRANT SELECT (api_key) ON TABLE aigateway.language_models TO PUBLIC;
         """,
         """
         GRANT USAGE ON SEQUENCE aigateway.model_quota_fencing_seq TO PUBLIC;

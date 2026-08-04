@@ -87,8 +87,40 @@ public static class AiGatewayProductionUpgradePreflight
                    default_namespace.nspname = 'aigateway');
             """,
             cancellationToken);
+        var freshSchemaSecurityIsExpected = await ReadBooleanAsync(
+            connection,
+            """
+            SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM pg_namespace AS schema_state
+                       WHERE schema_state.nspname = 'aigateway')
+                   OR EXISTS (
+                       SELECT 1
+                       FROM pg_namespace AS schema_state
+                       WHERE schema_state.nspname = 'aigateway'
+                         AND pg_get_userbyid(schema_state.nspowner) = current_user
+                         AND (
+                             SELECT count(*)
+                             FROM aclexplode(coalesce(
+                                 schema_state.nspacl,
+                                 acldefault('n'::"char", schema_state.nspowner))) AS acl_state
+                         ) = 2
+                         AND NOT EXISTS (
+                             SELECT 1
+                             FROM aclexplode(coalesce(
+                                 schema_state.nspacl,
+                                 acldefault('n'::"char", schema_state.nspowner))) AS acl_state
+                             WHERE acl_state.grantor <> schema_state.nspowner
+                                OR acl_state.grantee <> schema_state.nspowner
+                                OR acl_state.privilege_type NOT IN ('CREATE', 'USAGE')
+                                OR acl_state.is_grantable));
+            """,
+            cancellationToken);
 
-        if (!historyExists && schemaObjectCount == 0 && relevantDefaultAclCount == 0)
+        if (!historyExists &&
+            schemaObjectCount == 0 &&
+            relevantDefaultAclCount == 0 &&
+            freshSchemaSecurityIsExpected)
         {
             return new AiGatewayProductionUpgradeInspection(
                 AiGatewayProductionUpgradeState.Fresh,
@@ -187,6 +219,35 @@ public static class AiGatewayProductionUpgradePreflight
             FROM information_schema.columns
             WHERE table_schema = 'aigateway'
             ORDER BY table_name, ordinal_position;
+
+            SELECT 'column-acl|' || relation_state.relname || '|' ||
+                   lpad(column_state.attnum::text, 4, '0') || '|' ||
+                   column_state.attname || '|' ||
+                   pg_get_userbyid(acl_state.grantor) || '|' ||
+                   CASE WHEN acl_state.grantee = 0
+                        THEN 'PUBLIC'
+                        ELSE pg_get_userbyid(acl_state.grantee)
+                   END || '|' ||
+                   acl_state.privilege_type || '|' || acl_state.is_grantable::text
+            FROM pg_attribute AS column_state
+            JOIN pg_class AS relation_state
+              ON relation_state.oid = column_state.attrelid
+            JOIN pg_namespace AS relation_namespace
+              ON relation_namespace.oid = relation_state.relnamespace
+            CROSS JOIN LATERAL aclexplode(column_state.attacl) AS acl_state
+            WHERE relation_namespace.nspname = 'aigateway'
+              AND relation_state.relkind IN ('r', 'p', 'v', 'm', 'f')
+              AND column_state.attnum > 0
+              AND NOT column_state.attisdropped
+            ORDER BY relation_state.relname,
+                     column_state.attnum,
+                     pg_get_userbyid(acl_state.grantor),
+                     CASE WHEN acl_state.grantee = 0
+                          THEN 'PUBLIC'
+                          ELSE pg_get_userbyid(acl_state.grantee)
+                     END,
+                     acl_state.privilege_type,
+                     acl_state.is_grantable;
 
             SELECT 'index|' || table_class.relname || '|' || index_class.relname || '|' ||
                    index_state.indisunique::text || '|' || index_state.indisprimary::text || '|' ||
