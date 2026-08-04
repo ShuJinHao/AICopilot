@@ -1,10 +1,14 @@
 using AICopilot.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using System.Data;
 
 namespace AICopilot.MigrationWorkApp;
 
 internal static class MigrationWorkerDatabaseMigrator
 {
+    internal const long AiGatewayProductionUpgradeLockId = 0x4149474154455741L;
+
     public static MigrationHistoryBootstrapper.MigrationContext[] CreateMigrationContexts(
         AiCopilotDbContext dbContext,
         IdentityStoreDbContext identityStoreDbContext,
@@ -30,17 +34,86 @@ internal static class MigrationWorkerDatabaseMigrator
     {
         var aiGateway = migrationContexts.Single(context =>
             context.DbContext is AiGatewayDbContext);
-        var connectionString = aiGateway.DbContext.Database.GetConnectionString()
-            ?? aiGateway.DbContext.Database.GetDbConnection().ConnectionString;
-        await AiGatewayProductionUpgradePreflight.InspectAsync(
-            connectionString,
-            cancellationToken);
-
-        await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(migrationContexts, cancellationToken);
-
-        foreach (var migrationContext in migrationContexts)
+        var database = aiGateway.DbContext.Database;
+        var connection = database.GetDbConnection() as NpgsqlConnection
+            ?? throw new InvalidOperationException(
+                "AiGateway production migration requires an Npgsql connection.");
+        var openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
         {
-            await RunMigrationAsync(migrationContext.DbContext, cancellationToken);
+            await database.OpenConnectionAsync(cancellationToken);
+        }
+
+        var lockAcquired = false;
+        try
+        {
+            await AcquireAiGatewayProductionUpgradeLockAsync(connection, cancellationToken);
+            lockAcquired = true;
+            await AiGatewayProductionUpgradePreflight.InspectAsync(
+                connection,
+                cancellationToken);
+
+            await MigrationHistoryBootstrapper.BootstrapLegacyHistoryAsync(
+                migrationContexts,
+                cancellationToken);
+
+            foreach (var migrationContext in migrationContexts)
+            {
+                if (ReferenceEquals(migrationContext, aiGateway))
+                {
+                    await AiGatewayProductionUpgradePreflight.InspectAsync(
+                        connection,
+                        cancellationToken);
+                }
+
+                await RunMigrationAsync(migrationContext.DbContext, cancellationToken);
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (lockAcquired)
+                {
+                    await ReleaseAiGatewayProductionUpgradeLockAsync(
+                        connection,
+                        CancellationToken.None);
+                }
+            }
+            finally
+            {
+                if (openedHere)
+                {
+                    await database.CloseConnectionAsync();
+                }
+            }
+        }
+    }
+
+    internal static async Task AcquireAiGatewayProductionUpgradeLockAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT pg_advisory_lock(@lock_id);";
+        command.Parameters.AddWithValue("lock_id", AiGatewayProductionUpgradeLockId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    internal static async Task ReleaseAiGatewayProductionUpgradeLockAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT pg_advisory_unlock(@lock_id);";
+        command.Parameters.AddWithValue("lock_id", AiGatewayProductionUpgradeLockId);
+        var released = await command.ExecuteScalarAsync(cancellationToken);
+        if (released is not true)
+        {
+            throw new InvalidOperationException(
+                "AiGateway production migration advisory lock release could not be proven.");
         }
     }
 

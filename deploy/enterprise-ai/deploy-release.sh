@@ -2173,8 +2173,8 @@ if [ -z "$REQUESTED_SERVICES" ]; then
   CONTAINER_UPDATE_STARTED=true
   compose up -d --remove-orphans postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
-  backup_database_before_migration
   quiesce_schema_dependent_runtimes
+  backup_database_before_migration
   MIGRATION_EXECUTED=true
   run_migration_and_verify
   check_model_secret_migration_preflight
@@ -2185,8 +2185,8 @@ else
   compose up -d postgres eventbus qdrant
   wait_for_compose_service_healthy postgres 180
   if [ "$RUN_MIGRATION" = "true" ]; then
-    backup_database_before_migration
     quiesce_schema_dependent_runtimes
+    backup_database_before_migration
     MIGRATION_EXECUTED=true
     run_migration_and_verify
     check_model_secret_migration_preflight

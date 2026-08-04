@@ -87,6 +87,9 @@ case "${1:-}" in
         ;;
       exec)
         if [[ "$*" == *pg_dump* ]]; then
+          if [ "${FAKE_DATABASE_BACKUP_FAIL:-false}" = true ]; then
+            exit 31
+          fi
           printf 'fake-postgres-dump\n'
         fi
         exit 0
@@ -241,6 +244,10 @@ grep -Eq 'compose .* (pull|stop|up|start|exec)( |$)' "$DOCKER_LOG" && \
 success_invocation='migration-guard-success'
 success_request="$(make_request "$success_invocation" 1111111111111111111111111111111111111111 a)"
 FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 run_request "$success_request"
+stop_line="$(grep -n 'compose .* stop .*aicopilot-httpapi' "$DOCKER_LOG" | head -n 1 | cut -d: -f1)"
+backup_line="$(grep -n 'compose .* exec .*pg_dump' "$DOCKER_LOG" | head -n 1 | cut -d: -f1)"
+[ -n "$stop_line" ] && [ -n "$backup_line" ] && [ "$stop_line" -lt "$backup_line" ] || \
+  fail 'final PostgreSQL dump was not taken after all old runtimes were quiesced'
 grep -Fq "INVOCATION_ID=$success_invocation" "$SERVER_DIR/releases/routine-current.env" || \
   fail 'valid migration proof did not commit current state'
 [ -f "$SERVER_DIR/releases/routine-history/$success_invocation.migration-committed.env" ] || \
@@ -281,6 +288,25 @@ cmp -s "$TEST_ROOT/routine-current.before" "$SERVER_DIR/releases/routine-current
 grep -Fq 'ROLLBACK_STATUS=completed' \
   "$SERVER_DIR/releases/routine-history/$quiesce_failure_invocation.failed.env" || \
   fail 'pre-migration quiesce failure did not restore the previous runtime'
+
+: > "$DOCKER_LOG"
+backup_failure_invocation='migration-guard-backup-failure'
+backup_failure_request="$(make_request "$backup_failure_invocation" 8888888888888888888888888888888888888888 c)"
+set +e
+FAKE_DATABASE_BACKUP_FAIL=true FAKE_MIGRATION_MARKER_MODE=success FAKE_MIGRATION_EXIT_CODE=0 \
+  run_request "$backup_failure_request" > "$TEST_ROOT/backup-failure.log" 2>&1
+backup_failure_status=$?
+set -e
+[ "$backup_failure_status" -ne 0 ] && [ "$backup_failure_status" -ne 86 ] || \
+  fail 'post-quiesce backup failure was misclassified as an unsafe migration partial'
+grep -Fq 'ROLLBACK_STATUS=completed' \
+  "$SERVER_DIR/releases/routine-history/$backup_failure_invocation.failed.env" || \
+  fail 'post-quiesce backup failure did not restore the previous runtime'
+[ ! -f "$SERVER_DIR/releases/routine-history/$backup_failure_invocation.migration-started.env" ] || \
+  fail 'post-quiesce backup failure wrote a migration-started marker'
+if find "$SERVER_DIR/backups/postgres" -maxdepth 1 -type f -name '*.partial' -print -quit | grep -q .; then
+  fail 'post-quiesce backup failure retained a partial database dump'
+fi
 
 for recovery_mode in unhealthy up-failed http-failed restart-unstable; do
   : > "$DOCKER_LOG"

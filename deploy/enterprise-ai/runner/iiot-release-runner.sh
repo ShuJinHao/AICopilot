@@ -729,22 +729,36 @@ printf 'runner_phase=pull target=%s\n' "$TARGET_NAME"
 compose_with_images "$CANDIDATE_IMAGES_FILE" pull "${SELECTED_COMPOSE_SERVICES[@]}"
 
 if [[ "$SELECTED" == *" migration "* ]]; then
+  if [ "$TARGET" = aicopilot ]; then
+    printf 'runner_phase=runtime-quiesce target=%s services=%s\n' \
+      "$TARGET_NAME" "${RUNTIME_COMPOSE_SERVICES[*]}"
+    ROLLOUT_STARTED=1
+    ROLLBACK_REQUIRED=1
+    compose_with_images "$PREVIOUS_IMAGES_FILE" stop "${RUNTIME_COMPOSE_SERVICES[@]}"
+  fi
+
   backup_dir="$DEPLOY_DIR/backups/postgres"
   BACKUP_FILE="$backup_dir/${TARGET}-${INVOCATION_ID}.dump"
   backup_temp="${BACKUP_FILE}.partial"
   rm -f "$backup_temp"
   printf 'runner_phase=database-backup target=%s file=%s\n' "$TARGET_NAME" "$BACKUP_FILE"
   if [ "$TARGET" = cloud ]; then
-    compose_with_images "$CANDIDATE_IMAGES_FILE" exec -T postgres \
-      pg_dump -h 127.0.0.1 -Fc -U postgres -d iiot-db > "$backup_temp"
+    if ! compose_with_images "$CANDIDATE_IMAGES_FILE" exec -T postgres \
+      pg_dump -h 127.0.0.1 -Fc -U postgres -d iiot-db > "$backup_temp"; then
+      rm -f "$backup_temp"
+      fail "database backup command failed" 74
+    fi
   else
     postgres_user="$(read_env_value "$ENV_FILE" POSTGRES_USER || true)"
     postgres_db="$(read_env_value "$ENV_FILE" POSTGRES_DB || true)"
     postgres_password="$(read_env_value "$ENV_FILE" POSTGRES_PASSWORD || true)"
     [ -n "$postgres_user" ] && [ -n "$postgres_db" ] && [ -n "$postgres_password" ] || \
       fail "POSTGRES_USER/POSTGRES_DB/POSTGRES_PASSWORD are required for migration backup" 66
-    compose_with_images "$CANDIDATE_IMAGES_FILE" exec -T -e "PGPASSWORD=$postgres_password" postgres \
-      pg_dump -h 127.0.0.1 -Fc -U "$postgres_user" -d "$postgres_db" > "$backup_temp"
+    if ! compose_with_images "$CANDIDATE_IMAGES_FILE" exec -T -e "PGPASSWORD=$postgres_password" postgres \
+      pg_dump -h 127.0.0.1 -Fc -U "$postgres_user" -d "$postgres_db" > "$backup_temp"; then
+      rm -f "$backup_temp"
+      fail "database backup command failed" 74
+    fi
   fi
   [ -s "$backup_temp" ] || fail "database backup is empty" 74
   mv "$backup_temp" "$BACKUP_FILE"
@@ -753,13 +767,6 @@ if [[ "$SELECTED" == *" migration "* ]]; then
   printf '%s  %s\n' "$BACKUP_SHA256" "$(basename "$BACKUP_FILE")" > "$BACKUP_FILE.sha256"
   chmod 600 "$BACKUP_FILE.sha256"
 
-  if [ "$TARGET" = aicopilot ]; then
-    printf 'runner_phase=runtime-quiesce target=%s services=%s\n' \
-      "$TARGET_NAME" "${RUNTIME_COMPOSE_SERVICES[*]}"
-    ROLLOUT_STARTED=1
-    ROLLBACK_REQUIRED=1
-    compose_with_images "$PREVIOUS_IMAGES_FILE" stop "${RUNTIME_COMPOSE_SERVICES[@]}"
-  fi
   write_migration_started_state
 
   printf 'runner_phase=migration target=%s\n' "$TARGET_NAME"

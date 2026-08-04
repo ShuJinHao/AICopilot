@@ -566,6 +566,11 @@ full_database_backup="$(find "$REMOTE_DIR/backups/postgres" -maxdepth 1 -type f 
 [ -s "$full_database_backup.sha256" ] || fail "full migration path did not create a backup checksum"
 (cd "$(dirname "$full_database_backup")" && sha256sum -c "$(basename "$full_database_backup").sha256" >/dev/null) || \
   fail "full migration path database backup checksum did not verify"
+full_quiesce_line="$(grep -n 'compose .* stop aicopilot-httpapi .*aicopilot-webui' "$DOCKER_LOG" | head -n 1 | cut -d: -f1)"
+full_backup_line="$(grep -n 'compose .* exec .*pg_dump' "$DOCKER_LOG" | head -n 1 | cut -d: -f1)"
+[ -n "$full_quiesce_line" ] && [ -n "$full_backup_line" ] && \
+  [ "$full_quiesce_line" -lt "$full_backup_line" ] || \
+  fail "full migration path did not quiesce schema writers before the final database backup"
 if grep -Fq 'QdRotatedStrongSecretValue5678' "$REMOTE_DIR/releases/current-release.env" "$REMOTE_DIR/releases/current-release.summary.md"; then
   fail "full config deployment recorded a secret value instead of only its fingerprint"
 fi

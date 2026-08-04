@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using Npgsql;
@@ -31,6 +32,20 @@ public static class AiGatewayProductionUpgradePreflight
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
+        return await InspectAsync(connection, cancellationToken);
+    }
+
+    public static async Task<AiGatewayProductionUpgradeInspection> InspectAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        if (connection.State != ConnectionState.Open)
+        {
+            throw new InvalidOperationException(
+                "AiGateway production migration preflight requires an open PostgreSQL connection.");
+        }
+
         var historyExists = await ReadBooleanAsync(
             connection,
             "SELECT to_regclass('aigateway.\"__EFMigrationsHistory_AiGateway\"') IS NOT NULL;",
@@ -57,8 +72,23 @@ public static class AiGatewayProductionUpgradePreflight
             )::integer;
             """,
             cancellationToken);
+        var relevantDefaultAclCount = await ReadInt32Async(
+            connection,
+            """
+            SELECT count(*)::integer
+            FROM pg_default_acl AS default_acl
+            LEFT JOIN pg_namespace AS default_namespace
+              ON default_namespace.oid = default_acl.defaclnamespace
+            WHERE default_acl.defaclrole = (
+                      SELECT role_state.oid
+                      FROM pg_roles AS role_state
+                      WHERE role_state.rolname = current_user)
+              AND (default_acl.defaclnamespace = 0 OR
+                   default_namespace.nspname = 'aigateway');
+            """,
+            cancellationToken);
 
-        if (!historyExists && schemaObjectCount == 0)
+        if (!historyExists && schemaObjectCount == 0 && relevantDefaultAclCount == 0)
         {
             return new AiGatewayProductionUpgradeInspection(
                 AiGatewayProductionUpgradeState.Fresh,
@@ -99,6 +129,41 @@ public static class AiGatewayProductionUpgradePreflight
                 acldefault('n'::"char", schema_state.nspowner))) AS acl_state
             WHERE schema_state.nspname = 'aigateway'
             ORDER BY pg_get_userbyid(acl_state.grantor),
+                     CASE WHEN acl_state.grantee = 0
+                          THEN 'PUBLIC'
+                          ELSE pg_get_userbyid(acl_state.grantee)
+                     END,
+                     acl_state.privilege_type,
+                     acl_state.is_grantable;
+
+            SELECT 'default-acl|' || pg_get_userbyid(default_acl.defaclrole) || '|' ||
+                   CASE WHEN default_acl.defaclnamespace = 0
+                        THEN '*'
+                        ELSE default_namespace.nspname
+                   END || '|' ||
+                   default_acl.defaclobjtype::text || '|' ||
+                   pg_get_userbyid(acl_state.grantor) || '|' ||
+                   CASE WHEN acl_state.grantee = 0
+                        THEN 'PUBLIC'
+                        ELSE pg_get_userbyid(acl_state.grantee)
+                   END || '|' ||
+                   acl_state.privilege_type || '|' || acl_state.is_grantable::text
+            FROM pg_default_acl AS default_acl
+            LEFT JOIN pg_namespace AS default_namespace
+              ON default_namespace.oid = default_acl.defaclnamespace
+            CROSS JOIN LATERAL aclexplode(default_acl.defaclacl) AS acl_state
+            WHERE default_acl.defaclrole = (
+                      SELECT role_state.oid
+                      FROM pg_roles AS role_state
+                      WHERE role_state.rolname = current_user)
+              AND (default_acl.defaclnamespace = 0 OR
+                   default_namespace.nspname = 'aigateway')
+            ORDER BY CASE WHEN default_acl.defaclnamespace = 0
+                          THEN '*'
+                          ELSE default_namespace.nspname
+                     END,
+                     default_acl.defaclobjtype,
+                     pg_get_userbyid(acl_state.grantor),
                      CASE WHEN acl_state.grantee = 0
                           THEN 'PUBLIC'
                           ELSE pg_get_userbyid(acl_state.grantee)

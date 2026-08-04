@@ -1,5 +1,6 @@
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Persistence;
+using AICopilot.MigrationWorkApp;
 using AICopilot.Core.AiGateway.Aggregates.ConversationTemplate;
 using AICopilot.Core.AiGateway.Aggregates.LanguageModel;
 using AICopilot.Core.AiGateway.Aggregates.Sessions;
@@ -308,6 +309,29 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
     }
 
     [Fact]
+    public async Task EmptyDatabaseWithDefaultPrivilegeDrift_ShouldFailPreflight()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_fresh_default_acl_drift");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using var connection = new NpgsqlConnection(productionConnectionString);
+        await connection.OpenAsync();
+        await ExecuteNonQueryAsync(
+            connection,
+            """
+            ALTER DEFAULT PRIVILEGES IN SCHEMA aigateway
+                GRANT SELECT ON TABLES TO PUBLIC;
+            """);
+
+        var action = () => AiGatewayProductionUpgradePreflight.InspectAsync(
+            productionConnectionString);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*unknown schema/history state*Do not infer or insert migration history*");
+    }
+
+    [Fact]
     public async Task ProductionHistoryWithSchemaDrift_ShouldFailPreflightWithoutWritingHistory()
     {
         await using var database = await PostgresScratchDatabase.CreateAsync(
@@ -403,8 +427,45 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
         """,
         """
         GRANT USAGE ON SEQUENCE aigateway.model_quota_fencing_seq TO PUBLIC;
+        """,
+        """
+        ALTER DEFAULT PRIVILEGES IN SCHEMA aigateway
+            GRANT SELECT ON TABLES TO PUBLIC;
         """
     };
+
+    [Fact]
+    public async Task ProductionUpgradeLock_ShouldExcludeConcurrentMigrationSession()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_gateway_upgrade_lock");
+        var productionConnectionString = await PrepareProductionOwnedSchemaAsync(database);
+        await using var owner = new NpgsqlConnection(productionConnectionString);
+        await using var contender = new NpgsqlConnection(productionConnectionString);
+        await owner.OpenAsync();
+        await contender.OpenAsync();
+
+        await MigrationWorkerDatabaseMigrator.AcquireAiGatewayProductionUpgradeLockAsync(
+            owner,
+            CancellationToken.None);
+        try
+        {
+            (await TryAcquireProductionUpgradeLockAsync(contender)).Should().BeFalse();
+        }
+        finally
+        {
+            await MigrationWorkerDatabaseMigrator.ReleaseAiGatewayProductionUpgradeLockAsync(
+                owner,
+                CancellationToken.None);
+        }
+
+        (await TryAcquireProductionUpgradeLockAsync(contender)).Should().BeTrue();
+        await ExecuteNonQueryAsync(
+            contender,
+            "SELECT pg_advisory_unlock(@lock_id);",
+            ("lock_id", MigrationWorkerDatabaseMigrator.AiGatewayProductionUpgradeLockId));
+    }
 
     [Theory]
     [MemberData(nameof(StructuralDriftCommands))]
@@ -532,11 +593,28 @@ public sealed class AiGatewayMigrationSchemaTests(PostgresPersistenceFixture fix
 
     private static async Task ExecuteNonQueryAsync(
         NpgsqlConnection connection,
-        string sql)
+        string sql,
+        params (string Name, object Value)[] parameters)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
         await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<bool> TryAcquireProductionUpgradeLockAsync(
+        NpgsqlConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT pg_try_advisory_lock(@lock_id);";
+        command.Parameters.AddWithValue(
+            "lock_id",
+            MigrationWorkerDatabaseMigrator.AiGatewayProductionUpgradeLockId);
+        return (bool)(await command.ExecuteScalarAsync()
+            ?? throw new InvalidOperationException("Expected PostgreSQL advisory-lock result."));
     }
 
     private static async Task<long> ReadInt64Async(
