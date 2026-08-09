@@ -276,6 +276,17 @@ public sealed class DeploymentPreflightBehaviorTests
         retiredCredentialValidationIndex.Should().BeLessThan(runnerAttestationIndex);
         retiredCredentialValidationIndex.Should().BeLessThan(deployDirectoryCreationIndex);
         retiredCredentialValidationIndex.Should().BeLessThan(deployEnvironmentWriteIndex);
+
+        var retiredCredentialPatternMatch = Regex.Match(
+            workflow,
+            "retired_sensitive_pattern='(?<pattern>[^']+)'",
+            RegexOptions.CultureInvariant);
+        retiredCredentialPatternMatch.Success.Should().BeTrue();
+        Regex.IsMatch(
+                "CLOUD_AI_SERVICE_ACCOUNT_TOKEN=",
+                retiredCredentialPatternMatch.Groups["pattern"].Value,
+                RegexOptions.CultureInvariant)
+            .Should().BeTrue("even an empty retired credential assignment must fail before deploy writes");
     }
 
     [Fact]

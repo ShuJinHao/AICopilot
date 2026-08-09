@@ -101,7 +101,7 @@ jobs:
               exit 64
             fi
           done
-          retired_sensitive_pattern='^(CLOUD_AI_SERVICE_ACCOUNT_TOKEN|CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN|CloudAiRead__ServiceAccountToken|CLOUD_IDENTITY_STATUS_SERVICE_TOKEN|CloudIdentityStatus__ServiceAccountToken|DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD|DATABASE|DOCKER_NETWORK|DB_HOST_ALIAS))=.+$'
+          retired_sensitive_pattern='^(CLOUD_AI_SERVICE_ACCOUNT_TOKEN|CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN|CloudAiRead__ServiceAccountToken|CLOUD_IDENTITY_STATUS_SERVICE_TOKEN|CloudIdentityStatus__ServiceAccountToken|DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD|DATABASE|DOCKER_NETWORK|DB_HOST_ALIAS))=.*$'
           if grep -Eq "$retired_sensitive_pattern" <<< "$DEPLOY_ENV_FILE"; then
             echo "DEPLOY_ENV_FILE contains retired interactive AiRead or direct Cloud DB credentials; refusing emergency deployment." >&2
             exit 64
