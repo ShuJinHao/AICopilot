@@ -119,6 +119,98 @@ public sealed class DeploymentPreflightBehaviorTests
     }
 
     [Fact]
+    public async Task DeployReleaseValidateOnly_ShouldKeepTypedAiReadRealWhileDirectDbRemainsClosed()
+    {
+        var scriptPath = Path.Combine(
+            RepositoryTestSupport.Root,
+            "deploy",
+            "enterprise-ai",
+            "deploy-release.sh");
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "aicopilot-deploy-typed-ai-read",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            var enabledEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "typed-enabled.env",
+                "http://cloud.factory.internal:81",
+                cloudReadonlyMode: "Real",
+                cloudAiReadEnabled: true,
+                cloudReadonlyRealEnabled: true,
+                cloudReadonlyAllowProductionRead: true);
+            var enabledResult = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string>
+                {
+                    ["ENV_FILE"] = enabledEnvPath
+                });
+
+            enabledResult.ExitCode.Should().Be(0, enabledResult.Output);
+
+            var contradictoryEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "typed-contradictory.env",
+                "http://cloud.factory.internal:81",
+                cloudAiReadEnabled: true);
+            var contradictoryResult = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string>
+                {
+                    ["ENV_FILE"] = contradictoryEnvPath
+                });
+
+            contradictoryResult.ExitCode.Should().Be(64, contradictoryResult.Output);
+            contradictoryResult.Output.Should().Contain("CLOUD_AI_READ_STATE_CONFLICT");
+            contradictoryResult.Output.Should().NotContain("docker compose");
+
+            var legacyCredentialEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "typed-legacy-token.env",
+                "http://cloud.factory.internal:81");
+            await File.AppendAllTextAsync(
+                legacyCredentialEnvPath,
+                "\nCLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN=retired-static-token\n");
+            var legacyCredentialResult = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string>
+                {
+                    ["ENV_FILE"] = legacyCredentialEnvPath
+                });
+
+            legacyCredentialResult.ExitCode.Should().Be(64, legacyCredentialResult.Output);
+            legacyCredentialResult.Output.Should().Contain("LEGACY_CLOUD_CREDENTIAL_FORBIDDEN");
+            legacyCredentialResult.Output.Should().NotContain("retired-static-token");
+        }
+        finally
+        {
+            RepositoryTestSupport.TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public void EmergencyDeployWorkflow_ShouldPreserveTypedAiReadStateAndForceDirectDbClosed()
+    {
+        var workflow = File.ReadAllText(Path.Combine(
+            RepositoryTestSupport.Root,
+            ".github",
+            "workflows",
+            "aicopilot-deploy.yml"));
+
+        workflow.Should().NotContain("set_env_value \"$DEPLOY_TARGET_DIR/.env\" CLOUD_READONLY_MODE");
+        workflow.Should().NotContain("set_env_value \"$DEPLOY_TARGET_DIR/.env\" CLOUD_READONLY_REAL_ENABLED");
+        workflow.Should().NotContain("set_env_value \"$DEPLOY_TARGET_DIR/.env\" CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ");
+        workflow.Should().Contain(
+            "set_env_value \"$DEPLOY_TARGET_DIR/.env\" DATA_ANALYSIS_CLOUD_READONLY_ENABLED false");
+        workflow.Should().Contain("typed AiRead state is preserved from the validated deployment environment");
+    }
+
+    [Fact]
     public async Task TrackedShellScripts_ShouldMatchExecutionClassification()
     {
         var result = await RepositoryTestSupport.RunAsync(
@@ -225,7 +317,11 @@ public sealed class DeploymentPreflightBehaviorTests
         string directory,
         string fileName,
         string cloudOidcIssuer,
-        string bootstrapAdminUserName = "bootstrap-admin")
+        string bootstrapAdminUserName = "bootstrap-admin",
+        string cloudReadonlyMode = "Disabled",
+        bool cloudAiReadEnabled = false,
+        bool cloudReadonlyRealEnabled = false,
+        bool cloudReadonlyAllowProductionRead = false)
     {
         var envPath = Path.Combine(directory, fileName);
         File.WriteAllText(
@@ -241,10 +337,10 @@ AICOPILOT_BOOTSTRAP_ADMIN_USERNAME={{bootstrapAdminUserName}}
 AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD=AdminStrong1234
 AICOPILOT_API_KEY_ENCRYPTION_KEY=EncryptionKeyValue01234567890123456789
 AICOPILOT_JWT_SECRET_KEY=JwtSecretValue012345678901234567890123456789012345678901234567890123
-CLOUD_READONLY_MODE=Disabled
-CLOUD_READONLY_REAL_ENABLED=false
-CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=false
-CLOUD_AI_READ_ENABLED=false
+CLOUD_READONLY_MODE={{cloudReadonlyMode}}
+CLOUD_READONLY_REAL_ENABLED={{cloudReadonlyRealEnabled.ToString().ToLowerInvariant()}}
+CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ={{cloudReadonlyAllowProductionRead.ToString().ToLowerInvariant()}}
+CLOUD_AI_READ_ENABLED={{cloudAiReadEnabled.ToString().ToLowerInvariant()}}
 CLOUD_AI_READ_BASE_URL=http://cloud.factory.internal:81
 CLOUD_IDENTITY_STATUS_ENABLED=true
 CLOUD_IDENTITY_STATUS_BASE_URL=http://cloud.factory.internal:81

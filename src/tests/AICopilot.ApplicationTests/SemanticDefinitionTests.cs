@@ -45,7 +45,7 @@ public sealed class SemanticDefinitionTests
         productionData.AllowedProjectionFields.Should().BeEquivalentTo(
             ["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt", "receivedAt", "fields", "fieldSchema"]);
         productionData.AllowedFilterFields.Should().BeEquivalentTo(
-            ["typeKey", "processId", "processCode", "processName", "deviceId", "deviceCode", "plcCode", "plcName", "preset", "barcode", "result", "fieldMode"]);
+            ["typeKey", "processId", "processCode", "processName", "deviceId", "deviceCode", "deviceName", "plcCode", "plcName", "preset", "barcode", "result", "fieldMode"]);
         productionData.AllowedSortFields.Should().BeEquivalentTo(
             ["completedAt", "typeKey", "result"]);
 

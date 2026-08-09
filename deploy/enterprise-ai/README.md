@@ -28,7 +28,7 @@
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
 - 日常链使用服务器预置且 mode `0600` 的真实 `.env`，support sync 明确排除它；从零部署按 Keychain 生成该文件。Markdown、旧 env 与 GitHub `DEPLOY_ENV_FILE` 不作为标准流程 fallback。
 - 当前内网部署红线是 HTTP-only。部署脚本、compose、nginx 模板和验收命令不得把 HTTPS redirection、HSTS、443 listener、证书申请/续期或 OIDC HTTPS metadata 强制校验作为当前门槛；安全加固改走内网隔离、端口收敛、同源代理、CORS 白名单、强 secret、短期 token、非 root 容器、只读边界和除 HSTS 外的安全响应头。
-- AICopilot 对 Cloud 业务数据保持只读边界；交互式读取只允许携带当前有效 Cloud 用户委托的 typed AiRead，缺失或无效委托直接拒绝。不得通过静态系统 Token、Direct DB、Text-to-SQL、MCP、Tool、Agent workflow、后台任务或隐藏适配器扩大读取范围或写 Cloud。
+- AICopilot 对 Cloud 业务数据保持只读边界；交互式读取只允许携带当前有效 Cloud 用户委托的 typed AiRead，缺失或无效委托直接拒绝。typed AiRead 开启时 `CLOUD_READONLY_MODE=Real`、`CLOUD_READONLY_REAL_ENABLED=true`、`CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=true`，但 `DATA_ANALYSIS_CLOUD_READONLY_ENABLED` 与 Text-to-SQL 必须继续为 false；typed AiRead 关闭时三项状态才保持 Disabled/false。不得通过静态系统 Token、Direct DB、Text-to-SQL、MCP、Tool、Agent workflow、后台任务或隐藏适配器扩大读取范围或写 Cloud。
 - 当前标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode。
 - AICopilot 日常真实慢路径只剩选中镜像 build/Harbor push、migration 和健康检查，不存在等价的“HTTP 上传限速 1000M”概念。support sync、深度 attestation 和 cleanup 已拆出。
 - 正式日常发布只构建 fresh remote tip 的固定 Git SHA，并使用独立 detached worktree；不得读取或要求清理正在被其他 agent 修改的原工作树。
@@ -91,7 +91,7 @@ cd /srv/enterprise-ai/deploy
 平台侧留痕使用 `runner-platform-attestation.template.md` 复制一份填写，填好的记录不要提交真实 secret 或敏感截图；完成后用
 `scripts/check-platform-attestation-record.sh --record <filled-attestation.md>` 做静态完整性校验。该 linter 会拒绝模板占位符、未勾选项、空签署人和 `pending` / `not implemented` / `N/A` 等弱证明词，并要求记录包含 GitHub production environment secret 限制、`contents: read`、`self-hosted + iiot-linux-prod`、生产/secret workflow 无 GitHub hosted runner 的证据；如果 OIDC/Vault 或等价短期凭据尚未落地，记录里只能写成已批准的基础设施例外，并按结构化字段给出 `Ticket or change id`、`Exception owner`、`Due date` 和 `Current mitigation`。该 linter 只检查事实记录是否完整，不能替代 GitHub、Vault、OIDC 或 runner 真实验收。
 
-当前真实 Cloud Direct DB/Text-to-SQL 整体关闭，运行 mode 必须保持 disabled，不得注册 AICopilot `CloudReadOnly` DataAnalysis 数据源或执行 SQL。从零部署和运行容器不得读取或注入 Cloud readonly 用户、密码、连接串、role/grant，不得创建 AICopilot 到 Cloud Postgres 的网络；GitHub production environment secret、手动 workflow 和旧服务器 `.env` 都不能恢复这些输入。
+当前真实 Cloud Direct DB/Text-to-SQL 整体关闭，`DataAnalysis:CloudReadOnly` 与 Text-to-SQL 执行 mode 必须保持 disabled，不得注册 AICopilot Direct DB 数据源或执行 SQL；这不等于关闭当前用户委托的 typed AiRead 状态。从零部署和运行容器不得读取或注入 Cloud readonly 用户、密码、连接串、role/grant，不得创建 AICopilot 到 Cloud Postgres 的网络；GitHub production environment secret、手动 workflow 和旧服务器 `.env` 都不能恢复这些输入。
 
 以下文件仅作为冻结资产保留，不进入当前部署、运行或生产凭据清单。Cloud PostgreSQL readonly role 的历史授权载体是
 `deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和
@@ -266,7 +266,7 @@ cd /srv/enterprise-ai/deploy
 ./deploy-release.sh --validate-only
 ```
 
-该命令会 fail-fast 校验 `.env` 权限、模板占位、弱 secret、HTTP-only URL、Cloud OIDC 内网 HTTP issuer、必填 secret、direct Cloud readonly 配置，以及 `releases/*` owner/mode 对标准 non-root 路径是否仍可读可写。公共 HTTP OIDC 域名、HTTPS URL、HSTS/证书强制项、弱密码、空 token 或 root-owned release state 都必须先修正再发布。
+该命令会 fail-fast 校验 `.env` 权限、模板占位、弱 secret、HTTP-only URL、Cloud OIDC 内网 HTTP issuer、必填 secret、typed AiRead/只读状态一致性、Direct DB/Text-to-SQL 关闭态、退役凭据键，以及 `releases/*` owner/mode 对标准 non-root 路径是否仍可读可写。公共 HTTP OIDC 域名、HTTPS URL、HSTS/证书强制项、弱密码、空 token 或 root-owned release state 都必须先修正再发布。
 
 ## API Key 密文迁移验收
 

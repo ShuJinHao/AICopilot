@@ -216,7 +216,8 @@ public enum CloudAiReadFilterValueKind
     Date = 5,
     Preset = 6,
     HourlyPreset = 7,
-    FieldMode = 8
+    FieldMode = 8,
+    Keyword = 9
 }
 
 public sealed record CloudAiReadFilterRule(
@@ -249,6 +250,10 @@ public static class CloudAiReadSemanticSchemaRegistry
 
     private static readonly Regex TokenPattern = new(
         "^[\\p{L}\\p{N}][\\p{L}\\p{N}._:/-]{0,79}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex KeywordPattern = new(
+        "^[\\p{L}\\p{N}][\\p{L}\\p{N} ._:/-]{0,79}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly IReadOnlyDictionary<string, string> CanonicalLogLevels =
@@ -505,6 +510,8 @@ public static class CloudAiReadSemanticSchemaRegistry
             case CloudAiReadFilterValueKind.FieldMode:
                 normalized = normalized.ToLowerInvariant();
                 return normalized is "list" or "full";
+            case CloudAiReadFilterValueKind.Keyword:
+                return KeywordPattern.IsMatch(normalized);
             default:
                 return TokenPattern.IsMatch(normalized);
         }
@@ -531,7 +538,7 @@ public static class CloudAiReadSemanticSchemaRegistry
     {
         return new CloudAiReadFilterRule(
             field,
-            CloudAiReadFilterValueKind.Token,
+            CloudAiReadFilterValueKind.Keyword,
             ["contains", "eq"]);
     }
 

@@ -399,6 +399,7 @@ public sealed record BusinessQueryContext(
             .Where(filter => filter.Field is
                 "deviceId" or
                 "deviceCode" or
+                "deviceName" or
                 "processId" or
                 "processCode" or
                 "processName" or
@@ -497,6 +498,8 @@ public interface IBusinessQueryContextStore
     BusinessQueryContext Resolve(BusinessQueryContext requested);
 
     void Remember(BusinessQueryContext context);
+
+    void Invalidate(Guid sessionId);
 
     BusinessQueryConfirmationChallenge BeginConfirmation(BusinessQueryContext requested);
 
@@ -615,7 +618,15 @@ public static class BusinessQueryFallbackPolicy
 public static class ProductionQueryScopePolicy
 {
     private static readonly string[] RequiredFields = ["deviceId", "plcCode", "typeKey"];
-    private static readonly string[] AmbiguousFields = ["deviceCode", "plcName", "processId"];
+    private static readonly string[] AmbiguousFields =
+    [
+        "deviceCode",
+        "deviceName",
+        "plcName",
+        "processId",
+        "processCode",
+        "processName"
+    ];
 
     public static bool IsSealed(SemanticQueryPlan? plan)
     {
@@ -643,6 +654,49 @@ public static class ProductionQueryScopePolicy
             filter.Field.Equals("deviceId", StringComparison.OrdinalIgnoreCase)).Value;
         return Guid.TryParse(deviceId, out var parsed) && parsed != Guid.Empty;
     }
+
+    public static bool HasSameConfirmedScope(
+        SemanticQueryPlan confirmed,
+        SemanticQueryPlan revalidated)
+    {
+        ArgumentNullException.ThrowIfNull(confirmed);
+        ArgumentNullException.ThrowIfNull(revalidated);
+        if (!IsSealed(confirmed) ||
+            !IsSealed(revalidated) ||
+            confirmed.ProductionMetadataSeal is not { } confirmedSeal ||
+            revalidated.ProductionMetadataSeal is not { } revalidatedSeal)
+        {
+            return false;
+        }
+
+        return confirmedSeal.DeviceId == revalidatedSeal.DeviceId &&
+               SealMatchesPlan(confirmed, confirmedSeal) &&
+               SealMatchesPlan(revalidated, revalidatedSeal) &&
+               EqualsNormalized(confirmedSeal.PlcCode, revalidatedSeal.PlcCode) &&
+               EqualsNormalized(confirmedSeal.TypeKey, revalidatedSeal.TypeKey) &&
+               EqualsNormalized(confirmedSeal.PluginVersion, revalidatedSeal.PluginVersion) &&
+               EqualsNormalized(confirmedSeal.SchemaName, revalidatedSeal.SchemaName) &&
+               confirmedSeal.SchemaVersion == revalidatedSeal.SchemaVersion;
+    }
+
+    private static bool SealMatchesPlan(
+        SemanticQueryPlan plan,
+        ProductionQueryMetadataSeal seal)
+    {
+        var deviceId = plan.Filters.Single(filter =>
+            filter.Field.Equals("deviceId", StringComparison.OrdinalIgnoreCase)).Value;
+        var plcCode = plan.Filters.Single(filter =>
+            filter.Field.Equals("plcCode", StringComparison.OrdinalIgnoreCase)).Value;
+        var typeKey = plan.Filters.Single(filter =>
+            filter.Field.Equals("typeKey", StringComparison.OrdinalIgnoreCase)).Value;
+        return Guid.TryParse(deviceId, out var parsedDeviceId) &&
+               parsedDeviceId == seal.DeviceId &&
+               EqualsNormalized(plcCode, seal.PlcCode) &&
+               EqualsNormalized(typeKey, seal.TypeKey);
+    }
+
+    private static bool EqualsNormalized(string left, string right) =>
+        string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
 }
 
 public static class BusinessQueryProviderResultContract

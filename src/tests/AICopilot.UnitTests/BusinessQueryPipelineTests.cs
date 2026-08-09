@@ -507,6 +507,37 @@ public sealed class BusinessQueryPipelineTests
     }
 
     [Fact]
+    public void Invalidate_ShouldRemoveConfirmedAndPendingContextForOnlyThatSession()
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 9, 8, 0, 0, TimeSpan.Zero));
+        var store = new BusinessQueryContextStore(clock, TimeSpan.FromMinutes(30));
+        var first = CreateContext(
+            DataSourceExternalSystemType.CloudReadOnly,
+            sourceExplicitlySelected: true).Confirm(clock.UtcNow);
+        var second = CreateContext(
+            DataSourceExternalSystemType.CloudReadOnly,
+            sourceExplicitlySelected: true) with { SessionId = Guid.NewGuid() };
+        second = second.Confirm(clock.UtcNow);
+        store.Remember(first);
+        store.Remember(second);
+
+        store.Invalidate(first.SessionId);
+
+        var incomplete = new BusinessQueryConfirmation(false, false, false, false, false);
+        store.Resolve(first with
+        {
+            Confirmation = incomplete,
+            ConfirmedAtUtc = null
+        }).IsConfirmed.Should().BeFalse();
+        store.Resolve(second with
+        {
+            Confirmation = incomplete,
+            ConfirmedAtUtc = null
+        }).IsConfirmed.Should().BeTrue();
+    }
+
+    [Fact]
     public void ProviderRegistry_ShouldRequireExplicitSimulationSelection()
     {
         var provider = new StubBusinessQueryProvider(

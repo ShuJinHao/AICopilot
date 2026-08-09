@@ -255,7 +255,16 @@ public sealed record SemanticQueryPlan(
     IReadOnlyList<SemanticFilter> Filters,
     SemanticTimeRange? TimeRange,
     SemanticSort? Sort,
-    int Limit);
+    int Limit,
+    ProductionQueryMetadataSeal? ProductionMetadataSeal = null);
+
+public sealed record ProductionQueryMetadataSeal(
+    Guid DeviceId,
+    string PlcCode,
+    string TypeKey,
+    string PluginVersion,
+    string SchemaName,
+    int SchemaVersion);
 
 public enum SemanticPlanningFailureKind
 {

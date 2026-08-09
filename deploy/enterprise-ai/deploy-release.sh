@@ -1606,6 +1606,52 @@ ensure_no_template_placeholders() {
   done < "$ENV_FILE"
 }
 
+ensure_legacy_cloud_credentials_absent() {
+  local env_line
+  local key
+
+  while IFS= read -r env_line || [ -n "$env_line" ]
+  do
+    env_line="${env_line//$'\r'/}"
+    case "$env_line" in
+      ''|'#'*)
+        continue
+        ;;
+      *=*)
+        key="${env_line%%=*}"
+        case "$key" in
+          CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN|CloudAiRead__ServiceAccountToken|CLOUD_IDENTITY_STATUS_SERVICE_TOKEN|CloudIdentityStatus__ServiceAccountToken|DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING|DATA_ANALYSIS_CLOUD_READONLY_USERNAME|DATA_ANALYSIS_CLOUD_READONLY_PASSWORD|DATA_ANALYSIS_CLOUD_READONLY_DATABASE|DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK|DATA_ANALYSIS_CLOUD_READONLY_DB_HOST_ALIAS)
+            printf 'LEGACY_CLOUD_CREDENTIAL_FORBIDDEN: deploy .env must not contain retired interactive or Direct DB credential key %s.\n' "$key" >&2
+            exit 64
+            ;;
+        esac
+        ;;
+    esac
+  done < "$ENV_FILE"
+}
+
+ensure_typed_cloud_ai_read_state() {
+  local mode="${CLOUD_READONLY_MODE:-Disabled}"
+
+  if is_truthy "${CLOUD_AI_READ_ENABLED:-false}"; then
+    require_env_value CLOUD_AI_READ_BASE_URL
+    if [ "$mode" != "Real" ] ||
+       ! is_truthy "${CLOUD_READONLY_REAL_ENABLED:-false}" ||
+       ! is_truthy "${CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ:-false}"; then
+      printf 'CLOUD_AI_READ_STATE_CONFLICT: typed Cloud AiRead requires CLOUD_READONLY_MODE=Real, CLOUD_READONLY_REAL_ENABLED=true and CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=true.\n' >&2
+      exit 64
+    fi
+    return
+  fi
+
+  if [ "$mode" != "Disabled" ] ||
+     is_truthy "${CLOUD_READONLY_REAL_ENABLED:-false}" ||
+     is_truthy "${CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ:-false}"; then
+    printf 'CLOUD_AI_READ_STATE_CONFLICT: disabled typed Cloud AiRead requires the Cloud readonly runtime status to remain Disabled.\n' >&2
+    exit 64
+  fi
+}
+
 require_secret_value() {
   local key="$1"
   local min_length="$2"
@@ -1756,6 +1802,8 @@ ensure_required_secrets() {
   fi
   require_secret_value AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET 32
 
+  ensure_typed_cloud_ai_read_state
+
   if is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
     printf 'Real Cloud Direct DB/Text-to-SQL is temporarily closed; DATA_ANALYSIS_CLOUD_READONLY_ENABLED must remain false.\n' >&2
     exit 64
@@ -1770,6 +1818,7 @@ validate_deploy_environment() {
 validate_deploy_environment_readonly() {
   ensure_env_file_permissions
   ensure_no_template_placeholders
+  ensure_legacy_cloud_credentials_absent
   ensure_http_only_environment
   ensure_required_secrets
 }

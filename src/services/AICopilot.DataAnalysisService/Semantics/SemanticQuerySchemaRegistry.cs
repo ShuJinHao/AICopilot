@@ -147,7 +147,7 @@ public sealed class SemanticQuerySchemaRegistry(
                 DefaultSortField: "completedAt",
                 DefaultSortDirection: SemanticSortDirection.Desc,
                 DefaultLimit: productionDefinition.DefaultLimit,
-                RequiredAnyFilterFields: ["processId", "processCode", "processName", "deviceId", "deviceCode"]),
+                RequiredAnyFilterFields: ["processId", "processCode", "processName", "deviceId", "deviceCode", "deviceName"]),
             new(
                 "Analysis.ProductionData.Range",
                 SemanticQueryTarget.ProductionData,
@@ -157,7 +157,7 @@ public sealed class SemanticQuerySchemaRegistry(
                 DefaultSortField: "completedAt",
                 DefaultSortDirection: SemanticSortDirection.Desc,
                 DefaultLimit: productionDefinition.DefaultLimit,
-                RequiredAnyFilterFields: ["processId", "processCode", "processName", "deviceId", "deviceCode"],
+                RequiredAnyFilterFields: ["processId", "processCode", "processName", "deviceId", "deviceCode", "deviceName"],
                 RequiresTimeRange: true),
             new(
                 "Analysis.ProductionData.ByDevice",
@@ -168,7 +168,7 @@ public sealed class SemanticQuerySchemaRegistry(
                 DefaultSortField: "completedAt",
                 DefaultSortDirection: SemanticSortDirection.Desc,
                 DefaultLimit: productionDefinition.DefaultLimit,
-                RequiredAnyFilterFields: ["processId", "processCode", "processName", "deviceId", "deviceCode"]),
+                RequiredAnyFilterFields: ["processId", "processCode", "processName", "deviceId", "deviceCode", "deviceName"]),
             new(
                 "Analysis.Process.List",
                 SemanticQueryTarget.Process,

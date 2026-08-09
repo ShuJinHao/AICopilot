@@ -86,6 +86,28 @@ public sealed class SemanticQueryPlannerTests
     }
 
     [Theory]
+    [InlineData("Analysis.ProductionData.Latest", false)]
+    [InlineData("Analysis.ProductionData.Range", true)]
+    [InlineData("Analysis.ProductionData.ByDevice", false)]
+    public void Planner_ShouldAcceptDeviceNameForEveryProductionIntent(
+        string intent,
+        bool requiresTimeRange)
+    {
+        var timeRange = requiresTimeRange
+            ? ",\"timeRange\":{\"field\":\"completedAt\",\"start\":\"2026-04-20T00:00:00Z\",\"end\":\"2026-04-21T00:00:00Z\"}"
+            : string.Empty;
+        var result = _planner.Plan(
+            intent,
+            "{\"filters\":[{\"field\":\"deviceName\",\"operator\":\"eq\",\"value\":\"P2 模切\"}]" +
+            timeRange +
+            "}");
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan!.Filters.Should().ContainSingle(filter =>
+            filter.Field == "deviceName" && filter.Value == "P2 模切");
+    }
+
+    [Theory]
     [InlineData("Analysis.Device.List", "{\"fields\":[\"password\"]}", "projection whitelist")]
     [InlineData("Analysis.DeviceLog.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", "timeRange")]
     [InlineData("Analysis.Recipe.Detail", "{\"filters\":[{\"field\":\"processName\",\"operator\":\"eq\",\"value\":\"Cutting\"}]}", "recipeId")]

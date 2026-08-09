@@ -129,9 +129,83 @@ public sealed class BusinessQueryExecutor(
             if (confirmedPlan.Target == SemanticQueryTarget.ProductionData &&
                 !ProductionQueryScopePolicy.IsSealed(confirmedPlan))
             {
+                businessQueryContextStore.Invalidate(sessionId);
                 return BusinessQueryExecutionResult.ConfirmationRequired(
                     CloudAiReadProblemCodes.MissingRequiredParameter,
                     "[系统提示]: 已确认的生产数据范围尚未通过 Cloud 唯一解析设备、PLC 和 TypeKey，请重新发起查询。");
+            }
+
+            if (confirmedPlan.Target == SemanticQueryTarget.ProductionData)
+            {
+                if (cloudAiReadClient is null || !cloudAiReadClient.IsEnabled)
+                {
+                    businessQueryContextStore.Invalidate(sessionId);
+                    return BusinessQueryExecutionResult.Failure(
+                        CloudAiReadProblemCodes.NotConfigured,
+                        "[系统提示]: Cloud PLC 与业务记录 Schema 动态元数据当前不可用，旧确认已失效。");
+                }
+
+                SemanticQueryPlan revalidatedPlan;
+                try
+                {
+                    revalidatedPlan = await cloudAiReadClient.SealProductionScopeAsync(
+                        confirmedPlan,
+                        cancellationToken);
+                }
+                catch (CloudAiReadException ex) when (
+                    ex.Code is CloudAiReadProblemCodes.MissingRequiredParameter or
+                        CloudAiReadProblemCodes.InvalidRequest)
+                {
+                    businessQueryContextStore.Invalidate(sessionId);
+                    return BusinessQueryExecutionResult.ConfirmationRequired(
+                        ex.Code,
+                        $"[系统提示]: 已确认的生产数据动态范围已变化，旧确认已失效；{ex.Message} 请重新发起并确认查询。");
+                }
+                catch (CloudAiReadException ex) when (
+                    ex.Code == CloudAiReadProblemCodes.DelegationRequired)
+                {
+                    businessQueryContextStore.Invalidate(sessionId);
+                    return BusinessQueryExecutionResult.Failure(
+                        ex.Code,
+                        "[系统提示]: 当前用户缺少有效 Cloud 委托，旧确认已失效；请重新通过 Cloud 登录后再查询。");
+                }
+                catch (CloudAiReadException ex) when (
+                    ex.Code == CloudAiReadProblemCodes.Unauthorized)
+                {
+                    businessQueryContextStore.Invalidate(sessionId);
+                    return BusinessQueryExecutionResult.Failure(
+                        ex.Code,
+                        "[系统提示]: 当前 Cloud 委托已失效或无法验证，旧确认已失效；请重新通过 Cloud 登录后再查询。");
+                }
+                catch (CloudAiReadException ex) when (
+                    ex.Code is CloudAiReadProblemCodes.Forbidden or
+                        CloudAiReadProblemCodes.RequestBlocked)
+                {
+                    businessQueryContextStore.Invalidate(sessionId);
+                    return BusinessQueryExecutionResult.Failure(
+                        ex.Code,
+                        "[系统提示]: 当前 Cloud 用户权限或设备范围不足，旧确认已失效，系统已停止元数据读取。");
+                }
+                catch (CloudAiReadException)
+                {
+                    businessQueryContextStore.Invalidate(sessionId);
+                    return BusinessQueryExecutionResult.Failure(
+                        CloudAiReadProblemCodes.Unavailable,
+                        "[系统提示]: Cloud PLC 权威快照或业务记录 Schema 不可用、已过期或与实际插件版本不一致，旧确认已失效。");
+                }
+
+                if (!ProductionQueryScopePolicy.HasSameConfirmedScope(
+                        confirmedPlan,
+                        revalidatedPlan))
+                {
+                    businessQueryContextStore.Invalidate(sessionId);
+                    return BusinessQueryExecutionResult.ConfirmationRequired(
+                        CloudAiReadProblemCodes.MissingRequiredParameter,
+                        "[系统提示]: 已确认的设备、PLC、TypeKey、插件版本或 Schema 版本已变化，旧确认已失效；请重新发起并确认查询。");
+                }
+
+                confirmedPlan = revalidatedPlan;
+                confirmedQuery = confirmedQuery with { SemanticPlan = revalidatedPlan };
             }
 
             return await RunBusinessQueryProviderAsync(
@@ -286,6 +360,12 @@ public sealed class BusinessQueryExecutor(
         var providerResult = await provider.QueryAsync(context, cancellationToken);
         BusinessQueryProviderResultContract.EnsureMatches(context, provider, providerResult);
 
+        if (plan.Target == SemanticQueryTarget.ProductionData &&
+            providerResult.Outcome is not (BusinessQueryOutcome.Success or BusinessQueryOutcome.Empty))
+        {
+            businessQueryContextStore.Invalidate(context.SessionId);
+        }
+
         if (providerResult.Outcome is BusinessQueryOutcome.Success or BusinessQueryOutcome.Empty)
         {
             businessQueryContextStore.Remember(context);
@@ -323,7 +403,9 @@ public sealed class BusinessQueryExecutor(
         {
             return BusinessQueryExecutionResult.ConfirmationRequired(
                 CloudAiReadProblemCodes.MissingRequiredParameter,
-                $"[系统提示]: {targetLabel}查询缺少必要条件，请补充设备、时间范围或条码后重试。");
+                plan.Target == SemanticQueryTarget.ProductionData
+                    ? "[系统提示]: 已确认的生产数据动态范围已变化，旧确认已失效；请重新发起并确认查询。"
+                    : $"[系统提示]: {targetLabel}查询缺少必要条件，请补充设备、时间范围或条码后重试。");
         }
 
         if (providerResult.Outcome == BusinessQueryOutcome.Unauthorized)
@@ -353,6 +435,14 @@ public sealed class BusinessQueryExecutor(
             return BusinessQueryExecutionResult.Failure(
                 CloudAiReadProblemCodes.Forbidden,
                 $"[系统提示]: {targetLabel}查询权限或设备范围不足，系统已明确终止本次正式数据读取。");
+        }
+
+        if (plan.Target == SemanticQueryTarget.ProductionData &&
+            providerResult.Outcome == BusinessQueryOutcome.Unavailable)
+        {
+            return BusinessQueryExecutionResult.Failure(
+                providerResult.FailureCode ?? CloudAiReadProblemCodes.Unavailable,
+                "[系统提示]: Cloud PLC 权威快照、实际插件版本或业务记录 Schema 无法重新验证，旧确认已失效，本次未读取生产记录。");
         }
 
         var fallbackDecision = BusinessQueryFallbackPolicy.EvaluateSameSourceTextToSql(

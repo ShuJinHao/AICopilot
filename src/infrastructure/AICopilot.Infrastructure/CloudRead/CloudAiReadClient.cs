@@ -199,7 +199,8 @@ public sealed class CloudAiReadClient(
             cancellationToken);
         var deviceFilters = originalQuery.Filters
             .Where(filter => filter.Field.Equals("deviceId", StringComparison.OrdinalIgnoreCase) ||
-                             filter.Field.Equals("deviceCode", StringComparison.OrdinalIgnoreCase))
+                             filter.Field.Equals("deviceCode", StringComparison.OrdinalIgnoreCase) ||
+                             filter.Field.Equals("deviceName", StringComparison.OrdinalIgnoreCase))
             .Concat(resolvedProcessFilter is null ? [] : [resolvedProcessFilter])
             .ToArray();
         if (deviceFilters.Length == 0)
@@ -364,13 +365,24 @@ public sealed class CloudAiReadClient(
             .OrderBy(filter => filter.Field, StringComparer.Ordinal)
             .ToArray();
 
-        return plan with { Filters = sealedFilters };
+        return plan with
+        {
+            Filters = sealedFilters,
+            ProductionMetadataSeal = new ProductionQueryMetadataSeal(
+                device.DeviceId,
+                plc.PlcCode.Trim(),
+                schema.TypeKey.Trim(),
+                plc.PluginVersion.Trim(),
+                schema.SchemaName.Trim(),
+                schema.SchemaVersion)
+        };
     }
 
     private static bool IsProductionScopeField(string field)
     {
         return field.Equals("deviceId", StringComparison.OrdinalIgnoreCase) ||
                field.Equals("deviceCode", StringComparison.OrdinalIgnoreCase) ||
+               field.Equals("deviceName", StringComparison.OrdinalIgnoreCase) ||
                field.Equals("processId", StringComparison.OrdinalIgnoreCase) ||
                field.Equals("processCode", StringComparison.OrdinalIgnoreCase) ||
                field.Equals("processName", StringComparison.OrdinalIgnoreCase) ||
@@ -739,6 +751,12 @@ public sealed class CloudAiReadClient(
 
             if (filter.Field.Equals("deviceCode", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(device.DeviceCode.Trim(), filter.Value.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (filter.Field.Equals("deviceName", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(device.DeviceName.Trim(), filter.Value.Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }

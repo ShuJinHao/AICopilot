@@ -65,7 +65,7 @@ Cloud 正式 AI Read 只读表面必须在 AICopilot 客户端 allowlist 中逐�
 Cloud AiRead transport 只允许以上十个固定 GET，并且每个交互式请求必须按当前 AI 用户和 grant 取得其运行时委托。AICopilot 不提供任意 method/path 公共传输入口，不接受可配置 POST allowlist；POST、PUT、PATCH、DELETE 必须在发出 HTTP 请求前拒绝。Cloud identity status 是独立的只读身份 GET 表面，使用 AICopilot 内存中按固定 actor/audience 生成的 5 分钟 system Token，只复用安全路径校验，不扩展 Cloud AiRead 业务端点。
 
 <!-- AICOPILOT_FALLBACK_POLICY_V1_BEGIN -->
-六类 Cloud business plugin 只能走 typed GET，并统一返回 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable` 或 `Unauthorized`。制造业务查询在执行 `/production-records` 前，必须先通过 `/processes`、`/devices`、`/device-plcs`、`/data-schemas` 把工序、正式 `DeviceId`、`PlcCode` 与 `TypeKey` 唯一解析并形成用户确认范围；零候选、多候选、截断、实际插件版本/能力缺失、PLC 不可用或过期都不得执行数据查询。Harness 主聊天的模型可见业务查询表面只能有一个 `BusinessQuery`，Text-to-SQL 不作为独立工具进入模型目录。当前 `BusinessQueryFallbackPolicy` 和 runner 必须对所有真实 Cloud 能力返回关闭结论；`Unsupported`、`Unavailable`、`Success`、`Empty`、`NeedClarification`、`Unauthorized`、权限或凭据失败、元数据未解析/过期、跨源、MCP 与 Simulation 均不得生成或执行 SQL。模型不得决定、触发、扩大或绕过该关闭状态。以后只有当前用户委托范围贯穿 SQL，且 AST 能强制注入不可移除的行条件或数据库 RLS 能独立证明相同范围后，才允许另行复审开放。查询确认键固定为 `SessionId`；确认与复用只按该 Session 绑定，重试继续使用同一确认身份键。
+六类 Cloud business plugin 只能走 typed GET，并统一返回 `Success`、`Empty`、`NeedClarification`、`Unsupported`、`Unavailable` 或 `Unauthorized`。制造业务查询在执行 `/production-records` 前，必须先通过 `/processes`、`/devices`、`/device-plcs`、`/data-schemas` 把工序、正式 `DeviceId`、`PlcCode` 与 `TypeKey` 唯一解析并形成用户确认范围；零候选、多候选、截断、实际插件版本/能力缺失、PLC 不可用或过期都不得执行数据查询。用户确认后真正执行前必须无条件重跑同一元数据链，重新核对当前用户设备范围、PLC 权威与新鲜状态、PLC 实际插件版本、Schema 插件版本、Schema 名称/版本、唯一 `TypeKey` 和 `list` 能力；重封印结果与确认时任一项不一致即使旧确认失效且不得请求生产记录。Harness 主聊天的模型可见业务查询表面只能有一个 `BusinessQuery`，Text-to-SQL 不作为独立工具进入模型目录。当前 `BusinessQueryFallbackPolicy` 和 runner 必须对所有真实 Cloud 能力返回关闭结论；`Unsupported`、`Unavailable`、`Success`、`Empty`、`NeedClarification`、`Unauthorized`、权限或凭据失败、元数据未解析/过期、跨源、MCP 与 Simulation 均不得生成或执行 SQL。模型不得决定、触发、扩大或绕过该关闭状态。以后只有当前用户委托范围贯穿 SQL，且 AST 能强制注入不可移除的行条件或数据库 RLS 能独立证明相同范围后，才允许另行复审开放。查询确认键固定为 `SessionId`；确认与复用只按该 Session 绑定，重试继续使用同一确认身份键。
 <!-- AICOPILOT_FALLBACK_POLICY_V1_END -->
 
 每个 provider 必须为其声明的每个 capability 同时声明非空结果字段契约和敏感字段片段；registry 必须与同一 `SourceKey/SourceType` 的 profile 联合校验 capability，并确保结果契约覆盖 capability profile 的全部敏感字段片段。运行时逐行校验顶层字段，递归检查 dictionary、sequence、`JsonElement`、`JsonDocument` 和可安全序列化 DTO，未知或序列化失败的复杂对象 fail-closed；校验通过后才能进入通用最终上下文 formatter。formatter 不持有 Cloud 专用 schema；MES/ERP 的输出边界由各自 provider capability 结果契约负责。业务数据源绑定必须同时匹配 `SourceKey`、`SourceType`，已确认 `DataSourceId` 时还必须精确匹配该 ID。
@@ -82,7 +82,7 @@ Cloud AiRead transport 只允许以上十个固定 GET，并且每个交互式�
 
 当前 AP/CP 插件各自只启用插件能力清单声明的“模切完成记录”；主 `TypeKey` 为 `die-cutting-completion`，历史 `AP`/`CP` 只允许由 Cloud 按对应插件版本的 `legacyTypeKeys` 做只读兼容归一化。AICopilot 不保存或推导这组历史映射，不能把 `AP`、`CP`、正负极、P1/P2、PLC 数量或字段清单写成语义核心。回答字段只来自 `/data-schemas` 返回的当前实际 Schema 与 `/production-records` 的真实结果。
 
-自然语言中的工序、设备显示名称、PLC 名称和业务记录名称都必须先经 Cloud 动态元数据解析。零个或多个正式候选都返回 `NeedClarification`；不得通过中文名称拼接 `TypeKey`、PLC 编码或选择第一条。
+自然语言中的工序、设备显示名称、PLC 名称和业务记录名称都必须先经 Cloud 动态元数据解析。`deviceName` 只允许作为 `/devices` 的 keyword 候选搜索输入；封印前必须对返回 `DeviceName` Trim 后做大小写不敏感的唯一精确匹配。零个或多个精确候选都返回 `NeedClarification`；同时给出 `deviceId/deviceCode/deviceName/process*` 时必须全部命中同一设备。封印后只保留正式 `deviceId/plcCode/typeKey`，最终 `/production-records` 请求不得携带上述名称、编码或工序条件；不得通过 contains 第一条、中文名称拼接或本地别名猜测目标。
 
 ### 3.1 行数唯一 owner 与 sealed plan 边界
 

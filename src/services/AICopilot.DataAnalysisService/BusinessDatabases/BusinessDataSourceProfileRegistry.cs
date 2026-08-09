@@ -189,6 +189,17 @@ internal sealed class BusinessQueryContextStore(
         confirmedContexts[context.SessionId] = context;
     }
 
+    public void Invalidate(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return;
+        }
+
+        confirmedContexts.TryRemove(sessionId, out _);
+        pendingConfirmations.TryRemove(sessionId, out _);
+    }
+
     public BusinessQueryConfirmationChallenge BeginConfirmation(BusinessQueryContext requested)
     {
         if (requested.SessionId == Guid.Empty || requested.SemanticPlan is null)

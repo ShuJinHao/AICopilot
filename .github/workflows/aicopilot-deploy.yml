@@ -158,11 +158,8 @@ jobs:
             echo "DEPLOY_ENV_FILE contains retired interactive AiRead or direct Cloud DB credentials; refusing emergency deployment." >&2
             exit 64
           fi
-          set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_MODE Disabled
-          set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ENABLED false
-          set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ false
           set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_ENABLED false
-          echo "Real Cloud Direct DB/Text-to-SQL remains disabled; typed AiRead uses runtime current-user delegation."
+          echo "Real Cloud Direct DB/Text-to-SQL remains disabled; typed AiRead state is preserved from the validated deployment environment."
           chmod +x "$DEPLOY_TARGET_DIR"/*.sh
           find "$DEPLOY_TARGET_DIR/scripts" -maxdepth 1 -type f -name '*.sh' -exec chmod +x {} +
 

@@ -249,6 +249,94 @@ public sealed class BusinessQueryExecutorTests
         fallback.BoundContext.Should().BeNull();
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ConfirmedProductionScope_ShouldRevalidateBeforeReadingRecords()
+    {
+        var calls = new List<string>();
+        var context = CreateConfirmedContext(BusinessDataCapability.ProductionRecord);
+        var provider = new RecordingProvider(context, BusinessQueryOutcome.Empty, calls);
+        var store = new RecordingContextStore();
+        var client = new FailingCloudAiReadClient(calls: calls);
+        var executor = CreateExecutor(
+            provider,
+            new RecordingFallbackRunner(calls),
+            cloudAiReadClient: client,
+            contextStore: store);
+
+        var result = await executor.ExecuteAsync(
+            context.SessionId,
+            context.SemanticPlan!.Intent,
+            context.Question,
+            context,
+            CancellationToken.None);
+
+        result.Status.Should().Be(BusinessQueryExecutionStatus.Empty);
+        calls.Should().Equal("metadata", "typed");
+        store.InvalidateCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ConfirmedProductionScopeWithExpiredPlc_ShouldInvalidateBeforeProvider()
+    {
+        var calls = new List<string>();
+        var context = CreateConfirmedContext(BusinessDataCapability.ProductionRecord);
+        var provider = new RecordingProvider(context, BusinessQueryOutcome.Success, calls);
+        var store = new RecordingContextStore();
+        var client = new FailingCloudAiReadClient(
+            sealFailureCode: CloudAiReadProblemCodes.Unavailable,
+            calls: calls);
+        var executor = CreateExecutor(
+            provider,
+            new RecordingFallbackRunner(calls),
+            cloudAiReadClient: client,
+            contextStore: store);
+
+        var result = await executor.ExecuteAsync(
+            context.SessionId,
+            context.SemanticPlan!.Intent,
+            context.Question,
+            context,
+            CancellationToken.None);
+
+        result.Status.Should().Be(BusinessQueryExecutionStatus.Failed);
+        result.FailureCode.Should().Be(CloudAiReadProblemCodes.Unavailable);
+        calls.Should().Equal("metadata");
+        store.InvalidateCalls.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("plugin-version")]
+    [InlineData("schema-version")]
+    [InlineData("type-key")]
+    public async Task ExecuteAsync_ConfirmedProductionMetadataChanged_ShouldRequireNewConfirmation(
+        string change)
+    {
+        var calls = new List<string>();
+        var context = CreateConfirmedContext(BusinessDataCapability.ProductionRecord);
+        var provider = new RecordingProvider(context, BusinessQueryOutcome.Success, calls);
+        var store = new RecordingContextStore();
+        var client = new FailingCloudAiReadClient(
+            sealTransform: plan => ChangeProductionSeal(plan, change),
+            calls: calls);
+        var executor = CreateExecutor(
+            provider,
+            new RecordingFallbackRunner(calls),
+            cloudAiReadClient: client,
+            contextStore: store);
+
+        var result = await executor.ExecuteAsync(
+            context.SessionId,
+            context.SemanticPlan!.Intent,
+            context.Question,
+            context,
+            CancellationToken.None);
+
+        result.Status.Should().Be(BusinessQueryExecutionStatus.NeedsConfirmation);
+        result.SafeMessage.Should().Contain("旧确认已失效");
+        calls.Should().Equal("metadata");
+        store.InvalidateCalls.Should().Be(1);
+    }
+
     private static readonly Guid TestDataSourceId =
         Guid.Parse("c08e6cff-9f99-4c4d-95ab-d0da25fa43bd");
 
@@ -257,14 +345,15 @@ public sealed class BusinessQueryExecutorTests
         IBusinessTextToSqlFallbackRunner fallbackRunner,
         ISemanticQueryPlanner? planner = null,
         IBusinessDatabaseReadService? databaseReadService = null,
-        ICloudAiReadClient? cloudAiReadClient = null)
+        ICloudAiReadClient? cloudAiReadClient = null,
+        IBusinessQueryContextStore? contextStore = null)
     {
         return new BusinessQueryExecutor(
             planner ?? new UnexpectedPlanner(),
             NullLogger<BusinessQueryExecutor>.Instance,
             new FixedProviderRegistry(provider),
             new FixedProfileRegistry(),
-            new RecordingContextStore(),
+            contextStore ?? new RecordingContextStore(),
             databaseReadService ?? new FixedDatabaseReadService(),
             fallbackRunner,
             cloudAiReadClient);
@@ -276,8 +365,47 @@ public sealed class BusinessQueryExecutorTests
         var target = capability switch
         {
             BusinessDataCapability.DeviceLog => SemanticQueryTarget.DeviceLog,
+            BusinessDataCapability.ProductionRecord => SemanticQueryTarget.ProductionData,
             _ => SemanticQueryTarget.Device
         };
+        if (target == SemanticQueryTarget.ProductionData)
+        {
+            var deviceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var productionPlan = new SemanticQueryPlan(
+                "Analysis.ProductionData.ByDevice",
+                target,
+                SemanticQueryKind.ByDevice,
+                "test production query",
+                new SemanticProjection(["recordId", "deviceName", "typeKey", "completedAt"]),
+                [
+                    new SemanticFilter("deviceId", SemanticFilterOperator.Equal, deviceId.ToString("D")),
+                    new SemanticFilter("plcCode", SemanticFilterOperator.Equal, "P2-PLC05"),
+                    new SemanticFilter("preset", SemanticFilterOperator.Equal, "today"),
+                    new SemanticFilter("typeKey", SemanticFilterOperator.Equal, "die-cutting-completion")
+                ],
+                null,
+                null,
+                20,
+                new ProductionQueryMetadataSeal(
+                    deviceId,
+                    "P2-PLC05",
+                    "die-cutting-completion",
+                    "2.0.12",
+                    "die-cutting-completion.v1",
+                    1));
+            return new BusinessQueryContext(
+                    Guid.NewGuid(),
+                    StandardBusinessDataSourceProfiles.CloudReadOnly.Code,
+                    TestDataSourceId,
+                    DataSourceExternalSystemType.CloudReadOnly,
+                    capability,
+                    "test production query",
+                    SourceExplicitlySelected: true,
+                    BusinessQueryConfirmation.Complete,
+                    productionPlan)
+                .Confirm(new DateTimeOffset(2026, 8, 2, 0, 0, 0, TimeSpan.Zero));
+        }
+
         var plan = new SemanticQueryPlan(
             $"Analysis.{target}.List",
             target,
@@ -301,6 +429,41 @@ public sealed class BusinessQueryExecutorTests
                 BusinessQueryConfirmation.Complete,
                 plan)
             .Confirm(new DateTimeOffset(2026, 8, 2, 0, 0, 0, TimeSpan.Zero));
+    }
+
+    private static SemanticQueryPlan ChangeProductionSeal(
+        SemanticQueryPlan plan,
+        string change)
+    {
+        var seal = plan.ProductionMetadataSeal
+                   ?? throw new InvalidOperationException("Production metadata seal is required.");
+        return change switch
+        {
+            "plugin-version" => plan with
+            {
+                ProductionMetadataSeal = seal with { PluginVersion = "2.0.13" }
+            },
+            "schema-version" => plan with
+            {
+                ProductionMetadataSeal = seal with
+                {
+                    SchemaName = "die-cutting-completion.v2",
+                    SchemaVersion = 2
+                }
+            },
+            "type-key" => plan with
+            {
+                Filters = plan.Filters
+                    .Where(filter => !filter.Field.Equals("typeKey", StringComparison.OrdinalIgnoreCase))
+                    .Append(new SemanticFilter(
+                        "typeKey",
+                        SemanticFilterOperator.Equal,
+                        "die-cutting-completion-v2"))
+                    .ToArray(),
+                ProductionMetadataSeal = seal with { TypeKey = "die-cutting-completion-v2" }
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(change), change, null)
+        };
     }
 
     private sealed class RecordingProvider(
@@ -360,17 +523,23 @@ public sealed class BusinessQueryExecutorTests
 
     private sealed class FailingCloudAiReadClient(
         string? sealFailureCode = null,
-        string? queryFailureCode = null) : ICloudAiReadClient
+        string? queryFailureCode = null,
+        Func<SemanticQueryPlan, SemanticQueryPlan>? sealTransform = null,
+        List<string>? calls = null) : ICloudAiReadClient
     {
         public bool IsEnabled => true;
 
         public Task<SemanticQueryPlan> SealProductionScopeAsync(
             SemanticQueryPlan plan,
-            CancellationToken cancellationToken = default) => sealFailureCode is null
-            ? Task.FromResult(plan)
-            : Task.FromException<SemanticQueryPlan>(new CloudAiReadException(
-                sealFailureCode,
-                "scope sealing failed"));
+            CancellationToken cancellationToken = default)
+        {
+            calls?.Add("metadata");
+            return sealFailureCode is null
+                ? Task.FromResult(sealTransform?.Invoke(plan) ?? plan)
+                : Task.FromException<SemanticQueryPlan>(new CloudAiReadException(
+                    sealFailureCode,
+                    "scope sealing failed"));
+        }
 
         public Task<CloudAiReadResult<object>> QuerySemanticAsync(
             SemanticQueryPlan plan,
@@ -456,10 +625,17 @@ public sealed class BusinessQueryExecutorTests
 
     private sealed class RecordingContextStore : IBusinessQueryContextStore
     {
+        public int InvalidateCalls { get; private set; }
+
         public BusinessQueryContext Resolve(BusinessQueryContext requested) => requested;
 
         public void Remember(BusinessQueryContext context)
         {
+        }
+
+        public void Invalidate(Guid sessionId)
+        {
+            InvalidateCalls++;
         }
 
         public BusinessQueryConfirmationChallenge BeginConfirmation(BusinessQueryContext requested) =>

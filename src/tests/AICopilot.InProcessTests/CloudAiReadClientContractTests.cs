@@ -1374,6 +1374,110 @@ public sealed class CloudAiReadClientContractTests
     }
 
     [Fact]
+    public async Task ProductionScope_DeviceNameWithNoExactCandidate_ShouldRequireClarification()
+    {
+        Uri? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request.RequestUri;
+            return CreateProductionScopeResponse(
+                request.RequestUri!,
+                [new { id = DeviceId, deviceCode = "DEV-001", deviceName = "Line Alpha Extended", processId = ProcessId }]);
+        }));
+        var client = CreateClient(httpClient);
+        var plan = CreateProductionPlan(
+            """{"filters":[{"field":"deviceName","operator":"eq","value":"Line Alpha"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        var act = () => client.SealProductionScopeAsync(plan);
+
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        ParseQuery(capturedRequest!).Should().Contain("keyword", "Line Alpha");
+    }
+
+    [Fact]
+    public async Task ProductionScope_DeviceNameWithTwoExactCandidates_ShouldRequireExplicitDevice()
+    {
+        using var httpClient = new HttpClient(new StubHandler(request =>
+            CreateProductionScopeResponse(
+                request.RequestUri!,
+                [
+                    new { id = DeviceId, deviceCode = "DEV-001", deviceName = "Line Alpha", processId = ProcessId },
+                    new { id = SecondDeviceId, deviceCode = "DEV-002", deviceName = " line alpha ", processId = ProcessId }
+                ])));
+        var client = CreateClient(httpClient);
+        var plan = CreateProductionPlan(
+            """{"filters":[{"field":"deviceName","operator":"contains","value":"LINE ALPHA"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        var act = () => client.SealProductionScopeAsync(plan);
+
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        exception.Which.Message.Should().Contain("唯一");
+    }
+
+    [Fact]
+    public async Task ProductionScope_ConflictingDeviceNameCodeAndProcess_ShouldRejectAllCandidates()
+    {
+        Uri? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request.RequestUri;
+            return CreateProductionScopeResponse(
+                request.RequestUri!,
+                [new { id = DeviceId, deviceCode = "DEV-001", deviceName = "Line Alpha", processId = ProcessId }]);
+        }));
+        var client = CreateClient(httpClient);
+        var plan = CreateProductionPlan(
+            $$"""{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"},{"field":"deviceName","operator":"eq","value":"Line Beta"},{"field":"processId","operator":"eq","value":"{{ProcessId}}"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        var act = () => client.SealProductionScopeAsync(plan);
+
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        var query = ParseQuery(capturedRequest!);
+        query.Should().Contain("deviceCode", "DEV-001");
+        query.Should().Contain("keyword", "Line Beta");
+        query.Should().Contain("processId", ProcessId);
+    }
+
+    [Fact]
+    public async Task SemanticQuery_DeviceNameUniqueExactMatch_ShouldSealToDeviceIdOnly()
+    {
+        var capturedRequests = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequests.Add(request.RequestUri!);
+            return CreateProductionScopeResponse(
+                request.RequestUri!,
+                [
+                    new { id = SecondDeviceId, deviceCode = "DEV-002", deviceName = "Line Alpha Extended", processId = ProcessId },
+                    new { id = DeviceId, deviceCode = "DEV-001", deviceName = " line alpha ", processId = ProcessId }
+                ]);
+        }));
+        var client = CreateClient(httpClient);
+        var plan = CreateProductionPlan(
+            """{"filters":[{"field":"deviceName","operator":"contains","value":"LINE ALPHA"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        _ = await client.QuerySemanticAsync(plan);
+
+        capturedRequests.Select(uri => uri.AbsolutePath).Should().Equal(
+            "/api/v1/ai/read/devices",
+            "/api/v1/ai/read/device-plcs",
+            "/api/v1/ai/read/data-schemas",
+            "/api/v1/ai/read/production-records");
+        var finalQuery = ParseQuery(capturedRequests[^1]);
+        finalQuery.Should().Contain("deviceId", DeviceId);
+        finalQuery.Should().Contain("plcCode", "P2-PLC05");
+        finalQuery.Should().Contain("typeKey", "die-cutting-completion");
+        finalQuery.Should().NotContainKey("deviceName");
+        finalQuery.Should().NotContainKey("deviceCode");
+        finalQuery.Should().NotContainKey("processId");
+        finalQuery.Should().NotContainKey("processCode");
+        finalQuery.Should().NotContainKey("processName");
+    }
+
+    [Fact]
     public async Task SemanticQuery_ShouldResolveDynamicDevicePlcAndTypeKeyBeforeProductionRead()
     {
         var capturedRequests = new List<Uri>();
@@ -1821,6 +1925,76 @@ public sealed class CloudAiReadClientContractTests
             }),
             new StaticCloudDelegationAccessTokenProvider(),
             NullLogger<CloudAiReadClient>.Instance);
+    }
+
+    private static SemanticQueryPlan CreateProductionPlan(string query)
+    {
+        var definitions = new SemanticDefinitionCatalog();
+        var planner = new SemanticQueryPlanner(
+            new SemanticQuerySchemaRegistry(definitions),
+            definitions);
+        var planning = planner.Plan("Analysis.ProductionData.ByDevice", query);
+        planning.IsSuccess.Should().BeTrue(planning.ErrorMessage);
+        return planning.Plan!;
+    }
+
+    private static HttpResponseMessage CreateProductionScopeResponse(
+        Uri requestUri,
+        object[] deviceItems)
+    {
+        object[] items = requestUri.AbsolutePath switch
+        {
+            "/api/v1/ai/read/devices" => deviceItems,
+            "/api/v1/ai/read/device-plcs" =>
+            [
+                new
+                {
+                    deviceId = DeviceId,
+                    deviceName = "Line Alpha",
+                    processId = ProcessId,
+                    pluginVersion = "2.0.12",
+                    plcCode = "P2-PLC05",
+                    plcName = "P2 PLC 05",
+                    isAuthoritative = true,
+                    configurationVersion = "17",
+                    snapshotCapturedAtUtc = "2026-07-24T01:00:00Z",
+                    snapshotReceivedAtUtc = "2026-07-24T01:00:01Z",
+                    freshness = "Current",
+                    enabled = true,
+                    protocol = "S7",
+                    address = "10.0.0.5",
+                    runtimeStatus = "Online",
+                    isConnected = true,
+                    lastCommunicationAtUtc = "2026-07-24T01:00:00Z",
+                    lastError = (string?)null
+                }
+            ],
+            "/api/v1/ai/read/data-schemas" =>
+            [
+                new
+                {
+                    deviceId = DeviceId,
+                    plcCode = "P2-PLC05",
+                    pluginVersion = "2.0.12",
+                    typeKey = "die-cutting-completion",
+                    displayName = "模切完成记录",
+                    schemaName = "die-cutting-completion.v1",
+                    schemaVersion = 1,
+                    scope = "plc",
+                    queryModes = new[] { "list" },
+                    fields = Array.Empty<object>()
+                }
+            ],
+            "/api/v1/ai/read/production-records" => [],
+            _ => throw new InvalidOperationException($"Unexpected path {requestUri.AbsolutePath}")
+        };
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(CreateEnvelope(
+                items,
+                rowCount: items.Length,
+                source: requestUri.AbsolutePath.Split('/').Last()))
+        };
     }
 
     private sealed class StaticCloudDelegationAccessTokenProvider

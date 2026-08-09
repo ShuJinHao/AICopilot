@@ -73,7 +73,7 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 - 本地 emergency admin 只用于 AI 恢复，用户名和密码由独立 emergency 配置承载；不得把 Cloud 工号写入该配置，也不得让 Cloud OIDC 自动绑定该账号。用户名规范化后等于 `101650` 时，应用启动和部署预检必须以 `EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT` 失败，不自动改名、合并或删除。
 - 迁移前已存在、尚无 Cloud 绑定且仍带本地密码的 `101650` 必须视为历史 emergency admin 冲突证据；Migration Worker 在身份 advisory lock 与事务内、角色同步和 seed 写入前以 `EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT` 失败，OIDC 首次绑定与本地密码确认端点同时以 `emergency_admin_canonical_cloud_admin_conflict` 失败关闭。
 - Cloud 工号 `101650` 的自动收编使用独立 Cloud OIDC 目标配置，规范值固定为 `101650`；不得复用 emergency admin 的用户名、密码、seed 或配置键。该例外只免本地密码确认，不代表系统只能有一个 `Admin`。
-- 当前真实 Cloud Direct DB/Text-to-SQL 整体关闭；部署模板、compose 和运行配置必须保持其 mode disabled。readonly 连接、role、grant/preflight 脚本可以作为冻结资产保留，但不得注册真实 Cloud 数据源或注入其凭据。Simulation 使用的无业务语义通用连接器可保留，不因框架存在而视为真实 Cloud 路径已注册。
+- 当前真实 Cloud Direct DB/Text-to-SQL 整体关闭；`DataAnalysis:CloudReadOnly` 与 Text-to-SQL 执行开关必须保持 disabled，readonly 连接、role、grant/preflight 脚本可以作为冻结资产保留，但不得注册真实 Cloud 数据源或注入其凭据。该关闭态不得误伤当前用户委托的 typed AiRead：`CLOUD_AI_READ_ENABLED=true` 时只读状态必须是 `Real + Enabled + AllowProductionRead`，而 Direct DB/Text-to-SQL 仍为 false；typed AiRead 未配置时状态才允许整体 `Disabled`。部署预检必须拒绝两者矛盾以及任何退役静态 AiRead Token/Direct DB 凭据键。Simulation 使用的无业务语义通用连接器可保留，不因框架存在而视为真实 Cloud 路径已注册。
 
 ## 7. 镜像、SSH 和 runner
 
