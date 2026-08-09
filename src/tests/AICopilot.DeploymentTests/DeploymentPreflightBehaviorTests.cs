@@ -174,7 +174,7 @@ public sealed class DeploymentPreflightBehaviorTests
                 "http://cloud.factory.internal:81");
             await File.AppendAllTextAsync(
                 legacyCredentialEnvPath,
-                "\nCLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN=retired-static-token\n");
+                "\nCLOUD_AI_SERVICE_ACCOUNT_TOKEN=retired-static-token\n");
             var legacyCredentialResult = await RepositoryTestSupport.RunAsync(
                 "bash",
                 [scriptPath, "--validate-only"],
