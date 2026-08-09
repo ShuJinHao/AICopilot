@@ -59,7 +59,7 @@ internal static class HttpApiOptionsConfiguration
         var cloudAiReadOptions = builder.Configuration
             .GetSection(CloudAiReadOptions.SectionName)
             .Get<CloudAiReadOptions>() ?? new CloudAiReadOptions();
-        cloudAiReadOptions.EnsureValid();
+        cloudAiReadOptions.EnsureValid(requireDelegationProbe: cloudOidcOptions.IsConfigured());
 
         var cloudReadonlyOptions = builder.Configuration
             .GetSection(CloudReadonlyOptions.SectionName)

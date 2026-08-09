@@ -167,6 +167,35 @@ public sealed class CloudOidcDelegationProofTests
     }
 
     [Fact]
+    public async Task ContractValidator_ShouldProbeForOidcLoginWhenTypedAiReadQueriesAreDisabled()
+    {
+        Uri? capturedUri = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedUri = request.RequestUri;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new { })
+            };
+        }));
+        var validator = new CloudDelegationTokenContractValidator(
+            httpClient,
+            Options.Create(new CloudAiReadOptions
+            {
+                Enabled = false,
+                BaseUrl = "https://ai-read.example.com"
+            }));
+
+        var proof = await validator.ValidateAsync(
+            "opaque-delegated-token",
+            CancellationToken.None);
+
+        proof.Should().Be(ValidContractProof());
+        capturedUri.Should().Be(
+            "https://ai-read.example.com/api/v1/ai/read/processes?maxRows=1");
+    }
+
+    [Fact]
     public void Proof_ShouldRejectUnvalidatedAudienceOrActor()
     {
         var properties = new AuthenticationProperties();

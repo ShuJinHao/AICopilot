@@ -64,7 +64,12 @@ public sealed class CloudAiReadOptions
 
     public void EnsureValid()
     {
-        if (!Enabled)
+        EnsureValid(requireDelegationProbe: false);
+    }
+
+    public void EnsureValid(bool requireDelegationProbe)
+    {
+        if (!Enabled && !requireDelegationProbe)
         {
             return;
         }
@@ -72,7 +77,8 @@ public sealed class CloudAiReadOptions
         if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var baseUri) ||
             (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps))
         {
-            throw new InvalidOperationException("CloudAiRead:BaseUrl must be an absolute HTTP/HTTPS URL when enabled.");
+            throw new InvalidOperationException(
+                "CloudAiRead:BaseUrl must be an absolute HTTP/HTTPS URL when typed AiRead or Cloud OIDC delegation validation is enabled.");
         }
 
         if (TimeoutSeconds is < 1 or > 30)

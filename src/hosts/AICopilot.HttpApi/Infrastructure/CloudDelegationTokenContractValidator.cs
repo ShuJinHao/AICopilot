@@ -32,8 +32,7 @@ internal sealed class CloudDelegationTokenContractValidator(
         CancellationToken cancellationToken = default)
     {
         var options = cloudAiReadOptions.Value;
-        if (!options.Enabled ||
-            !Uri.TryCreate(options.BaseUrl?.TrimEnd('/'), UriKind.Absolute, out var aiReadBaseUri) ||
+        if (!Uri.TryCreate(options.BaseUrl?.TrimEnd('/'), UriKind.Absolute, out var aiReadBaseUri) ||
             aiReadBaseUri.Scheme is not ("http" or "https") ||
             string.IsNullOrWhiteSpace(accessToken))
         {
