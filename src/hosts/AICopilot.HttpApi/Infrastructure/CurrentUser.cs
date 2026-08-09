@@ -14,6 +14,7 @@ public class CurrentUser : ICurrentUser
     public string? CloudDepartmentId { get; }
     public string? CloudDepartmentName { get; }
     public string? CloudStatusVersion { get; }
+    public string? CloudDelegationId { get; }
     public bool IsAuthenticated { get; }
 
     public CurrentUser(IHttpContextAccessor httpContextAccessor)
@@ -38,6 +39,7 @@ public class CurrentUser : ICurrentUser
         CloudDepartmentId = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudDepartmentId);
         CloudDepartmentName = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudDepartmentName);
         CloudStatusVersion = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudStatusVersion);
+        CloudDelegationId = user.FindFirstValue(ExternalIdentityJwtClaimTypes.CloudDelegationId);
 
         IsAuthenticated = true;
     }

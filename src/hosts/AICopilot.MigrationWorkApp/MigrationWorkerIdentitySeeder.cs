@@ -10,6 +10,7 @@ internal static class MigrationWorkerIdentitySeeder
     public static async Task SeedAsync(
         RoleManager<IdentityRole<Guid>> roleManager,
         UserManager<ApplicationUser> userManager,
+        IExternalIdentityBindingStore externalIdentityBindingStore,
         IPermissionCatalog permissionCatalog,
         IIdentityAccessService identityAccessService,
         EnabledAdminInvariantPolicy enabledAdminInvariant,
@@ -17,9 +18,29 @@ internal static class MigrationWorkerIdentitySeeder
         IConfiguration configuration,
         CancellationToken cancellationToken)
     {
+        var bootstrapAdmin = configuration
+            .GetSection(BootstrapAdminOptions.SectionName)
+            .Get<BootstrapAdminOptions>();
+        bootstrapAdmin?.EnsureSeparatedFromCanonicalCloudAdmin();
+
         await transactionalExecutionService.ExecuteAsync(async ct =>
         {
             await enabledAdminInvariant.AcquireAsync(ct);
+
+            var legacyCanonicalUser = await userManager.FindByNameAsync(
+                CloudOidcCanonicalAdminOptions.RequiredEmployeeNo);
+            if (legacyCanonicalUser is not null &&
+                await userManager.HasPasswordAsync(legacyCanonicalUser) &&
+                await externalIdentityBindingStore.FindByUserProviderAsync(
+                    legacyCanonicalUser.Id,
+                    ExternalIdentityProviders.Cloud,
+                    ct) is null)
+            {
+                throw new InvalidOperationException(
+                    $"{CloudOidcCanonicalAdminOptions.EmergencyAdminConflictReasonCode}: " +
+                    "Identity initialization found an unbound password-bearing local 101650 account. " +
+                    "It may belong to the legacy emergency-admin recovery chain and must be resolved explicitly.");
+            }
 
             foreach (var role in new[] { "Admin", "User" })
             {
@@ -40,10 +61,6 @@ internal static class MigrationWorkerIdentitySeeder
                 "User",
                 permissionCatalog.GetDefaultPermissions("User"),
                 ct);
-
-            var bootstrapAdmin = configuration
-                .GetSection(BootstrapAdminOptions.SectionName)
-                .Get<BootstrapAdminOptions>();
 
             if (bootstrapAdmin is not null &&
                 !string.IsNullOrWhiteSpace(bootstrapAdmin.UserName) &&

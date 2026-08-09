@@ -29,6 +29,11 @@ public sealed class SecurityDeploymentTests
             "appsettings.json"));
         var envTemplate = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", ".env.example"));
         var compose = File.ReadAllText(Path.Combine(solutionRoot, "deploy", "enterprise-ai", "docker-compose.yaml"));
+        var deployRelease = File.ReadAllText(Path.Combine(
+            solutionRoot,
+            "deploy",
+            "enterprise-ai",
+            "deploy-release.sh"));
 
         httpDevelopmentSettings.Should().NotContain("29ynIx63y0Uq5Yj6wZZYikBElPPW4rqpXKGq4voqmeMDefoJQEC8fQQzYPk95rNp");
         appHostSettings.Should().NotContain("\"pg-password\": \"123456\"");
@@ -54,8 +59,23 @@ public sealed class SecurityDeploymentTests
         compose.Should().Contain("AICopilotSecurity__ApiKeyEncryptionKey: ${AICOPILOT_API_KEY_ENCRYPTION_KEY}");
         compose.Should().Contain("AICopilot__PrivateModel__BaseUrl: ${AICOPILOT_PRIVATE_MODEL_BASE_URL:-http://model.internal.example:40034/v1}");
         compose.Should().Contain("AICopilot__PrivateModel__ContextWindowTokens: ${AICOPILOT_PRIVATE_MODEL_CONTEXT_TOKENS:-65536}");
-        compose.Should().Contain("CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-false}");
-        compose.Should().Contain("CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}");
+        compose.Should().Contain("CloudOidc__CanonicalAdminEmployeeNo: \"101650\"");
+        compose.Should().NotContain("CloudOidc__BootstrapAdminAutoBindEnabled");
+        compose.Should().NotContain("CloudOidc__BootstrapAdminUserName");
+        compose.Should().Contain("CloudIdentityStatus__SigningSecret: ${AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET:?identity-status signing secret is required}");
+        compose.Should().NotContain("CloudIdentityStatus__ServiceAccountToken");
+        envTemplate.Should().Contain("AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET=");
+        envTemplate.Should().Contain("CLOUD_IDENTITY_STATUS_ENABLED=true");
+        envTemplate.Should().NotContain("CLOUD_IDENTITY_STATUS_SIGNING_SECRET");
+        envTemplate.Should().NotContain("CLOUD_IDENTITY_STATUS_SERVICE_TOKEN");
+        deployRelease.Should().Contain("EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT");
+        deployRelease.Should().Contain("AICOPILOT_BOOTSTRAP_ADMIN_USERNAME");
+        compose.Should().NotContain("CloudAiRead__ServiceAccountToken");
+        compose.Should().Contain("DataAnalysis__CloudReadOnly__Enabled: \"false\"");
+        compose.Should().Contain("DataAnalysis__CloudReadOnlyTextToSql__Enabled: \"false\"");
+        envTemplate.Should().NotContain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED");
+        envTemplate.Should().NotContain("CLOUD_READONLY_CONNECTION_STRING");
+        envTemplate.Should().NotContain("DATA_ANALYSIS_CLOUD_READONLY_PASSWORD");
         compose.Should().Contain("FileStorage__RootPath: /var/lib/aicopilot/storage");
         compose.Should().NotContain("ArtifactWorkspace__RootPath");
         compose.Should().NotContain("FinalAgentContextStore");
@@ -346,7 +366,7 @@ public sealed class SecurityDeploymentTests
         foreach (var expectedDiagnosticCommand in new[]
                  {
                      "dotnet test src/tests/AICopilot.Architecture.AnalyzerTests/AICopilot.Architecture.AnalyzerTests.csproj --filter \"AIARCH006|AIARCH007_ShouldRequireControllerMetadataAndCloudReadOnlySafetyMetadata\" --no-restore",
-                     "dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --filter \"CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables\" --no-restore",
+                     "dotnet test src/tests/AICopilot.DeploymentTests/AICopilot.DeploymentTests.csproj --filter \"ClosedCloudDirectDbDeployment_ShouldFailBeforeCredentialsOrNetwork\" --no-restore",
                      "dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj --filter \"SqlGuardrailTests|SemanticSqlGenerationTests|CloudAiReadClientContractTests\" --no-restore",
                      "dotnet test src/tests/AICopilot.ContractTests/AICopilot.ContractTests.csproj --filter \"CloudReadonlyChatBoundaryTests\" --no-restore"
                  })
@@ -377,9 +397,10 @@ public sealed class SecurityDeploymentTests
         architectureRoadmap.Should().NotContain("AgentSafetyApplicationTests");
         architectureRoadmap.Should().NotContain("CloudAiReadClientTests");
         architectureRoadmap.Should().NotContain("AiEvalBehaviorGuardrailTests");
-        agentInstructions.Should().Contain(
+        agentInstructions.Should().Contain("工作区 `../docs/总规则.md` 是唯一默认必读入口");
+        agentInstructions.Should().NotContain(
             "必须用同一项目和 filter 的 `--list-tests` 证明至少命中 1 项");
-        agentInstructions.Should().Contain(
+        agentInstructions.Should().NotContain(
             "0-hit 即使命令退出 0 也不是有效诊断证据");
         File.Exists(Path.Combine(solutionRoot, "docs", "企业AI首次部署记录-2026-06-08.md")).Should().BeFalse();
         File.Exists(Path.Combine(solutionRoot, "docs", "A助理部署配置说明.md")).Should().BeFalse();
@@ -419,9 +440,9 @@ public sealed class SecurityDeploymentTests
         envTemplate.Should().Contain("sha-replace-with-release-tag");
         envTemplate.Should().Contain("AICOPILOT_BOOTSTRAP_ADMIN_USERNAME=bootstrap-admin");
         envTemplate.Should().NotContain("AICOPILOT_BOOTSTRAP_ADMIN_USERNAME=101650");
-        envTemplate.Should().Contain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED=false");
-        deployReadme.Should().Contain("生产模板和 compose fallback 均默认关闭");
-        deployReadme.Should().Contain("生产模板和 compose fallback 均默认关闭");
+        envTemplate.Should().NotContain("CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED");
+        deployReadme.Should().Contain("显式保持 Direct DB/Text-to-SQL 关闭");
+        deployReadme.Should().Contain("关闭态运行时和从零部署不得执行 readonly grant/probe");
         envTemplate.Should().Contain("AICOPILOT_MODEL_SMOKE_ALLOW_DUMMY_KEY=false");
         envTemplate.Should().NotContain("10.98.");
         envTemplate.Should().NotContain("CHANGE_ME");

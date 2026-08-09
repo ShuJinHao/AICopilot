@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace AICopilot.Services.Contracts;
 
 public sealed class CloudIdentityStatusOptions
@@ -10,7 +12,7 @@ public sealed class CloudIdentityStatusOptions
 
     public string StatusEndpointPath { get; init; } = "/api/v1/ai/identity/users/{cloudUserId}/status";
 
-    public string ServiceAccountToken { get; init; } = string.Empty;
+    public string SigningSecret { get; init; } = string.Empty;
 
     public int RefreshIntervalSeconds { get; init; } = 60;
 
@@ -65,7 +67,7 @@ public sealed class CloudIdentityStatusOptions
             throw new InvalidOperationException("CloudIdentityStatus:StatusEndpointPath must contain '{cloudUserId}'.");
         }
 
-        var statusPathDecision = CloudAiReadEndpointPolicy.Evaluate(
+        var statusPathDecision = CloudIdentityStatusEndpointPolicy.Evaluate(
             System.Net.Http.HttpMethod.Get,
             StatusEndpointPath.Replace("{cloudUserId}", "status-check", StringComparison.Ordinal));
         if (!statusPathDecision.IsAllowed)
@@ -74,9 +76,11 @@ public sealed class CloudIdentityStatusOptions
                 $"CloudIdentityStatus:StatusEndpointPath must stay under /api/v1/ai/identity/*: {statusPathDecision.Reason}");
         }
 
-        if (string.IsNullOrWhiteSpace(ServiceAccountToken))
+        if (string.IsNullOrWhiteSpace(SigningSecret) ||
+            Encoding.UTF8.GetByteCount(SigningSecret) < 32)
         {
-            throw new InvalidOperationException("CloudIdentityStatus:ServiceAccountToken is required when enabled.");
+            throw new InvalidOperationException(
+                "CloudIdentityStatus:SigningSecret must contain at least 32 UTF-8 bytes when enabled.");
         }
 
         if (RefreshIntervalSeconds is < 5 or > 3600)
@@ -93,6 +97,72 @@ public sealed class CloudIdentityStatusOptions
         {
             throw new InvalidOperationException("CloudIdentityStatus:FailureMode currently only supports RejectWhenUnverified.");
         }
+    }
+}
+
+public static class CloudIdentityStatusTokenDefaults
+{
+    public const string Issuer = "iiot-cloud-system";
+    public const string Audience = "iiot-cloud-identity-status";
+    public const string Actor = "ai-identity-status-system";
+    public const string ActorClaimType = "actor_type";
+    public const string Subject = "aicopilot-identity-status";
+    public const int LifetimeMinutes = 5;
+    public const int RenewBeforeSeconds = 60;
+}
+
+public interface ICloudIdentityStatusTokenProvider
+{
+    ValueTask<string> GetTokenAsync(CancellationToken cancellationToken = default);
+
+    void Invalidate();
+}
+
+public static class CloudIdentityStatusEndpointPolicy
+{
+    private const string Prefix = "/api/v1/ai/identity/users/";
+    private const string Suffix = "/status";
+
+    public static CloudAiReadRequestDecision Evaluate(HttpMethod method, string path)
+    {
+        if (method != HttpMethod.Get)
+        {
+            return CloudAiReadRequestDecision.Block(
+                "Cloud identity status only allows its fixed GET endpoint.");
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return CloudAiReadRequestDecision.Block(
+                "Cloud identity status path is required.");
+        }
+
+        var candidate = path.Trim();
+        if (!candidate.StartsWith("/", StringComparison.Ordinal) ||
+            candidate.Contains('?') ||
+            candidate.Contains('#') ||
+            candidate.Contains("//", StringComparison.Ordinal) ||
+            candidate.Contains("..", StringComparison.Ordinal) ||
+            !candidate.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase) ||
+            !candidate.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return CloudAiReadRequestDecision.Block(
+                "Cloud identity status path is outside its fixed endpoint.");
+        }
+
+        var segmentLength = candidate.Length - Prefix.Length - Suffix.Length;
+        if (segmentLength <= 0)
+        {
+            return CloudAiReadRequestDecision.Block(
+                "Cloud identity status requires one Cloud user identifier.");
+        }
+
+        var cloudUserId = candidate.Substring(Prefix.Length, segmentLength);
+        return !cloudUserId.Contains('/') &&
+               CloudAiReadEndpointPolicy.IsSafeRouteSegment(cloudUserId)
+            ? CloudAiReadRequestDecision.Allow
+            : CloudAiReadRequestDecision.Block(
+                "Cloud identity status requires one safe Cloud user identifier.");
     }
 }
 

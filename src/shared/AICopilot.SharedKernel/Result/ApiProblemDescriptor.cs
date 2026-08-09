@@ -14,6 +14,8 @@ public static class AuthProblemCodes
     public const string CloudIdentityUnverified = "cloud_identity_unverified";
     public const string ExternalIdentityConfirmationRequired = "external_identity_confirmation_required";
     public const string ExternalIdentityConflict = "external_identity_conflict";
+    public const string EmergencyAdminCanonicalCloudAdminConflict =
+        "emergency_admin_canonical_cloud_admin_conflict";
     public const string LastEnabledAdminRequired = "last_enabled_admin_required";
 }
 

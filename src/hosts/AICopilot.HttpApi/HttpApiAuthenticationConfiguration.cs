@@ -69,7 +69,7 @@ internal static class HttpApiAuthenticationConfiguration
                     options.CallbackPath = cloudOidcOptions.CallbackPath;
                     options.SignInScheme = CloudOidcAuthenticationDefaults.ExternalCookieScheme;
                     options.RequireHttpsMetadata = cloudOidcOptions.GetEffectiveRequireHttpsMetadata();
-                    options.SaveTokens = false;
+                    options.SaveTokens = true;
                     options.GetClaimsFromUserInfoEndpoint = true;
                     options.MapInboundClaims = false;
                     options.CorrelationCookie.SecurePolicy = remoteCookieSecurePolicy;
@@ -106,6 +106,43 @@ internal static class HttpApiAuthenticationConfiguration
                     options.ClaimActions.MapUniqueJsonKey("department_name", "department_name");
                     options.ClaimActions.MapUniqueJsonKey("tenant_id", "tenant_id");
                     options.ClaimActions.MapUniqueJsonKey("status_version", "status_version");
+
+                    options.Events.OnTokenResponseReceived = context =>
+                    {
+                        if (context.Properties is null)
+                        {
+                            context.Fail("Cloud OIDC token response did not retain authentication properties.");
+                            return Task.CompletedTask;
+                        }
+
+                        CloudOidcDelegationProof.CaptureGrantedScopes(
+                            context.Properties,
+                            context.TokenEndpointResponse?.Scope,
+                            cloudOidcOptions.Scopes
+                                .Where(scope => !string.IsNullOrWhiteSpace(scope))
+                                .Select(scope => scope.Trim())
+                                .ToArray());
+                        return Task.CompletedTask;
+                    };
+
+                    options.Events.OnUserInformationReceived = context =>
+                    {
+                        if (context.Properties is null)
+                        {
+                            context.Fail("Cloud OIDC userinfo did not retain authentication properties.");
+                            return Task.CompletedTask;
+                        }
+
+                        if (!CloudOidcDelegationProof.TryCaptureUserInfo(
+                                context.User,
+                                context.Properties,
+                                out var error))
+                        {
+                            context.Fail(error);
+                        }
+
+                        return Task.CompletedTask;
+                    };
 
                     options.Events.OnRemoteFailure = context =>
                     {

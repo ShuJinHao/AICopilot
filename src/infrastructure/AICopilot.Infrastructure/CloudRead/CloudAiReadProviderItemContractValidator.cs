@@ -14,6 +14,15 @@ internal static class CloudAiReadProviderItemContractValidator
         RequiredNullable("precision", ProviderItemValueKind.Integer),
         Required("required", ProviderItemValueKind.Boolean));
 
+    private static readonly ProviderItemContract DataSchemaFieldContract = new(
+        Required("key", ProviderItemValueKind.String),
+        Required("label", ProviderItemValueKind.String),
+        Required("type", ProviderItemValueKind.String),
+        RequiredNullable("unit", ProviderItemValueKind.String),
+        RequiredNullable("precision", ProviderItemValueKind.Integer),
+        Required("required", ProviderItemValueKind.Boolean),
+        Required("isPublic", ProviderItemValueKind.Boolean));
+
     private static readonly IReadOnlyDictionary<CloudAiReadOperation, ProviderItemContract> Contracts =
         new Dictionary<CloudAiReadOperation, ProviderItemContract>
         {
@@ -96,7 +105,37 @@ internal static class CloudAiReadProviderItemContractValidator
                 Required(
                     "fieldSchema",
                     ProviderItemValueKind.ObjectArray,
-                    ProductionFieldSchemaContract))
+                    ProductionFieldSchemaContract)),
+            [CloudAiReadOperation.DevicePlc] = new(
+                Required("deviceId", ProviderItemValueKind.Guid),
+                Required("deviceName", ProviderItemValueKind.String),
+                Required("processId", ProviderItemValueKind.Guid),
+                RequiredNullable("pluginVersion", ProviderItemValueKind.String),
+                Required("plcCode", ProviderItemValueKind.String),
+                Required("plcName", ProviderItemValueKind.String),
+                Required("isAuthoritative", ProviderItemValueKind.Boolean),
+                RequiredNullable("configurationVersion", ProviderItemValueKind.String),
+                RequiredNullable("snapshotCapturedAtUtc", ProviderItemValueKind.DateTime),
+                RequiredNullable("snapshotReceivedAtUtc", ProviderItemValueKind.DateTime),
+                Required("freshness", ProviderItemValueKind.String),
+                RequiredNullable("enabled", ProviderItemValueKind.Boolean),
+                RequiredNullable("protocol", ProviderItemValueKind.String),
+                RequiredNullable("address", ProviderItemValueKind.String),
+                RequiredNullable("runtimeStatus", ProviderItemValueKind.String),
+                RequiredNullable("isConnected", ProviderItemValueKind.Boolean),
+                RequiredNullable("lastCommunicationAtUtc", ProviderItemValueKind.DateTime),
+                RequiredNullable("lastError", ProviderItemValueKind.String)),
+            [CloudAiReadOperation.DataSchema] = new(
+                Required("deviceId", ProviderItemValueKind.Guid),
+                RequiredNullable("plcCode", ProviderItemValueKind.String),
+                Required("pluginVersion", ProviderItemValueKind.String),
+                Required("typeKey", ProviderItemValueKind.String),
+                Required("displayName", ProviderItemValueKind.String),
+                Required("schemaName", ProviderItemValueKind.String),
+                Required("schemaVersion", ProviderItemValueKind.Integer),
+                Required("scope", ProviderItemValueKind.String),
+                Required("queryModes", ProviderItemValueKind.StringArray),
+                Required("fields", ProviderItemValueKind.ObjectArray, DataSchemaFieldContract))
         };
 
     public static void Validate(CloudAiReadOperation operation, IReadOnlyList<JsonElement> records)
@@ -118,6 +157,59 @@ internal static class CloudAiReadProviderItemContractValidator
             {
                 ValidateProductionRecord(record);
             }
+            if (operation == CloudAiReadOperation.DevicePlc)
+            {
+                ValidateDevicePlc(record);
+            }
+            if (operation == CloudAiReadOperation.DataSchema)
+            {
+                ValidateDataSchema(record);
+            }
+        }
+    }
+
+    private static void ValidateDevicePlc(JsonElement record)
+    {
+        var freshness = record.GetProperty("freshness").GetString();
+        if (string.IsNullOrWhiteSpace(record.GetProperty("deviceName").GetString()) ||
+            string.IsNullOrWhiteSpace(record.GetProperty("plcCode").GetString()) ||
+            string.IsNullOrWhiteSpace(record.GetProperty("plcName").GetString()) ||
+            freshness is not ("Current" or "Stale" or "Unavailable"))
+        {
+            throw CloudAiReadJsonValueReader.InvalidProviderContract();
+        }
+    }
+
+    private static void ValidateDataSchema(JsonElement record)
+    {
+        if (string.IsNullOrWhiteSpace(record.GetProperty("pluginVersion").GetString()) ||
+            string.IsNullOrWhiteSpace(record.GetProperty("typeKey").GetString()) ||
+            string.IsNullOrWhiteSpace(record.GetProperty("displayName").GetString()) ||
+            string.IsNullOrWhiteSpace(record.GetProperty("schemaName").GetString()) ||
+            string.IsNullOrWhiteSpace(record.GetProperty("scope").GetString()) ||
+            record.GetProperty("schemaVersion").GetInt32() < 1)
+        {
+            throw CloudAiReadJsonValueReader.InvalidProviderContract();
+        }
+
+        var queryModes = record.GetProperty("queryModes")
+            .EnumerateArray()
+            .Select(item => item.GetString())
+            .ToArray();
+        if (queryModes.Any(string.IsNullOrWhiteSpace) ||
+            queryModes.Distinct(StringComparer.OrdinalIgnoreCase).Count() != queryModes.Length)
+        {
+            throw CloudAiReadJsonValueReader.InvalidProviderContract();
+        }
+
+        var fieldKeys = record.GetProperty("fields")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("key").GetString()!)
+            .ToArray();
+        if (fieldKeys.Any(string.IsNullOrWhiteSpace) ||
+            fieldKeys.Distinct(StringComparer.OrdinalIgnoreCase).Count() != fieldKeys.Length)
+        {
+            throw CloudAiReadJsonValueReader.InvalidProviderContract();
         }
     }
 
@@ -276,6 +368,7 @@ internal static class CloudAiReadProviderItemContractValidator
                 value.ValueKind is JsonValueKind.True or JsonValueKind.False,
             ProviderItemValueKind.ScalarObject => IsScalarObject(value),
             ProviderItemValueKind.ObjectArray => ValidateObjectArray(value, field.NestedContract),
+            ProviderItemValueKind.StringArray => IsStringArray(value),
             _ => false
         };
 
@@ -326,6 +419,12 @@ internal static class CloudAiReadProviderItemContractValidator
         return true;
     }
 
+    private static bool IsStringArray(JsonElement value)
+    {
+        return value.ValueKind == JsonValueKind.Array &&
+               value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String);
+    }
+
     private static ProviderItemField Required(
         string name,
         ProviderItemValueKind valueKind,
@@ -369,6 +468,7 @@ internal static class CloudAiReadProviderItemContractValidator
         Number,
         Boolean,
         ScalarObject,
-        ObjectArray
+        ObjectArray,
+        StringArray
     }
 }

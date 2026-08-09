@@ -126,6 +126,24 @@ internal static class CloudAiReadJsonValueReader
         return record.GetProperty(name).GetBoolean();
     }
 
+    public static bool? GetBoolean(JsonElement record, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!record.TryGetProperty(name, out var property))
+            {
+                continue;
+            }
+
+            if (property.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                return property.GetBoolean();
+            }
+        }
+
+        return null;
+    }
+
     public static decimal? GetDecimal(JsonElement record, params string[] names)
     {
         foreach (var name in names)
@@ -237,6 +255,14 @@ internal static class CloudAiReadJsonValueReader
         }
 
         return [];
+    }
+
+    public static IReadOnlyList<string> GetStringArray(JsonElement record, string name)
+    {
+        return record.GetProperty(name)
+            .EnumerateArray()
+            .Select(item => item.GetString()!)
+            .ToArray();
     }
 
     internal static CloudAiReadException InvalidProviderContract()

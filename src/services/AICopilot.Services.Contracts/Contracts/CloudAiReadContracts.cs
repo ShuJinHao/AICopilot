@@ -17,6 +17,7 @@ public static class CloudAiReadProblemCodes
     public const string RateLimited = "cloud_ai_read_rate_limited";
     public const string Unavailable = "cloud_ai_read_unavailable";
     public const string MissingRequiredParameter = "cloud_ai_read_missing_required_parameter";
+    public const string DelegationRequired = "cloud_delegation_required";
 }
 
 public static class CloudAiReadRowLimitPolicy
@@ -57,15 +58,18 @@ public sealed class CloudAiReadOptions
 
     public string BaseUrl { get; init; } = string.Empty;
 
-    public string ServiceAccountToken { get; init; } = string.Empty;
-
     public int TimeoutSeconds { get; init; } = 10;
 
     public bool IsConfigured() => Enabled;
 
     public void EnsureValid()
     {
-        if (!Enabled)
+        EnsureValid(requireDelegationProbe: false);
+    }
+
+    public void EnsureValid(bool requireDelegationProbe)
+    {
+        if (!Enabled && !requireDelegationProbe)
         {
             return;
         }
@@ -73,12 +77,8 @@ public sealed class CloudAiReadOptions
         if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var baseUri) ||
             (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps))
         {
-            throw new InvalidOperationException("CloudAiRead:BaseUrl must be an absolute HTTP/HTTPS URL when enabled.");
-        }
-
-        if (string.IsNullOrWhiteSpace(ServiceAccountToken))
-        {
-            throw new InvalidOperationException("CloudAiRead:ServiceAccountToken is required when enabled.");
+            throw new InvalidOperationException(
+                "CloudAiRead:BaseUrl must be an absolute HTTP/HTTPS URL when typed AiRead or Cloud OIDC delegation validation is enabled.");
         }
 
         if (TimeoutSeconds is < 1 or > 30)
@@ -107,7 +107,9 @@ public static class CloudAiReadEndpointPolicy
         "/api/v1/ai/read/capacity/summary",
         "/api/v1/ai/read/capacity/hourly",
         "/api/v1/ai/read/production-records",
-        "/api/v1/ai/read/device-logs"
+        "/api/v1/ai/read/device-logs",
+        "/api/v1/ai/read/device-plcs",
+        "/api/v1/ai/read/data-schemas"
     ];
 
     public static CloudAiReadRequestDecision Evaluate(
@@ -141,8 +143,7 @@ public static class CloudAiReadEndpointPolicy
 
     private static bool IsAllowedGetPath(string normalizedPath)
     {
-        return AllowedGetPaths.Contains(normalizedPath, StringComparer.OrdinalIgnoreCase) ||
-               normalizedPath.StartsWith("/api/v1/ai/identity/", StringComparison.OrdinalIgnoreCase);
+        return AllowedGetPaths.Contains(normalizedPath, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool TryNormalizePath(
@@ -207,7 +208,9 @@ public enum CloudAiReadOperation
     CapacitySummary = 5,
     CapacityHourly = 6,
     DeviceLog = 7,
-    ProductionRecord = 8
+    ProductionRecord = 8,
+    DevicePlc = 9,
+    DataSchema = 10
 }
 
 public enum CloudAiReadFilterValueKind
@@ -219,7 +222,8 @@ public enum CloudAiReadFilterValueKind
     Date = 5,
     Preset = 6,
     HourlyPreset = 7,
-    FieldMode = 8
+    FieldMode = 8,
+    Keyword = 9
 }
 
 public sealed record CloudAiReadFilterRule(
@@ -252,6 +256,10 @@ public static class CloudAiReadSemanticSchemaRegistry
 
     private static readonly Regex TokenPattern = new(
         "^[\\p{L}\\p{N}][\\p{L}\\p{N}._:/-]{0,79}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex KeywordPattern = new(
+        "^[\\p{L}\\p{N}][\\p{L}\\p{N} ._:/-]{0,79}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly IReadOnlyDictionary<string, string> CanonicalLogLevels =
@@ -309,14 +317,17 @@ public static class CloudAiReadSemanticSchemaRegistry
                 KeywordRule("message")),
             SchemaWithTimeRange(CloudAiReadOperation.ProductionRecord, "/api/v1/ai/read/production-records",
                 Rule("typeKey"),
-                Rule("processId", CloudAiReadFilterValueKind.Guid),
                 Rule("deviceId", CloudAiReadFilterValueKind.Guid),
                 Rule("plcCode"),
-                Rule("plcName"),
                 Rule("preset", CloudAiReadFilterValueKind.Preset),
                 Rule("barcode"),
                 Rule("result"),
-                Rule("fieldMode", CloudAiReadFilterValueKind.FieldMode))
+                Rule("fieldMode", CloudAiReadFilterValueKind.FieldMode)),
+            Schema(CloudAiReadOperation.DevicePlc, "/api/v1/ai/read/device-plcs",
+                Rule("deviceId", CloudAiReadFilterValueKind.Guid)),
+            Schema(CloudAiReadOperation.DataSchema, "/api/v1/ai/read/data-schemas",
+                Rule("deviceId", CloudAiReadFilterValueKind.Guid),
+                Rule("plcCode"))
         }.ToDictionary(schema => schema.Operation);
 
     private static readonly IReadOnlyDictionary<string, CloudAiReadIntentSchema> IntentSchemas =
@@ -330,9 +341,9 @@ public static class CloudAiReadSemanticSchemaRegistry
             Intent("Analysis.DeviceLog.ByLevel", CloudAiReadOperation.DeviceLog, requiredAll: ["level"], requiredAny: ["deviceId"], requiredTimeAlternatives: ["preset"], allowsTimeRange: true),
             Intent("Analysis.Capacity.Range", CloudAiReadOperation.CapacitySummary, requiredAny: ["deviceId"], allowsTimeRange: true, requiresTimeRange: true),
             Intent("Analysis.Capacity.ByDevice", CloudAiReadOperation.CapacitySummary, requiredAny: ["deviceId"], requiredTimeAlternatives: ["shiftDate"], allowsTimeRange: true),
-            Intent("Analysis.ProductionData.Latest", CloudAiReadOperation.ProductionRecord, requiredAny: ["typeKey", "processId", "deviceId"], allowsTimeRange: true),
-            Intent("Analysis.ProductionData.Range", CloudAiReadOperation.ProductionRecord, requiredAny: ["typeKey", "processId", "deviceId"], allowsTimeRange: true, requiresTimeRange: true),
-            Intent("Analysis.ProductionData.ByDevice", CloudAiReadOperation.ProductionRecord, requiredAny: ["typeKey", "processId", "deviceId"], requiredTimeAlternatives: ["preset"], allowsTimeRange: true),
+            Intent("Analysis.ProductionData.Latest", CloudAiReadOperation.ProductionRecord, requiredAll: ["deviceId", "plcCode", "typeKey"], allowsTimeRange: true),
+            Intent("Analysis.ProductionData.Range", CloudAiReadOperation.ProductionRecord, requiredAll: ["deviceId", "plcCode", "typeKey"], allowsTimeRange: true, requiresTimeRange: true),
+            Intent("Analysis.ProductionData.ByDevice", CloudAiReadOperation.ProductionRecord, requiredAll: ["deviceId", "plcCode", "typeKey"], requiredTimeAlternatives: ["preset"], allowsTimeRange: true),
             Intent("Analysis.Process.List", CloudAiReadOperation.Process),
             Intent("Analysis.Process.Detail", CloudAiReadOperation.Process, requiredAny: ["processId", "processCode", "processName"]),
             Intent("Analysis.ClientRelease.List", CloudAiReadOperation.ClientRelease)
@@ -505,6 +516,8 @@ public static class CloudAiReadSemanticSchemaRegistry
             case CloudAiReadFilterValueKind.FieldMode:
                 normalized = normalized.ToLowerInvariant();
                 return normalized is "list" or "full";
+            case CloudAiReadFilterValueKind.Keyword:
+                return KeywordPattern.IsMatch(normalized);
             default:
                 return TokenPattern.IsMatch(normalized);
         }
@@ -531,7 +544,7 @@ public static class CloudAiReadSemanticSchemaRegistry
     {
         return new CloudAiReadFilterRule(
             field,
-            CloudAiReadFilterValueKind.Token,
+            CloudAiReadFilterValueKind.Keyword,
             ["contains", "eq"]);
     }
 
@@ -738,6 +751,50 @@ public sealed record CloudAiReadProductionRecordDto(
     DateTime? ReceivedAt,
     IReadOnlyDictionary<string, object?> Fields,
     IReadOnlyList<CloudAiReadProductionFieldSchemaDto> FieldSchema,
+    IReadOnlyDictionary<string, object?> AdditionalFields);
+
+public sealed record CloudAiReadDevicePlcDto(
+    Guid DeviceId,
+    string DeviceName,
+    Guid ProcessId,
+    string? PluginVersion,
+    string PlcCode,
+    string PlcName,
+    bool IsAuthoritative,
+    string? ConfigurationVersion,
+    DateTime? SnapshotCapturedAtUtc,
+    DateTime? SnapshotReceivedAtUtc,
+    string Freshness,
+    bool? Enabled,
+    string? Protocol,
+    string? Address,
+    string? RuntimeStatus,
+    bool? IsConnected,
+    DateTime? LastCommunicationAtUtc,
+    string? LastError,
+    IReadOnlyDictionary<string, object?> AdditionalFields);
+
+public sealed record CloudAiReadDataSchemaFieldDto(
+    string Key,
+    string Label,
+    string Type,
+    string? Unit,
+    int? Precision,
+    bool Required,
+    bool IsPublic,
+    IReadOnlyDictionary<string, object?> AdditionalFields);
+
+public sealed record CloudAiReadDataSchemaDto(
+    Guid DeviceId,
+    string? PlcCode,
+    string PluginVersion,
+    string TypeKey,
+    string DisplayName,
+    string SchemaName,
+    int SchemaVersion,
+    string Scope,
+    IReadOnlyList<string> QueryModes,
+    IReadOnlyList<CloudAiReadDataSchemaFieldDto> Fields,
     IReadOnlyDictionary<string, object?> AdditionalFields);
 
 public partial interface ICloudAiReadClient

@@ -42,14 +42,17 @@ public sealed class ActiveContractFilesystemTests
             Path.Combine(root, "docs", "Agent工作流与异常契约.md"));
         var cloudContract = File.ReadAllText(
             Path.Combine(root, "docs", "Cloud只读数据分析契约.md"));
-        businessRules.Should().Contain("JIT 首次身份绑定并发");
-        businessRules.Should().Contain("逐次工具批准产品边界");
+        businessRules.Should().Contain("Cloud 工号 `101650` 是规范的 Cloud 绑定 AI `Admin`");
+        businessRules.Should().Contain(
+            "`101650` 是唯一免本地密码确认的自动收编例外，不是系统唯一 `Admin`");
+        businessRules.Should().Contain(
+            "Cloud 账号、员工、权限和设备范围变化由 Cloud 在每次 AiRead 请求实时拒绝");
+        businessRules.Should().Contain(
+            "当前真实 Cloud 查询只保留 typed AiRead provider；所有真实 Cloud Direct DB 与 Text-to-SQL 整体关闭");
+        businessRules.Should().Contain("需要批准的工具必须逐次展示规范工具身份");
         cloudContract.Should().Contain("查询确认键固定为 `SessionId`");
-        businessRules.Should().Contain("Cloud provider / AI consumer 跨版本发布顺序");
-        businessRules.Should().Contain("完工弹夹数");
-        businessRules.Should().Contain("ModelContextProtocol 2.0.0");
-        businessRules.Should().Contain("McpToolOutputSchemaContractV1");
-        businessRules.Should().Contain("tool_execution_timeout");
+        cloudContract.Should().Contain("POST /api/identity/cloud-delegation/revoke-current");
+        cloudContract.Should().Contain("禁止回退静态 Token");
 
         agentContract.Should().Contain("Microsoft Agent Framework Harness");
         agentContract.Should().Contain("Microsoft.Agents.AI` `1.16.0");
@@ -63,7 +66,6 @@ public sealed class ActiveContractFilesystemTests
         agentContract.Should().Contain("AICopilot.AiGatewayService/BusinessQueries");
         agentContract.Should().Contain("ModelContextProtocol 2.0.0");
         agentContract.Should().Contain("tool_execution_timeout");
-
     }
 
     [Fact]
@@ -78,6 +80,8 @@ public sealed class ActiveContractFilesystemTests
 
         const string expectedRoutingParagraph =
             "本文档只登记当前能力状态和下一退出门，不承载实现正文、验证算法、部署操作或历史过程。MAF / Harness 细节见 [Agent 工作流与异常契约](./Agent工作流与异常契约.md)，Cloud 查询与数据安全见 [Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)，聚合与持久化见 [DDD 聚合根边界](./DDD聚合根边界.md)，候选与生产退出规则见 [AICopilot 安全部署契约](./AICopilot安全部署契约.md)。战略性“不做”边界只见 [AICopilot 业务规则](./AICopilot业务规则.md)。";
+        const string expectedStatusParagraph =
+            "当前状态：业务目标已确定、源码仅部分收口。身份与只读安全主链已实现，但只以当前源码重新构建后的最终门禁结果作为签收证据；其它复审问题、跨项目真实 E2E、生产迁移和部署尚未收口，当前代码尚未提交、未部署，不是生产基线。`SingleInstance` 已完成且唯一技术正文只在[Agent 工作流与异常契约第 1.2 节](./Agent工作流与异常契约.md#12-agentsession-持久化)，不再列为缺口。";
         const string tableHeader =
             "| 能力 | 源码状态 | 候选状态 | 生产状态 | 下一退出门 |";
         Regex.Matches(
@@ -107,7 +111,10 @@ public sealed class ActiveContractFilesystemTests
                 title => title.Trim().Should().Be("# AICopilot AI 架构路线图"),
                 routing => routing.Trim().Should().Be(
                     expectedRoutingParagraph,
-                    "the single routing paragraph is a canonical owner map, not free-form prose"));
+                    "the single routing paragraph is a canonical owner map, not free-form prose"),
+                status => status.Trim().Should().Be(
+                    expectedStatusParagraph,
+                    "the roadmap must describe current source status without carrying stale test counts"));
 
         var headerCells = ParseMarkdownTableRow(roadmapLines[headerLineIndex]);
         headerCells.Should().Equal(
@@ -279,19 +286,19 @@ public sealed class ActiveContractFilesystemTests
             "the roadmap must route strategic exclusions to the business rule owner");
         AssertActiveFragment(
             agentInstructions,
-            "路线图是状态与退出门入口，不承载实现、候选验证算法或部署操作正文",
+            "当前架构状态和下一退出门：读取 [AI 架构路线图](docs/AI架构路线图.md)",
             "AGENTS must keep the roadmap route narrow");
         AssertActiveFragment(
             businessRules,
-            "[AI 架构路线图](./AI架构路线图.md) 只作为当前状态与下一退出门登记表",
+            "| 当前架构状态与下一退出门 | [AI 架构路线图](./AI架构路线图.md) |",
             "business rules must route current status to the roadmap");
 
         string[] strategicExclusions =
         [
-            "不建设任意用户上传 Agent 定义后直接执行的平台",
-            "不允许模型扩大 Tool、MCP、知识库、数据源或证据权限",
-            "不以通用 SQL、MCP 或 Direct DB 替代已覆盖的 Cloud typed GET",
-            "不以 Simulation、LLM 推断或当前健康评分冒充生产事实或预测模型结果",
+            "任意用户上传 Agent 定义后直接执行",
+            "由模型、Prompt、插件或 MCP 扩大身份、权限、工具、数据源或证据边界",
+            "用通用 SQL、MCP、Simulation 或模型推断冒充真实制造事实",
+            "通过 AI 创建、修改、删除、补录、审批、派发或控制 Cloud/Edge 制造业务",
         ];
         foreach (var exclusion in strategicExclusions)
         {
@@ -453,15 +460,14 @@ public sealed class ActiveContractFilesystemTests
             }
         }
 
-        agentInstructions.Should().Contain("只是行为状态，不是安全隔离或授权边界");
-        agentInstructions.Should().Contain("模式与授权正交");
+        agentInstructions.Should().Contain(
+            "Plan/Execute 或人工批准均不得把 Cloud/MES/ERP 写入、生产控制或越权访问变成允许动作");
         businessRules.Should().Contain(
-            "`Plan` 用于帮助用户交互式澄清、调查并形成 Todo");
+            "`Plan` 用于交互式澄清、调查并形成 Todo");
         businessRules.Should().Contain(
-            "`Execute` 用于自主、连续地完成 Todo");
-        businessRules.Should().Contain("模式与授权正交");
+            "`Execute` 用于连续完成已经明确的 Todo");
         businessRules.Should().Contain(
-            "切换模式不得扩大或缩小用户权限、可用工具、数据边界或批准策略");
+            "两者只是行为模式，不是安全隔离或授权边界；切换模式不得改变身份、权限、工具、数据范围或批准策略");
         frontendInstructions.Should().Contain(
             "前端不得按模式推断、隐藏或放大工具权限");
         frontendInstructions.Should().Contain(
@@ -597,7 +603,7 @@ public sealed class ActiveContractFilesystemTests
         var normalizedCloudContract = NormalizeContractText(cloudContract);
 
         normalizedCloudContract.Should().Contain(
-            "typed-first、结构化结果矩阵、查询确认、受控 Text-to-SQL、Simulation 边界和 fallback 决策的唯一技术正文");
+            "业务查询 typed AiRead、当前用户委托、结构化结果矩阵、查询确认、已关闭的 Text-to-SQL、Simulation 边界和 fallback 决策的唯一技术正文");
         string[] technicalOwnerMarkers =
         [
             "AICOPILOT_FALLBACK_POLICY_V1_BEGIN",
@@ -644,22 +650,20 @@ public sealed class ActiveContractFilesystemTests
             "[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)");
         agentContract.Should().Contain(
             "[Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)");
-        agentInstructions.Should().Contain("模型只看到 `BusinessQuery`");
-        businessRules.Should().Contain("模型只看到 `BusinessQuery`");
+        agentInstructions.Should().Contain(
+            "当前真实 Cloud 只保留 typed AiRead；Direct DB/Text-to-SQL 整体关闭");
+        businessRules.Should().Contain("模型只看到受治理的 `BusinessQuery`");
         agentContract.Should().Contain(
             "模型可见的业务查询工具只有 `BusinessQuery`");
         agentContract.Should().Contain(
-            "Text-to-SQL 只作为工具内部能力，绝不以独立工具暴露给模型");
+            "`Unsupported`、`Unavailable`、静态系统 Token、人工批准或模型判断均不得触发 SQL");
 
         cloudContract.Should().Contain(
-            "`BusinessQueryFallbackPolicy` 是唯一 fallback 决策 owner");
+            "`BusinessQueryFallbackPolicy` 和 runner 必须对所有真实 Cloud 能力返回关闭结论");
         cloudContract.Should().Contain(
-            "只有同一 Cloud 来源返回 `Unsupported` 或 `Unavailable`");
+            "`Unsupported`、`Unavailable`、`Success`、`Empty`、`NeedClarification`、`Unauthorized`、权限或凭据失败、元数据未解析/过期、跨源、MCP 与 Simulation 均不得生成或执行 SQL");
         cloudContract.Should().Contain(
-            "该 policy 才允许 `BusinessQueryExecutor` 在服务端自动进入受控 Text-to-SQL");
-        cloudContract.Should().Contain("模型不得决定、触发或绕过 fallback");
-        cloudContract.Should().Contain(
-            "权限或凭据失败、跨源、MCP 与 Simulation 均不得 fallback");
+            "模型不得决定、触发、扩大或绕过该关闭状态");
 
         const string policyStartMarker = "<!-- AICOPILOT_FALLBACK_POLICY_V1_BEGIN -->";
         const string policyEndMarker = "<!-- AICOPILOT_FALLBACK_POLICY_V1_END -->";
@@ -668,7 +672,7 @@ public sealed class ActiveContractFilesystemTests
             policyStartMarker,
             policyEndMarker);
         ComputeSha256(NormalizeContractText(canonicalPolicy)).Should().Be(
-            "c3998e3797727ce14924aa66bbae5087630b96ff4d4da5e4d49aefd8e7a638a4",
+            "a617b14489f60cf2108d09b0bb2fc0a84cf2b7f251691ab77a0f8be9317229b5",
             "the reviewed fallback decision matrix is a closed contract block");
 
         cloudContract.Should().Contain(
@@ -885,6 +889,7 @@ public sealed class ActiveContractFilesystemTests
             "`OutboxMessage`",
             "`ApplicationUser`",
             "`ExternalIdentityBinding`",
+            "`CloudDelegationGrant`",
             "`IdentityRoleClaim<>`",
             "`IdentityRole<>`",
             "`IdentityUserClaim<>`",
@@ -949,9 +954,9 @@ public sealed class ActiveContractFilesystemTests
             "| OwnedValueObject | `ModelParameters`、`TemplateSpecification` |",
             "| RuntimeRecord | `AgentSessionState`、`ModelQuotaReservation`、`PersistenceCommitMarker` |",
             "| Audit | `AuditLogEntry`、`OutboxMessage` |",
-            "| IdentityRecord | `ApplicationUser`、`ExternalIdentityBinding`、`IdentityRoleClaim<>`、`IdentityRole<>`、`IdentityUserClaim<>`、`IdentityUserLogin<>`、`IdentityUserRole<>`、`IdentityUserToken<>` |",
+            "| IdentityRecord | `ApplicationUser`、`ExternalIdentityBinding`、`CloudDelegationGrant`、`IdentityRoleClaim<>`、`IdentityRole<>`、`IdentityUserClaim<>`、`IdentityUserLogin<>`、`IdentityUserRole<>`、`IdentityUserToken<>` |",
             "| `AiCopilotDbContext` | `AuditLogEntry`、`OutboxMessage`、`PersistenceCommitMarker` | 主基础设施 migration owner；唯一拥有 Outbox 与 persistence commit marker 迁移 |",
-            "| `IdentityStoreDbContext` | Identity 记录、`ExternalIdentityBinding`；审计只作为事务参与者 | 拥有 Identity 迁移；审计映射使用 `ExcludeFromMigrations` |",
+            "| `IdentityStoreDbContext` | Identity 记录、`ExternalIdentityBinding`、加密的 `CloudDelegationGrant`；审计只作为事务参与者 | 拥有 Identity 迁移；审计映射使用 `ExcludeFromMigrations` |",
             "| `AiGatewayDbContext` | 上述七个 AiGateway 集合 | 拥有已投产的 append-only migration 历史和当前增量升级 |",
             "| `RagDbContext` | RAG 聚合、`Document`、`DocumentChunk` | 拥有 RAG 迁移 |",
             "| `DataAnalysisDbContext` | `BusinessDatabase`、`DataSourcePermissionGrant` | 拥有 DataAnalysis 迁移 |",
@@ -968,6 +973,7 @@ public sealed class ActiveContractFilesystemTests
             "`OutboxDispatcher` 统一领取和发布，必须保留 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略以及 dead-letter 上限，禁止多 worker 重复发布同一消息。",
             "业务行、Outbox、审计和数据库 durable commit marker 只能由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交。每个 execution-strategy attempt 对业务 Context 只执行一次 `SaveChangesAsync(false)`；事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。",
             "Identity 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine；非成功 `Result` 必须回滚 UserManager/RoleManager 已触发的中间保存，拒绝审计只能在回滚后另行提交。禁止恢复 `EfTransactionalExecutionService`、通用 Outbox 扫描或复制第二套 transaction/retry。",
+            "`CloudDelegationGrant` 是当前 AI 用户与 Cloud 用户短期委托的 Identity 运行记录，不是业务聚合根。它由 `IdentityStoreDbContext` 独占迁移和写入，使用 Data Protection 独立 purpose 加密 Token；创建/提升/绑定、grant 落库和登录成功必须处于同一 Identity 事务，grant 存储失败不得签发 AICopilot JWT。当前用户撤销只能用 JWT grant id 与当前 AI UserId 精确命中，幂等设置 `RevokedAtUtc` 并立即清空密文 Token；每小时、每批 500 条的清理使用数据库 advisory lock 保持单实例，过期时清 Token，过期或撤销满 24 小时后删元数据。",
             "EF execution strategy 必须使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，禁止手写业务重试循环。commit-unknown 不得通过 `SaveChanges(false)`、Outbox 或 audit 是否存在来推断成功。",
             "数据库 durable commit marker 只用于事务提交结果验证和 commit-ACK 丢失对账，不是 Agent durable 编排、Tool checkpoint、任务恢复点或工具重放依据。marker 必须与业务写入处于同一事务，并由 fresh context 在独立超时和 execution strategy 下验证。",
             "marker 写入后 caller cancellation 不得中断 commit/verification。无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id；调用方不得自动重放业务。",
@@ -1048,11 +1054,11 @@ public sealed class ActiveContractFilesystemTests
 
         AssertActiveFragment(
             agentInstructions,
-            "唯一技术正文 [DDD 聚合根边界](docs/DDD聚合根边界.md)",
+            "[DDD 聚合根边界](docs/DDD聚合根边界.md)",
             "AGENTS must actively route DDD and persistence work to the owner contract");
         AssertActiveFragment(
             businessRules,
-            "唯一技术正文是 [DDD 聚合根边界](./DDD聚合根边界.md)",
+            "事务与持久化见[DDD 聚合根边界](./DDD聚合根边界.md)",
             "business rules must actively link the DDD owner contract");
         AssertActiveFragment(
             agentContract,
@@ -1071,18 +1077,6 @@ public sealed class ActiveContractFilesystemTests
             "[DDD 聚合根边界](../../docs/DDD聚合根边界.md)",
             "the deployment guide must actively link the DDD owner contract");
 
-        AssertActiveFragment(
-            businessRules,
-            "聚合必须按各自业务不变量和生命周期独立演进；数据源授权与业务数据源之间只通过稳定标识跨聚合引用，不能把独立授权生命周期重新下沉为父实体的可变子集合。正式聚合清单、持久化分类和不变量理由只见 DDD 唯一技术正文。",
-            "the business aggregate principle must remain active prose");
-        AssertActiveFragment(
-            businessRules,
-            "业务变更、审计、待发布事件和数据库提交结果保障必须保持原子；提交结果未知时不得自动重放业务。事务参与者、重试/验证算法、Outbox 领取和 commit marker 细节只见 DDD 唯一技术正文。",
-            "the business atomicity and no-replay principle must remain active prose");
-        AssertActiveFragment(
-            businessRules,
-            "知识库上传必须通过持久化对账保护数据库与文件一致性，且只能使用正式 RAG 文档入口。journal、lease、存储路径、后台对账与保留实现只见 DDD 唯一技术正文。",
-            "the business RAG persistence principle must remain active prose");
         AssertActiveFragment(
             agentContract,
             "`persistence_commit_outcome_unknown` 表示写入可能已提交，调用方不得自动重试；只返回非敏感 commit id 供受控对账。数据库 commit marker、事务验证与文件持久化规则的唯一技术正文是 [DDD 聚合根边界](./DDD聚合根边界.md)，本契约不复制其实现。",

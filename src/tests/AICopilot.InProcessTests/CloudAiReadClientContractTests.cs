@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using AICopilot.DataAnalysisService.Semantics;
 using AICopilot.Infrastructure.CloudRead;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -36,6 +37,9 @@ public sealed class CloudAiReadClientContractTests
             method.Name == nameof(ICloudAiReadClient.GetCapacityHourlyAsync) ||
             method.Name == nameof(ICloudAiReadClient.GetDeviceLogsAsync) ||
             method.Name == nameof(ICloudAiReadClient.GetProductionRecordsAsync) ||
+            method.Name == nameof(ICloudAiReadClient.GetDevicePlcsAsync) ||
+            method.Name == nameof(ICloudAiReadClient.GetDataSchemasAsync) ||
+            method.Name == nameof(ICloudAiReadClient.SealProductionScopeAsync) ||
             method.Name == nameof(ICloudAiReadClient.QuerySemanticAsync));
 
         AssertRequiredReferenceProperties<CloudAiReadDeviceDto>(
@@ -159,6 +163,45 @@ public sealed class CloudAiReadClientContractTests
             nameof(CloudAiReadProductionRecordDto.CompletedAt),
             nameof(CloudAiReadProductionRecordDto.ReceivedAt));
 
+        AssertRequiredReferenceProperties<CloudAiReadDevicePlcDto>(
+            nameof(CloudAiReadDevicePlcDto.DeviceName),
+            nameof(CloudAiReadDevicePlcDto.PlcCode),
+            nameof(CloudAiReadDevicePlcDto.PlcName),
+            nameof(CloudAiReadDevicePlcDto.Freshness),
+            nameof(CloudAiReadDevicePlcDto.AdditionalFields));
+        AssertOptionalReferenceProperties<CloudAiReadDevicePlcDto>(
+            nameof(CloudAiReadDevicePlcDto.PluginVersion),
+            nameof(CloudAiReadDevicePlcDto.ConfigurationVersion),
+            nameof(CloudAiReadDevicePlcDto.Protocol),
+            nameof(CloudAiReadDevicePlcDto.Address),
+            nameof(CloudAiReadDevicePlcDto.RuntimeStatus),
+            nameof(CloudAiReadDevicePlcDto.LastError));
+        AssertRequiredValueProperties<CloudAiReadDevicePlcDto>(
+            nameof(CloudAiReadDevicePlcDto.DeviceId),
+            nameof(CloudAiReadDevicePlcDto.ProcessId),
+            nameof(CloudAiReadDevicePlcDto.IsAuthoritative));
+        AssertOptionalValueProperties<CloudAiReadDevicePlcDto>(
+            nameof(CloudAiReadDevicePlcDto.SnapshotCapturedAtUtc),
+            nameof(CloudAiReadDevicePlcDto.SnapshotReceivedAtUtc),
+            nameof(CloudAiReadDevicePlcDto.Enabled),
+            nameof(CloudAiReadDevicePlcDto.IsConnected),
+            nameof(CloudAiReadDevicePlcDto.LastCommunicationAtUtc));
+
+        AssertRequiredReferenceProperties<CloudAiReadDataSchemaDto>(
+            nameof(CloudAiReadDataSchemaDto.PluginVersion),
+            nameof(CloudAiReadDataSchemaDto.TypeKey),
+            nameof(CloudAiReadDataSchemaDto.DisplayName),
+            nameof(CloudAiReadDataSchemaDto.SchemaName),
+            nameof(CloudAiReadDataSchemaDto.Scope),
+            nameof(CloudAiReadDataSchemaDto.QueryModes),
+            nameof(CloudAiReadDataSchemaDto.Fields),
+            nameof(CloudAiReadDataSchemaDto.AdditionalFields));
+        AssertOptionalReferenceProperties<CloudAiReadDataSchemaDto>(
+            nameof(CloudAiReadDataSchemaDto.PlcCode));
+        AssertRequiredValueProperties<CloudAiReadDataSchemaDto>(
+            nameof(CloudAiReadDataSchemaDto.DeviceId),
+            nameof(CloudAiReadDataSchemaDto.SchemaVersion));
+
         AssertPropertyTypes<CloudAiReadDeviceDto>(
             (nameof(CloudAiReadDeviceDto.DeviceId), typeof(Guid)),
             (nameof(CloudAiReadDeviceDto.ProcessId), typeof(Guid)));
@@ -205,6 +248,18 @@ public sealed class CloudAiReadClientContractTests
             (nameof(CloudAiReadProductionRecordDto.DeviceId), typeof(Guid)),
             (nameof(CloudAiReadProductionRecordDto.CompletedAt), typeof(DateTime?)),
             (nameof(CloudAiReadProductionRecordDto.ReceivedAt), typeof(DateTime?)));
+        AssertPropertyTypes<CloudAiReadDevicePlcDto>(
+            (nameof(CloudAiReadDevicePlcDto.DeviceId), typeof(Guid)),
+            (nameof(CloudAiReadDevicePlcDto.ProcessId), typeof(Guid)),
+            (nameof(CloudAiReadDevicePlcDto.IsAuthoritative), typeof(bool)),
+            (nameof(CloudAiReadDevicePlcDto.Enabled), typeof(bool?)),
+            (nameof(CloudAiReadDevicePlcDto.IsConnected), typeof(bool?)),
+            (nameof(CloudAiReadDevicePlcDto.SnapshotCapturedAtUtc), typeof(DateTime?)),
+            (nameof(CloudAiReadDevicePlcDto.SnapshotReceivedAtUtc), typeof(DateTime?)),
+            (nameof(CloudAiReadDevicePlcDto.LastCommunicationAtUtc), typeof(DateTime?)));
+        AssertPropertyTypes<CloudAiReadDataSchemaDto>(
+            (nameof(CloudAiReadDataSchemaDto.DeviceId), typeof(Guid)),
+            (nameof(CloudAiReadDataSchemaDto.SchemaVersion), typeof(int)));
     }
 
     [Fact]
@@ -1217,9 +1272,8 @@ public sealed class CloudAiReadClientContractTests
             "不要作为 queryText 发送",
             [
                 new CloudAiReadFilter("deviceId", "eq", DeviceId),
-                new CloudAiReadFilter("typeKey", "eq", "cp"),
+                new CloudAiReadFilter("typeKey", "eq", "die-cutting-completion"),
                 new CloudAiReadFilter("plcCode", "eq", "P2-CP05"),
-                new CloudAiReadFilter("plcName", "eq", "正极模切05"),
                 new CloudAiReadFilter("barcode", "eq", "CP-CLIP-001"),
                 new CloudAiReadFilter("result", "eq", "OK"),
                 new CloudAiReadFilter("fieldMode", "eq", "full")
@@ -1232,10 +1286,10 @@ public sealed class CloudAiReadClientContractTests
         capturedRequest.Should().NotBeNull();
         capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/production-records");
         var query = ParseQuery(capturedRequest.RequestUri);
-        query.Should().Contain("typeKey", "cp");
+        query.Should().Contain("typeKey", "die-cutting-completion");
         query.Should().Contain("deviceId", DeviceId);
         query.Should().Contain("plcCode", "P2-CP05");
-        query.Should().Contain("plcName", "正极模切05");
+        query.Should().NotContainKey("plcName");
         query.Should().Contain("startTime", "2026-04-20T00:00:00.0000000Z");
         query.Should().Contain("endTime", "2026-04-21T00:00:00.0000000Z");
         query.Should().Contain("barcode", "CP-CLIP-001");
@@ -1257,8 +1311,8 @@ public sealed class CloudAiReadClientContractTests
                     new
                     {
                         recordId = "dddddddd-dddd-dddd-dddd-dddddddddddd",
-                        typeKey = "cp",
-                        typeName = "正极模切",
+                        typeKey = "die-cutting-completion",
+                        typeName = "模切完成记录",
                         deviceId = DeviceId,
                         deviceName = "正极模切客户端",
                         barcode = "CP-CLIP-001",
@@ -1294,6 +1348,8 @@ public sealed class CloudAiReadClientContractTests
             "生产记录",
             [
                 new CloudAiReadFilter("deviceId", "eq", DeviceId),
+                new CloudAiReadFilter("plcCode", "eq", "P2-CP05"),
+                new CloudAiReadFilter("typeKey", "eq", "die-cutting-completion"),
                 new CloudAiReadFilter("preset", "eq", "last_24h")
             ],
             null,
@@ -1302,7 +1358,7 @@ public sealed class CloudAiReadClientContractTests
             20));
 
         result.Items.Should().ContainSingle();
-        result.Items[0].TypeKey.Should().Be("cp");
+        result.Items[0].TypeKey.Should().Be("die-cutting-completion");
         result.Items[0].DeviceName.Should().Be("正极模切客户端");
         result.Items[0].Fields["plcCode"].Should().Be("P2-CP05");
         result.Items[0].Fields["plcName"].Should().Be("正极模切05");
@@ -1318,44 +1374,200 @@ public sealed class CloudAiReadClientContractTests
     }
 
     [Fact]
-    public async Task SemanticQuery_ShouldCallGenericProductionRecordApiForChineseCpPlcQuestion()
+    public async Task ProductionScope_DeviceNameWithNoExactCandidate_ShouldRequireClarification()
     {
-        HttpRequestMessage? capturedRequest = null;
+        Uri? capturedRequest = null;
         using var httpClient = new HttpClient(new StubHandler(request =>
         {
-            capturedRequest = request;
+            capturedRequest = request.RequestUri;
+            return CreateProductionScopeResponse(
+                request.RequestUri!,
+                [new { id = DeviceId, deviceCode = "DEV-001", deviceName = "Line Alpha Extended", processId = ProcessId }]);
+        }));
+        var client = CreateClient(httpClient);
+        var plan = CreateProductionPlan(
+            """{"filters":[{"field":"deviceName","operator":"eq","value":"Line Alpha"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        var act = () => client.SealProductionScopeAsync(plan);
+
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        ParseQuery(capturedRequest!).Should().Contain("keyword", "Line Alpha");
+    }
+
+    [Fact]
+    public async Task ProductionScope_DeviceNameWithTwoExactCandidates_ShouldRequireExplicitDevice()
+    {
+        using var httpClient = new HttpClient(new StubHandler(request =>
+            CreateProductionScopeResponse(
+                request.RequestUri!,
+                [
+                    new { id = DeviceId, deviceCode = "DEV-001", deviceName = "Line Alpha", processId = ProcessId },
+                    new { id = SecondDeviceId, deviceCode = "DEV-002", deviceName = " line alpha ", processId = ProcessId }
+                ])));
+        var client = CreateClient(httpClient);
+        var plan = CreateProductionPlan(
+            """{"filters":[{"field":"deviceName","operator":"contains","value":"LINE ALPHA"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        var act = () => client.SealProductionScopeAsync(plan);
+
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        exception.Which.Message.Should().Contain("唯一");
+    }
+
+    [Fact]
+    public async Task ProductionScope_ConflictingDeviceNameCodeAndProcess_ShouldRejectAllCandidates()
+    {
+        Uri? capturedRequest = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequest = request.RequestUri;
+            return CreateProductionScopeResponse(
+                request.RequestUri!,
+                [new { id = DeviceId, deviceCode = "DEV-001", deviceName = "Line Alpha", processId = ProcessId }]);
+        }));
+        var client = CreateClient(httpClient);
+        var plan = CreateProductionPlan(
+            $$"""{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"},{"field":"deviceName","operator":"eq","value":"Line Beta"},{"field":"processId","operator":"eq","value":"{{ProcessId}}"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        var act = () => client.SealProductionScopeAsync(plan);
+
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.MissingRequiredParameter);
+        var query = ParseQuery(capturedRequest!);
+        query.Should().Contain("deviceCode", "DEV-001");
+        query.Should().Contain("keyword", "Line Beta");
+        query.Should().Contain("processId", ProcessId);
+    }
+
+    [Fact]
+    public async Task SemanticQuery_DeviceNameUniqueExactMatch_ShouldSealToDeviceIdOnly()
+    {
+        var capturedRequests = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequests.Add(request.RequestUri!);
+            return CreateProductionScopeResponse(
+                request.RequestUri!,
+                [
+                    new { id = SecondDeviceId, deviceCode = "DEV-002", deviceName = "Line Alpha Extended", processId = ProcessId },
+                    new { id = DeviceId, deviceCode = "DEV-001", deviceName = " line alpha ", processId = ProcessId }
+                ]);
+        }));
+        var client = CreateClient(httpClient);
+        var plan = CreateProductionPlan(
+            """{"filters":[{"field":"deviceName","operator":"contains","value":"LINE ALPHA"},{"field":"preset","operator":"eq","value":"today"}]}""");
+
+        _ = await client.QuerySemanticAsync(plan);
+
+        capturedRequests.Select(uri => uri.AbsolutePath).Should().Equal(
+            "/api/v1/ai/read/devices",
+            "/api/v1/ai/read/device-plcs",
+            "/api/v1/ai/read/data-schemas",
+            "/api/v1/ai/read/production-records");
+        var finalQuery = ParseQuery(capturedRequests[^1]);
+        finalQuery.Should().Contain("deviceId", DeviceId);
+        finalQuery.Should().Contain("plcCode", "P2-PLC05");
+        finalQuery.Should().Contain("typeKey", "die-cutting-completion");
+        finalQuery.Should().NotContainKey("deviceName");
+        finalQuery.Should().NotContainKey("deviceCode");
+        finalQuery.Should().NotContainKey("processId");
+        finalQuery.Should().NotContainKey("processCode");
+        finalQuery.Should().NotContainKey("processName");
+    }
+
+    [Fact]
+    public async Task SemanticQuery_ShouldResolveDynamicDevicePlcAndTypeKeyBeforeProductionRead()
+    {
+        var capturedRequests = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedRequests.Add(request.RequestUri!);
+            object[] items = request.RequestUri!.AbsolutePath switch
+            {
+                "/api/v1/ai/read/processes" => new object[]
+                {
+                    new { id = ProcessId, processCode = "CUT", processName = "模切" }
+                },
+                "/api/v1/ai/read/devices" => new object[]
+                {
+                    new { id = DeviceId, deviceCode = "DEV-001", deviceName = "P2 模切", processId = ProcessId }
+                },
+                "/api/v1/ai/read/device-plcs" =>
+                new object[]
+                {
+                    new
+                    {
+                        deviceId = DeviceId,
+                        deviceName = "P2 模切",
+                        processId = ProcessId,
+                        pluginVersion = "2.0.12",
+                        plcCode = "P2-PLC05",
+                        plcName = "P2 PLC 05",
+                        isAuthoritative = true,
+                        configurationVersion = "17",
+                        snapshotCapturedAtUtc = "2026-07-24T01:00:00Z",
+                        snapshotReceivedAtUtc = "2026-07-24T01:00:01Z",
+                        freshness = "Current",
+                        enabled = true,
+                        protocol = "S7",
+                        address = "10.0.0.5",
+                        runtimeStatus = "Online",
+                        isConnected = true,
+                        lastCommunicationAtUtc = "2026-07-24T01:00:00Z",
+                        lastError = (string?)null
+                    }
+                },
+                "/api/v1/ai/read/data-schemas" =>
+                new object[]
+                {
+                    new
+                    {
+                        deviceId = DeviceId,
+                        plcCode = "P2-PLC05",
+                        pluginVersion = "2.0.12",
+                        typeKey = "die-cutting-completion",
+                        displayName = "模切完成记录",
+                        schemaName = "die-cutting-completion.v1",
+                        schemaVersion = 1,
+                        scope = "plc",
+                        queryModes = new[] { "list", "detail" },
+                        fields = new[]
+                        {
+                            new { key = "punchingQuantity", label = "冲切数量", type = "integer", unit = (string?)null, precision = (int?)null, required = true, isPublic = true }
+                        }
+                    }
+                },
+                "/api/v1/ai/read/production-records" =>
+                new object[]
+                {
+                    new
+                    {
+                        recordId = "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                        typeKey = "die-cutting-completion",
+                        typeName = "模切完成记录",
+                        deviceId = DeviceId,
+                        deviceName = "P2 模切",
+                        barcode = "CLIP-005",
+                        result = "OK",
+                        completedAt = "2026-07-24T01:02:03Z",
+                        receivedAt = "2026-07-24T01:02:04Z",
+                        fields = new { punchingQuantity = 123 },
+                        fieldSchema = new[]
+                        {
+                            new { key = "punchingQuantity", label = "冲切数量", type = "integer", unit = (string?)null, precision = (int?)null, required = true }
+                        }
+                    }
+                },
+                _ => throw new InvalidOperationException($"Unexpected path {request.RequestUri.AbsolutePath}")
+            };
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = JsonContent.Create(CreateEnvelope(
-                    new[]
-                    {
-                        new
-                        {
-                            recordId = "dddddddd-dddd-dddd-dddd-dddddddddddd",
-                            typeKey = "cp",
-                            typeName = "正极模切",
-                            deviceId = DeviceId,
-                            deviceName = "正极模切客户端",
-                            barcode = "CP-CLIP-005",
-                            result = "OK",
-                            completedAt = "2026-07-24T01:02:03Z",
-                            receivedAt = "2026-07-24T01:02:04Z",
-                            fields = new
-                            {
-                                plcName = "正极模切05",
-                                punchingQuantity = 123,
-                                punchingSpeed = 1.25m
-                            },
-                            fieldSchema = new[]
-                            {
-                                new { key = "plcName", label = "PLC 名称", type = "string", unit = (string?)null, precision = (int?)null, required = true },
-                                new { key = "punchingQuantity", label = "冲切数量", type = "integer", unit = (string?)null, precision = (int?)null, required = true },
-                                new { key = "punchingSpeed", label = "冲切速度", type = "number", unit = (string?)null, precision = (int?)2, required = true }
-                            }
-                        }
-                    },
-                    rowCount: 1,
-                    source: "production_records"))
+                    items,
+                    rowCount: items.Length,
+                    source: request.RequestUri.AbsolutePath.Split('/').Last()))
             };
         }));
         var definitions = new SemanticDefinitionCatalog();
@@ -1364,27 +1576,127 @@ public sealed class CloudAiReadClientContractTests
             definitions);
         var planning = planner.Plan(
             "Analysis.ProductionData.ByDevice",
-            "查询今天正极模切05的弹夹、冲切数量和速度");
+            $$"""{"filters":[{"field":"processName","operator":"eq","value":"模切"},{"field":"plcName","operator":"eq","value":"P2 PLC 05"},{"field":"preset","operator":"eq","value":"today"}]}""");
         planning.IsSuccess.Should().BeTrue(planning.ErrorMessage);
         var client = CreateClient(httpClient);
 
         var result = await client.QuerySemanticAsync(planning.Plan!);
 
-        capturedRequest.Should().NotBeNull();
-        capturedRequest!.RequestUri!.AbsolutePath.Should().Be("/api/v1/ai/read/production-records");
-        var query = ParseQuery(capturedRequest.RequestUri);
-        query.Should().Contain("typeKey", "cp");
-        query.Should().Contain("plcName", "正极模切05");
+        capturedRequests.Select(uri => uri.AbsolutePath).Should().Equal(
+            "/api/v1/ai/read/processes",
+            "/api/v1/ai/read/devices",
+            "/api/v1/ai/read/device-plcs",
+            "/api/v1/ai/read/data-schemas",
+            "/api/v1/ai/read/production-records");
+        var processQuery = ParseQuery(capturedRequests[0]);
+        processQuery.Should().Contain("keyword", "模切");
+        var deviceQuery = ParseQuery(capturedRequests[1]);
+        deviceQuery.Should().Contain("processId", ProcessId);
+        var query = ParseQuery(capturedRequests[^1]);
+        query.Should().Contain("deviceId", DeviceId);
+        query.Should().Contain("typeKey", "die-cutting-completion");
+        query.Should().Contain("plcCode", "P2-PLC05");
+        query.Should().NotContainKey("plcName");
+        query.Should().NotContainKey("processId");
+        query.Should().NotContainKey("processName");
         query.Should().Contain("preset", "today");
         query.Should().NotContainKey("clientCode");
         result.Rows.Should().ContainSingle();
-        result.Rows[0]["deviceName"].Should().Be("正极模切客户端");
-        result.Rows[0]["barcode"].Should().Be("CP-CLIP-005");
+        result.Rows[0]["deviceName"].Should().Be("P2 模切");
+        result.Rows[0]["barcode"].Should().Be("CLIP-005");
         var fields = result.Rows[0]["fields"].Should()
             .BeAssignableTo<IReadOnlyDictionary<string, object?>>().Subject;
-        fields["plcName"].Should().Be("正极模切05");
         fields["punchingQuantity"].Should().Be(123L);
-        fields["punchingSpeed"].Should().Be(1.25m);
+    }
+
+    [Fact]
+    public async Task SemanticQuery_ShouldRejectDetailOnlySchemaBeforeProductionRead()
+    {
+        var capturedPaths = new List<string>();
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            capturedPaths.Add(path);
+            object[] items = path switch
+            {
+                "/api/v1/ai/read/devices" =>
+                [
+                    new { id = DeviceId, deviceCode = "DEV-001", deviceName = "P2 模切", processId = ProcessId }
+                ],
+                "/api/v1/ai/read/device-plcs" =>
+                [
+                    new
+                    {
+                        deviceId = DeviceId,
+                        deviceName = "P2 模切",
+                        processId = ProcessId,
+                        pluginVersion = "2.0.12",
+                        plcCode = "P2-PLC05",
+                        plcName = "P2 PLC 05",
+                        isAuthoritative = true,
+                        configurationVersion = "17",
+                        snapshotCapturedAtUtc = "2026-07-24T01:00:00Z",
+                        snapshotReceivedAtUtc = "2026-07-24T01:00:01Z",
+                        freshness = "Current",
+                        enabled = true,
+                        protocol = "S7",
+                        address = "10.0.0.5",
+                        runtimeStatus = "Online",
+                        isConnected = true,
+                        lastCommunicationAtUtc = "2026-07-24T01:00:00Z",
+                        lastError = (string?)null
+                    }
+                ],
+                "/api/v1/ai/read/data-schemas" =>
+                [
+                    new
+                    {
+                        deviceId = DeviceId,
+                        plcCode = "P2-PLC05",
+                        pluginVersion = "2.0.12",
+                        typeKey = "die-cutting-completion",
+                        displayName = "模切完成记录",
+                        schemaName = "die-cutting-completion.v1",
+                        schemaVersion = 1,
+                        scope = "plc",
+                        queryModes = new[] { "detail" },
+                        fields = new[]
+                        {
+                            new { key = "punchingQuantity", label = "冲切数量", type = "integer", unit = (string?)null, precision = (int?)null, required = true, isPublic = true }
+                        }
+                    }
+                ],
+                "/api/v1/ai/read/production-records" =>
+                    throw new InvalidOperationException("Production data must not be requested for a detail-only schema."),
+                _ => throw new InvalidOperationException($"Unexpected path {path}")
+            };
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(CreateEnvelope(
+                    items,
+                    rowCount: items.Length,
+                    source: path.Split('/').Last()))
+            };
+        }));
+        var definitions = new SemanticDefinitionCatalog();
+        var planner = new SemanticQueryPlanner(
+            new SemanticQuerySchemaRegistry(definitions),
+            definitions);
+        var planning = planner.Plan(
+            "Analysis.ProductionData.ByDevice",
+            """{"filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"},{"field":"plcName","operator":"eq","value":"P2 PLC 05"},{"field":"preset","operator":"eq","value":"today"}]}""");
+        planning.IsSuccess.Should().BeTrue(planning.ErrorMessage);
+        var client = CreateClient(httpClient);
+
+        var act = () => client.QuerySemanticAsync(planning.Plan!);
+
+        var exception = await act.Should().ThrowAsync<CloudAiReadException>();
+        exception.Which.Code.Should().Be(CloudAiReadProblemCodes.Unavailable);
+        exception.Which.Message.Should().Contain("list");
+        capturedPaths.Should().Equal(
+            "/api/v1/ai/read/devices",
+            "/api/v1/ai/read/device-plcs",
+            "/api/v1/ai/read/data-schemas");
     }
 
     [Fact]
@@ -1476,7 +1788,12 @@ public sealed class CloudAiReadClientContractTests
 
         var act = () => client.GetProductionRecordsAsync(new CloudAiReadQuery(
             null,
-            [new CloudAiReadFilter("deviceId", "eq", DeviceId), new CloudAiReadFilter("barcode", "eq", "CELL-001")],
+            [
+                new CloudAiReadFilter("deviceId", "eq", DeviceId),
+                new CloudAiReadFilter("plcCode", "eq", "P2-PLC05"),
+                new CloudAiReadFilter("typeKey", "eq", "die-cutting-completion"),
+                new CloudAiReadFilter("barcode", "eq", "CELL-001")
+            ],
             null,
             null,
             false,
@@ -1588,7 +1905,7 @@ public sealed class CloudAiReadClientContractTests
             Enabled = true,
             BaseUrl = "https://cloud.example.com",
             StatusEndpointPath = "/api/v1/users/{cloudUserId}/status",
-            ServiceAccountToken = "token"
+            SigningSecret = "identity-status-signing-secret-32-bytes-minimum"
         };
 
         var act = () => options.EnsureValid();
@@ -1604,10 +1921,90 @@ public sealed class CloudAiReadClientContractTests
             Options.Create(new CloudAiReadOptions
             {
                 Enabled = true,
-                BaseUrl = "https://cloud.example.com",
-                ServiceAccountToken = "service-token"
+                BaseUrl = "https://cloud.example.com"
             }),
+            new StaticCloudDelegationAccessTokenProvider(),
             NullLogger<CloudAiReadClient>.Instance);
+    }
+
+    private static SemanticQueryPlan CreateProductionPlan(string query)
+    {
+        var definitions = new SemanticDefinitionCatalog();
+        var planner = new SemanticQueryPlanner(
+            new SemanticQuerySchemaRegistry(definitions),
+            definitions);
+        var planning = planner.Plan("Analysis.ProductionData.ByDevice", query);
+        planning.IsSuccess.Should().BeTrue(planning.ErrorMessage);
+        return planning.Plan!;
+    }
+
+    private static HttpResponseMessage CreateProductionScopeResponse(
+        Uri requestUri,
+        object[] deviceItems)
+    {
+        object[] items = requestUri.AbsolutePath switch
+        {
+            "/api/v1/ai/read/devices" => deviceItems,
+            "/api/v1/ai/read/device-plcs" =>
+            [
+                new
+                {
+                    deviceId = DeviceId,
+                    deviceName = "Line Alpha",
+                    processId = ProcessId,
+                    pluginVersion = "2.0.12",
+                    plcCode = "P2-PLC05",
+                    plcName = "P2 PLC 05",
+                    isAuthoritative = true,
+                    configurationVersion = "17",
+                    snapshotCapturedAtUtc = "2026-07-24T01:00:00Z",
+                    snapshotReceivedAtUtc = "2026-07-24T01:00:01Z",
+                    freshness = "Current",
+                    enabled = true,
+                    protocol = "S7",
+                    address = "10.0.0.5",
+                    runtimeStatus = "Online",
+                    isConnected = true,
+                    lastCommunicationAtUtc = "2026-07-24T01:00:00Z",
+                    lastError = (string?)null
+                }
+            ],
+            "/api/v1/ai/read/data-schemas" =>
+            [
+                new
+                {
+                    deviceId = DeviceId,
+                    plcCode = "P2-PLC05",
+                    pluginVersion = "2.0.12",
+                    typeKey = "die-cutting-completion",
+                    displayName = "模切完成记录",
+                    schemaName = "die-cutting-completion.v1",
+                    schemaVersion = 1,
+                    scope = "plc",
+                    queryModes = new[] { "list" },
+                    fields = Array.Empty<object>()
+                }
+            ],
+            "/api/v1/ai/read/production-records" => [],
+            _ => throw new InvalidOperationException($"Unexpected path {requestUri.AbsolutePath}")
+        };
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(CreateEnvelope(
+                items,
+                rowCount: items.Length,
+                source: requestUri.AbsolutePath.Split('/').Last()))
+        };
+    }
+
+    private sealed class StaticCloudDelegationAccessTokenProvider
+        : ICloudDelegationAccessTokenProvider
+    {
+        public Task<string> GetCurrentTokenAsync(
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult("runtime-user-delegation-token");
+        }
     }
 
     private static CloudAiReadTimeRange CreateRange(string start, string end)
@@ -2111,6 +2508,8 @@ public sealed class CloudAiReadClientContractTests
             null,
             [
                 new CloudAiReadFilter("deviceId", "eq", DeviceId),
+                new CloudAiReadFilter("plcCode", "eq", "P2-PLC05"),
+                new CloudAiReadFilter("typeKey", "eq", "die-cutting-completion"),
                 new CloudAiReadFilter("preset", "eq", "last_24h")
             ],
             null,

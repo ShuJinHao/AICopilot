@@ -141,25 +141,14 @@ public static class StandardBusinessDataSourceProfiles
         DatabaseProviderType.PostgreSql,
         IsRealExternalSource: true,
         RequiresExplicitSelection: false,
-        SupportsTextToSqlFallback: true,
+        SupportsTextToSqlFallback: false,
         Enum.GetValues<BusinessDataCapability>().ToHashSet(),
         new BusinessQuerySecurityProfile(
             CloudReadOnlyGovernedSchema.AllowedTables,
             CloudReadOnlyGovernedSchema.AllowedColumns,
             CloudReadOnlyGovernedSchema.BlockedFieldFragments.ToHashSet(StringComparer.OrdinalIgnoreCase),
             new HashSet<string>(["public"], StringComparer.OrdinalIgnoreCase)),
-        new BusinessTextToSqlProfile(
-            "PostgreSQL",
-            "governed-business-readonly-text-to-sql",
-            CloudReadOnlyGovernedSchema.AllowedColumnTypes,
-            CloudReadOnlyGovernedSchema.AllowedColumnValueHints,
-            CloudReadOnlyGovernedSchema.JoinHints
-                .Select(hint => new BusinessTextToSqlJoinHint(
-                    hint.LeftTable,
-                    hint.LeftColumn,
-                    hint.RightTable,
-                    hint.RightColumn))
-                .ToArray()),
+        TextToSql: null,
         BuildCloudCapabilityQueryProfiles());
 
     private static IReadOnlyDictionary<BusinessDataCapability, BusinessDataCapabilityQueryProfile>
@@ -180,40 +169,14 @@ public static class StandardBusinessDataSourceProfiles
                 pair => pair.Key,
                 pair => pair.Value,
                 StringComparer.OrdinalIgnoreCase);
-        var columnTypes = CloudReadOnlyGovernedSchema.AllowedColumnTypes
-            .Where(pair => tables.Contains(pair.Key))
-            .ToDictionary(
-                pair => pair.Key,
-                pair => pair.Value,
-                StringComparer.OrdinalIgnoreCase);
-        var valueHints = CloudReadOnlyGovernedSchema.AllowedColumnValueHints
-            .Where(pair => tables.Contains(pair.Key))
-            .ToDictionary(
-                pair => pair.Key,
-                pair => pair.Value,
-                StringComparer.OrdinalIgnoreCase);
-        var joins = CloudReadOnlyGovernedSchema.JoinHints
-            .Where(hint => tables.Contains(hint.LeftTable) && tables.Contains(hint.RightTable))
-            .Select(hint => new BusinessTextToSqlJoinHint(
-                hint.LeftTable,
-                hint.LeftColumn,
-                hint.RightTable,
-                hint.RightColumn))
-            .ToArray();
-
         return new BusinessDataCapabilityQueryProfile(
-            SupportsTextToSqlFallback: true,
+            SupportsTextToSqlFallback: false,
             new BusinessQuerySecurityProfile(
                 tables,
                 columns,
                 CloudReadOnlyGovernedSchema.BlockedFieldFragments.ToHashSet(StringComparer.OrdinalIgnoreCase),
                 new HashSet<string>(["public"], StringComparer.OrdinalIgnoreCase)),
-            new BusinessTextToSqlProfile(
-                "PostgreSQL",
-                "governed-business-readonly-text-to-sql",
-                columnTypes,
-                valueHints,
-                joins));
+            TextToSql: null);
     }
 
     private static IReadOnlySet<string> Tables(params string[] tables)
@@ -421,6 +384,17 @@ public sealed record BusinessQueryContext(
 
     public bool HasSameFilters(BusinessQueryContext requested)
     {
+        if (SemanticPlan?.Target == SemanticQueryTarget.ProductionData ||
+            requested.SemanticPlan?.Target == SemanticQueryTarget.ProductionData)
+        {
+            return SemanticPlan?.Target == SemanticQueryTarget.ProductionData &&
+                   requested.SemanticPlan?.Target == SemanticQueryTarget.ProductionData &&
+                   ProductionQueryScopePolicy.HasSameConfirmedScope(
+                       SemanticPlan,
+                       requested.SemanticPlan) &&
+                   ScopeMatches(SemanticPlan.Filters, requested.SemanticPlan.Filters);
+        }
+
         return ScopeMatches(SemanticPlan?.Filters, requested.SemanticPlan?.Filters);
     }
 
@@ -436,11 +410,14 @@ public sealed record BusinessQueryContext(
             .Where(filter => filter.Field is
                 "deviceId" or
                 "deviceCode" or
+                "deviceName" or
                 "processId" or
                 "processCode" or
                 "processName" or
                 "recordId" or
                 "barcode" or
+                "plcCode" or
+                "typeKey" or
                 "componentKey" or
                 "channel")
             .OrderBy(filter => filter.Field, StringComparer.Ordinal)
@@ -471,7 +448,8 @@ public sealed record BusinessQueryProviderResult(
     string SourcePath,
     string SourceLabel,
     DateTimeOffset? QueriedAtUtc,
-    string SafeMessage)
+    string SafeMessage,
+    string? FailureCode = null)
 {
     public static BusinessQueryProviderResult FromOutcome(
         BusinessQueryContext context,
@@ -479,7 +457,8 @@ public sealed record BusinessQueryProviderResult(
         BusinessQueryOutcome outcome,
         string safeMessage,
         string sourcePath = "",
-        string sourceLabel = "")
+        string sourceLabel = "",
+        string? failureCode = null)
     {
         return new BusinessQueryProviderResult(
             outcome,
@@ -494,7 +473,8 @@ public sealed record BusinessQueryProviderResult(
             sourcePath,
             sourceLabel,
             null,
-            safeMessage);
+            safeMessage,
+            failureCode);
     }
 }
 
@@ -529,6 +509,8 @@ public interface IBusinessQueryContextStore
     BusinessQueryContext Resolve(BusinessQueryContext requested);
 
     void Remember(BusinessQueryContext context);
+
+    void Invalidate(Guid sessionId);
 
     BusinessQueryConfirmationChallenge BeginConfirmation(BusinessQueryContext requested);
 
@@ -565,6 +547,13 @@ public static class BusinessQueryFallbackPolicy
         BusinessQueryProviderResult pluginResult,
         BusinessDataSourceProfile profile)
     {
+        if (context.SourceType == DataSourceExternalSystemType.CloudReadOnly ||
+            profile.SourceType == DataSourceExternalSystemType.CloudReadOnly)
+        {
+            return BusinessQueryFallbackDecision.Denied(
+                "real_cloud_text_to_sql_temporarily_closed");
+        }
+
         if (!profile.SupportsTextToSqlFallback)
         {
             return BusinessQueryFallbackDecision.Denied("profile_fallback_disabled");
@@ -573,6 +562,25 @@ public static class BusinessQueryFallbackPolicy
         if (!context.IsConfirmed)
         {
             return BusinessQueryFallbackDecision.Denied("query_context_not_confirmed");
+        }
+
+        if (context.Capability == BusinessDataCapability.ProductionRecord &&
+            !ProductionQueryScopePolicy.IsSealed(context.SemanticPlan))
+        {
+            return BusinessQueryFallbackDecision.Denied("production_scope_not_sealed");
+        }
+
+        // The governed SQL executor currently enforces tables, columns, schemas,
+        // readonly access, and limits, but it cannot yet inject and verify mandatory
+        // row predicates. A sealed scope in the context or prompt is therefore not
+        // sufficient evidence that generated SQL stayed inside the confirmed
+        // DeviceId + PlcCode + TypeKey tuple. Keep production-record fallback closed
+        // until the execution contract can enforce that tuple independently of the
+        // generated SQL text.
+        if (context.Capability == BusinessDataCapability.ProductionRecord)
+        {
+            return BusinessQueryFallbackDecision.Denied(
+                "production_fallback_row_scope_enforcement_unavailable");
         }
 
         if (!string.Equals(context.SourceKey, profile.Code, StringComparison.OrdinalIgnoreCase) ||
@@ -616,6 +624,90 @@ public static class BusinessQueryFallbackPolicy
                 BusinessQueryFallbackDecision.Denied("unsupported_outcome")
         };
     }
+}
+
+public static class ProductionQueryScopePolicy
+{
+    private static readonly string[] RequiredFields = ["deviceId", "plcCode", "typeKey"];
+    private static readonly string[] AmbiguousFields =
+    [
+        "deviceCode",
+        "deviceName",
+        "plcName",
+        "processId",
+        "processCode",
+        "processName"
+    ];
+
+    public static bool IsSealed(SemanticQueryPlan? plan)
+    {
+        if (plan?.Target != SemanticQueryTarget.ProductionData ||
+            plan.Filters.Any(filter =>
+                AmbiguousFields.Contains(filter.Field, StringComparer.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        foreach (var field in RequiredFields)
+        {
+            var matches = plan.Filters
+                .Where(filter => field.Equals(filter.Field, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (matches.Length != 1 ||
+                matches[0].Operator != SemanticFilterOperator.Equal ||
+                string.IsNullOrWhiteSpace(matches[0].Value))
+            {
+                return false;
+            }
+        }
+
+        var deviceId = plan.Filters.Single(filter =>
+            filter.Field.Equals("deviceId", StringComparison.OrdinalIgnoreCase)).Value;
+        return Guid.TryParse(deviceId, out var parsed) && parsed != Guid.Empty;
+    }
+
+    public static bool HasSameConfirmedScope(
+        SemanticQueryPlan confirmed,
+        SemanticQueryPlan revalidated)
+    {
+        ArgumentNullException.ThrowIfNull(confirmed);
+        ArgumentNullException.ThrowIfNull(revalidated);
+        if (!IsSealed(confirmed) ||
+            !IsSealed(revalidated) ||
+            confirmed.ProductionMetadataSeal is not { } confirmedSeal ||
+            revalidated.ProductionMetadataSeal is not { } revalidatedSeal)
+        {
+            return false;
+        }
+
+        return confirmedSeal.DeviceId == revalidatedSeal.DeviceId &&
+               SealMatchesPlan(confirmed, confirmedSeal) &&
+               SealMatchesPlan(revalidated, revalidatedSeal) &&
+               EqualsNormalized(confirmedSeal.PlcCode, revalidatedSeal.PlcCode) &&
+               EqualsNormalized(confirmedSeal.TypeKey, revalidatedSeal.TypeKey) &&
+               EqualsNormalized(confirmedSeal.PluginVersion, revalidatedSeal.PluginVersion) &&
+               EqualsNormalized(confirmedSeal.SchemaName, revalidatedSeal.SchemaName) &&
+               confirmedSeal.SchemaVersion == revalidatedSeal.SchemaVersion;
+    }
+
+    private static bool SealMatchesPlan(
+        SemanticQueryPlan plan,
+        ProductionQueryMetadataSeal seal)
+    {
+        var deviceId = plan.Filters.Single(filter =>
+            filter.Field.Equals("deviceId", StringComparison.OrdinalIgnoreCase)).Value;
+        var plcCode = plan.Filters.Single(filter =>
+            filter.Field.Equals("plcCode", StringComparison.OrdinalIgnoreCase)).Value;
+        var typeKey = plan.Filters.Single(filter =>
+            filter.Field.Equals("typeKey", StringComparison.OrdinalIgnoreCase)).Value;
+        return Guid.TryParse(deviceId, out var parsedDeviceId) &&
+               parsedDeviceId == seal.DeviceId &&
+               EqualsNormalized(plcCode, seal.PlcCode) &&
+               EqualsNormalized(typeKey, seal.TypeKey);
+    }
+
+    private static bool EqualsNormalized(string left, string right) =>
+        string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
 }
 
 public static class BusinessQueryProviderResultContract

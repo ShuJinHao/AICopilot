@@ -27,20 +27,15 @@ x-aicopilot-common-env: &aicopilot-common-env
   CloudReadonly__Real__AllowProductionRead: ${CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ:-false}
   CloudAiRead__Enabled: ${CLOUD_AI_READ_ENABLED:-false}
   CloudAiRead__BaseUrl: ${CLOUD_AI_READ_BASE_URL:-}
-  CloudAiRead__ServiceAccountToken: ${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}
   CloudAiRead__TimeoutSeconds: ${CLOUD_AI_READ_TIMEOUT_SECONDS:-10}
-  CloudIdentityStatus__Enabled: ${CLOUD_IDENTITY_STATUS_ENABLED:-false}
+  CloudIdentityStatus__Enabled: "true"
   CloudIdentityStatus__BaseUrl: ${CLOUD_IDENTITY_STATUS_BASE_URL:-}
-  CloudIdentityStatus__ServiceAccountToken: ${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}
+  CloudIdentityStatus__SigningSecret: ${AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET:?identity-status signing secret is required}
   CloudIdentityStatus__RefreshIntervalSeconds: ${CLOUD_IDENTITY_STATUS_REFRESH_INTERVAL_SECONDS:-60}
   CloudIdentityStatus__TimeoutSeconds: ${CLOUD_IDENTITY_STATUS_TIMEOUT_SECONDS:-5}
   CloudIdentityStatus__FailureMode: RejectWhenUnverified
-  DataAnalysis__CloudReadOnly__Enabled: ${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}
-  DataAnalysis__CloudReadOnly__DatabaseName: ${DATA_ANALYSIS_CLOUD_READONLY_DATABASE_NAME:-DeviceSemanticReadonly}
-  DataAnalysis__CloudReadOnly__ConnectionString: ${DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING:-}
-  DataAnalysis__CloudReadOnly__ReadOnlyCredentialVerified: ${DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED:-false}
-  DataAnalysis__CloudReadOnly__DefaultQueryLimit: ${DATA_ANALYSIS_CLOUD_READONLY_DEFAULT_QUERY_LIMIT:-200}
-  DataAnalysis__CloudReadOnly__MaxQueryLimit: ${DATA_ANALYSIS_CLOUD_READONLY_MAX_QUERY_LIMIT:-1000}
+  DataAnalysis__CloudReadOnly__Enabled: "false"
+  DataAnalysis__CloudReadOnlyTextToSql__Enabled: "false"
   CloudOidc__Enabled: ${CLOUD_OIDC_ENABLED:-false}
   CloudOidc__Issuer: ${CLOUD_OIDC_ISSUER:-}
   CloudOidc__AllowIntranetHttpOidc: ${ALLOW_INTRANET_HTTP_OIDC:-false}
@@ -48,8 +43,7 @@ x-aicopilot-common-env: &aicopilot-common-env
   CloudOidc__CallbackPath: /api/identity/cloud-oidc/callback
   CloudOidc__FrontendCompletionPath: /cloud-login/complete
   CloudOidc__RequireHttpsMetadata: ${CLOUD_OIDC_REQUIRE_HTTPS_METADATA:-true}
-  CloudOidc__BootstrapAdminAutoBindEnabled: ${CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED:-false}
-  CloudOidc__BootstrapAdminUserName: ${AICOPILOT_BOOTSTRAP_ADMIN_USERNAME}
+  CloudOidc__CanonicalAdminEmployeeNo: "101650"
 
 x-aicopilot-data-volumes: &aicopilot-data-volumes
   - enterprise-ai-aicopilot-data:/var/lib/aicopilot
@@ -125,7 +119,6 @@ services:
         condition: service_healthy
     networks:
       - enterprise-ai-net
-      - cloud-readonly-net
 
   aicopilot-httpapi:
     image: ${AICOPILOT_HTTPAPI_IMAGE}
@@ -155,7 +148,6 @@ services:
       - "8080"
     networks:
       - enterprise-ai-net
-      - cloud-readonly-net
 
   aicopilot-dataworker:
     image: ${AICOPILOT_DATAWORKER_IMAGE}
@@ -182,7 +174,6 @@ services:
         condition: service_completed_successfully
     networks:
       - enterprise-ai-net
-      - cloud-readonly-net
 
   aicopilot-ragworker:
     image: ${AICOPILOT_RAGWORKER_IMAGE}
@@ -223,10 +214,6 @@ services:
 networks:
   enterprise-ai-net:
     driver: bridge
-  cloud-readonly-net:
-    external: true
-    name: ${DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK:-enterprise-ai-cloud-readonly}
-
 volumes:
   enterprise-ai-aicopilot-data:
   enterprise-ai-postgres-data:

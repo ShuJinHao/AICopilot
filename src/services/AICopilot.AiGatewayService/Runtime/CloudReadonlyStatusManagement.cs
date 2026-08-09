@@ -11,16 +11,50 @@ public sealed record GetCloudReadonlyStatusQuery : IQuery<Result<CloudReadonlySt
 
 public sealed class GetCloudReadonlyStatusQueryHandler(
     IOptions<CloudReadonlyOptions> cloudReadonlyOptions,
-    IOptions<CloudAiReadOptions> cloudAiReadOptions)
+    IOptions<CloudAiReadOptions> cloudAiReadOptions,
+    ICurrentUser currentUser,
+    ICloudDelegationGrantStore delegationGrantStore,
+    TimeProvider timeProvider)
     : IQueryHandler<GetCloudReadonlyStatusQuery, Result<CloudReadonlyStatusDto>>
 {
-    public Task<Result<CloudReadonlyStatusDto>> Handle(
+    public async Task<Result<CloudReadonlyStatusDto>> Handle(
         GetCloudReadonlyStatusQuery request,
         CancellationToken cancellationToken)
     {
-        return Task.FromResult(Result.Success(CloudReadonlyStatusEvaluator.Evaluate(
+        var delegationAvailable = await HasCurrentDelegationAsync(cancellationToken);
+        return Result.Success(CloudReadonlyStatusEvaluator.Evaluate(
             cloudReadonlyOptions.Value,
-            cloudAiReadOptions.Value)));
+            cloudAiReadOptions.Value,
+            delegationAvailable));
+    }
+
+    private async Task<bool> HasCurrentDelegationAsync(CancellationToken cancellationToken)
+    {
+        if (!currentUser.IsAuthenticated ||
+            !currentUser.Id.HasValue ||
+            !Guid.TryParse(currentUser.CloudDelegationId, out var grantId) ||
+            grantId == Guid.Empty)
+        {
+            return false;
+        }
+
+        try
+        {
+            var grant = await delegationGrantStore.ResolveAsync(
+                grantId,
+                currentUser.Id.Value,
+                timeProvider.GetUtcNow().UtcDateTime,
+                cancellationToken);
+            return grant is { AccessToken.Length: > 0 };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
 
@@ -28,10 +62,11 @@ public static class CloudReadonlyStatusEvaluator
 {
     public static CloudReadonlyStatusDto Evaluate(
         CloudReadonlyOptions readonlyOptions,
-        CloudAiReadOptions aiReadOptions)
+        CloudAiReadOptions aiReadOptions,
+        bool delegationAvailable)
     {
         var baseUrlConfigured = IsHttpBaseUrlConfigured(aiReadOptions.BaseUrl);
-        var tokenConfigured = !string.IsNullOrWhiteSpace(aiReadOptions.ServiceAccountToken);
+        var transportConfigured = aiReadOptions.Enabled;
         var productionReadAllowed = readonlyOptions.Real.AllowProductionRead;
         var mode = readonlyOptions.Mode.ToString();
 
@@ -42,7 +77,8 @@ public static class CloudReadonlyStatusEvaluator
                     mode,
                     CloudReadonlyRuntimeStatuses.Simulation,
                     baseUrlConfigured,
-                    tokenConfigured,
+                    transportConfigured,
+                    delegationAvailable,
                     productionReadAllowed,
                     "当前使用 Cloud 只读模拟数据，仅用于演示分析链路。"),
 
@@ -51,7 +87,8 @@ public static class CloudReadonlyStatusEvaluator
                     mode,
                     CloudReadonlyRuntimeStatuses.RealNotAllowed,
                     baseUrlConfigured,
-                    tokenConfigured,
+                    transportConfigured,
+                    delegationAvailable,
                     productionReadAllowed,
                     "Cloud 正式只读模式未完全放行，需要同时启用 CloudReadonly:Real、AllowProductionRead 和 CloudAiRead。"),
 
@@ -60,33 +97,37 @@ public static class CloudReadonlyStatusEvaluator
                     mode,
                     CloudReadonlyRuntimeStatuses.RealMissingBaseUrl,
                     baseUrlConfigured,
-                    tokenConfigured,
+                    transportConfigured,
+                    delegationAvailable,
                     productionReadAllowed,
                     "Cloud AiRead 已选择正式模式，但缺少有效 BaseUrl。"),
 
-            CloudReadonlyDataSourceMode.Real when !tokenConfigured =>
+            CloudReadonlyDataSourceMode.Real when !delegationAvailable =>
                 new CloudReadonlyStatusDto(
                     mode,
-                    CloudReadonlyRuntimeStatuses.RealMissingToken,
+                    CloudReadonlyRuntimeStatuses.RealMissingDelegation,
                     baseUrlConfigured,
-                    tokenConfigured,
+                    transportConfigured,
+                    delegationAvailable,
                     productionReadAllowed,
-                    "Cloud AiRead 已选择正式模式，但缺少 ServiceAccountToken。"),
+                    "Cloud AiRead 传输已配置，但当前用户缺少有效委托；请重新通过 Cloud 登录。"),
 
             CloudReadonlyDataSourceMode.Real =>
                 new CloudReadonlyStatusDto(
                     mode,
                     CloudReadonlyRuntimeStatuses.RealReady,
                     baseUrlConfigured,
-                    tokenConfigured,
+                    transportConfigured,
+                    delegationAvailable,
                     productionReadAllowed,
-                    "Cloud AiRead 正式只读数据源已配置，可读取和分析数据，但不会写入或修改 Cloud。"),
+                    "Cloud AiRead 正式只读传输和当前用户委托均有效，可读取授权范围内的数据。"),
 
             _ => new CloudReadonlyStatusDto(
                 mode,
                 CloudReadonlyRuntimeStatuses.Disabled,
                 baseUrlConfigured,
-                tokenConfigured,
+                transportConfigured,
+                delegationAvailable,
                 productionReadAllowed,
                 "Cloud 只读数据源未启用。可启用 Simulation 演示模式，或配置 Real + Cloud AiRead 读取正式数据。")
         };

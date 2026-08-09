@@ -8,7 +8,8 @@ namespace AICopilot.Infrastructure.CloudIdentity;
 
 public sealed class CloudIdentityStatusClient(
     HttpClient httpClient,
-    IOptions<CloudIdentityStatusOptions> options) : ICloudIdentityStatusClient
+    IOptions<CloudIdentityStatusOptions> options,
+    ICloudIdentityStatusTokenProvider tokenProvider) : ICloudIdentityStatusClient
 {
     public async Task<CloudIdentityStatusCheckResult> GetStatusAsync(
         string cloudUserId,
@@ -28,27 +29,41 @@ public sealed class CloudIdentityStatusClient(
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, BuildStatusUri(configuredOptions, cloudUserId, tenantId));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuredOptions.ServiceAccountToken);
-
-            using var response = await httpClient.SendAsync(request, timeoutCts.Token);
-            if (response.StatusCode == HttpStatusCode.NotFound)
+            for (var attempt = 0; attempt < 2; attempt++)
             {
-                return CloudIdentityStatusCheckResult.NotFound("Cloud identity was not found.");
+                var token = await tokenProvider.GetTokenAsync(timeoutCts.Token);
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    BuildStatusUri(configuredOptions, cloudUserId, tenantId));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var response = await httpClient.SendAsync(request, timeoutCts.Token);
+                if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0)
+                {
+                    tokenProvider.Invalidate();
+                    continue;
+                }
+
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return CloudIdentityStatusCheckResult.NotFound("Cloud identity was not found.");
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    return CloudIdentityStatusCheckResult.Unavailable(
+                        $"Cloud identity status endpoint returned {(int)response.StatusCode}.");
+                }
+
+                var status = await response.Content.ReadFromJsonAsync<CloudIdentityStatusSnapshot>(
+                    cancellationToken: timeoutCts.Token);
+
+                return status is null
+                    ? CloudIdentityStatusCheckResult.Unavailable("Cloud identity status endpoint returned an empty payload.")
+                    : CloudIdentityStatusCheckResult.Succeeded(status);
             }
 
-            if (!response.IsSuccessStatusCode)
-            {
-                return CloudIdentityStatusCheckResult.Unavailable(
-                    $"Cloud identity status endpoint returned {(int)response.StatusCode}.");
-            }
-
-            var status = await response.Content.ReadFromJsonAsync<CloudIdentityStatusSnapshot>(
-                cancellationToken: timeoutCts.Token);
-
-            return status is null
-                ? CloudIdentityStatusCheckResult.Unavailable("Cloud identity status endpoint returned an empty payload.")
-                : CloudIdentityStatusCheckResult.Succeeded(status);
+            return CloudIdentityStatusCheckResult.Unavailable(
+                "Cloud identity status endpoint rejected the renewed credential.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

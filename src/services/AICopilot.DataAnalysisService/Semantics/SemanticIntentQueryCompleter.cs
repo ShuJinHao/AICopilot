@@ -100,32 +100,10 @@ internal static partial class SemanticIntentQueryCompleter
         }
 
         var queryText = payload.QueryText;
-        var inferredScope = InferProductionScope(queryText);
-        var existingTypeKey = payload.GetFilterValue("typeKey");
-        var normalizedTypeKey = NormalizeProductionTypeKey(existingTypeKey);
         var inferredPreset = payload.HasFilter("preset")
             ? null
             : InferProductionPreset(queryText);
         var shouldRewrite = !payload.IsJson;
-
-        if (normalizedTypeKey is not null &&
-            !string.Equals(existingTypeKey, normalizedTypeKey, StringComparison.Ordinal))
-        {
-            payload.UpsertFilter("typeKey", normalizedTypeKey);
-            shouldRewrite = true;
-        }
-        else if (existingTypeKey is null && inferredScope is not null)
-        {
-            payload.UpsertFilter("typeKey", inferredScope.TypeKey);
-            shouldRewrite = true;
-        }
-
-        if (!payload.HasFilter("plcName") &&
-            !string.IsNullOrWhiteSpace(inferredScope?.PlcName))
-        {
-            payload.UpsertFilter("plcName", inferredScope.PlcName);
-            shouldRewrite = true;
-        }
 
         if (inferredPreset is not null)
         {
@@ -136,53 +114,6 @@ internal static partial class SemanticIntentQueryCompleter
         return shouldRewrite
             ? new SemanticIntentQueryCompletion(intent, payload.ToJson(), WasCompleted: true)
             : new SemanticIntentQueryCompletion(intent, query, WasCompleted: false);
-    }
-
-    private static ProductionScope? InferProductionScope(string? queryText)
-    {
-        if (string.IsNullOrWhiteSpace(queryText))
-        {
-            return null;
-        }
-
-        var match = ProductionPlcNameRegex().Match(queryText);
-        if (match.Success)
-        {
-            var processName = match.Groups["process"].Value;
-            var suffix = NormalizeDigits(match.Groups["suffix"].Value);
-            return new ProductionScope(
-                processName == "正极模切" ? "cp" : "ap",
-                processName + suffix);
-        }
-
-        if (queryText.Contains("正极模切", StringComparison.Ordinal))
-        {
-            return new ProductionScope("cp", null);
-        }
-
-        if (queryText.Contains("负极模切", StringComparison.Ordinal))
-        {
-            return new ProductionScope("ap", null);
-        }
-
-        return null;
-    }
-
-    private static string? NormalizeProductionTypeKey(string? typeKey)
-    {
-        if (string.IsNullOrWhiteSpace(typeKey))
-        {
-            return null;
-        }
-
-        return typeKey.Trim() switch
-        {
-            var value when value.Equals("cp", StringComparison.OrdinalIgnoreCase) => "cp",
-            var value when value.Equals("ap", StringComparison.OrdinalIgnoreCase) => "ap",
-            "正极模切" => "cp",
-            "负极模切" => "ap",
-            _ => null
-        };
     }
 
     private static string? InferProductionPreset(string? queryText)
@@ -208,13 +139,6 @@ internal static partial class SemanticIntentQueryCompleter
         }
 
         return null;
-    }
-
-    private static string NormalizeDigits(string value)
-    {
-        return string.Concat(value.Select(character => character is >= '０' and <= '９'
-            ? (char)('0' + character - '０')
-            : character));
     }
 
     private static LevelFilter? InferLevelFilter(string? queryText)
@@ -579,12 +503,7 @@ internal static partial class SemanticIntentQueryCompleter
 
     private sealed record RelativeTimeRange(DateTimeOffset Start, DateTimeOffset End);
 
-    private sealed record ProductionScope(string TypeKey, string? PlcName);
-
     [GeneratedRegex(@"(?:最近|近|过去)\s*(?<amount>\d+|一|二|两|三|四|五|六|七|八|九|十)\s*(?<unit>天|日|小时|时|d|D|h|H)", RegexOptions.CultureInvariant)]
     private static partial Regex RelativeTimeRangeRegex();
-
-    [GeneratedRegex(@"(?<process>正极模切|负极模切)\s*(?<suffix>[0-9０-９]{1,4})", RegexOptions.CultureInvariant)]
-    private static partial Regex ProductionPlcNameRegex();
 
 }

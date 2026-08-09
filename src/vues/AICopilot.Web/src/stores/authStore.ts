@@ -307,6 +307,19 @@ export const useAuthStore = defineStore('auth', () => {
     return await ensureCurrentUser(true)
   }
 
+  async function logout() {
+    try {
+      if (token.value) {
+        await identityService.revokeCurrentCloudDelegation()
+      }
+    } catch (error) {
+      void error
+      console.warn('Cloud delegation revocation failed during logout; local auth will still be cleared.')
+    } finally {
+      clearAuth()
+    }
+  }
+
   function clearAuth(message?: string) {
     token.value = ''
     currentUser.value = null
@@ -359,6 +372,7 @@ export const useAuthStore = defineStore('auth', () => {
     finalizeCloudOidcLogin,
     confirmExistingCloudOidcAccount,
     cancelCloudOidcAccountConfirmation,
+    logout,
     resolveUnauthorizedMessage,
     clearAuth
   }

@@ -579,6 +579,10 @@ public sealed class MafNativeModeContractTests
         {
         }
 
+        public void Invalidate(Guid sessionId)
+        {
+        }
+
         public BusinessQueryConfirmationChallenge BeginConfirmation(BusinessQueryContext requested) =>
             throw new InvalidOperationException("Confirmation is not expected in the catalog test.");
 

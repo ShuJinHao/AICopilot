@@ -78,6 +78,27 @@ public static class PostgreSqlAdvisoryLock
         await command.ExecuteScalarAsync(cancellationToken);
     }
 
+    public static async Task<bool> TryAcquireTransactionAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        long key,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+        if (!ReferenceEquals(connection, transaction.Connection))
+        {
+            throw new InvalidOperationException(
+                "PostgreSQL advisory transaction lock must use the transaction's connection.");
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT pg_try_advisory_xact_lock(@lock_key)";
+        AddKeyParameter(command, key);
+        return await command.ExecuteScalarAsync(cancellationToken) is true;
+    }
+
     private static void AddKeyParameter(DbCommand command, long key)
     {
         var parameter = command.CreateParameter();

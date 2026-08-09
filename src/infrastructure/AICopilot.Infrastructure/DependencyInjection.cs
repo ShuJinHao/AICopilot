@@ -17,6 +17,7 @@ using AICopilot.Infrastructure.Storage;
 using AICopilot.Services.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Reflection;
@@ -35,9 +36,16 @@ public static class DependencyInjection
         builder.AddAiRuntime();
 
         AddLocalFileStorage(builder.Services);
+        builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+        builder.Services.AddSingleton<
+            ICloudIdentityStatusTokenProvider,
+            CloudIdentityStatusTokenProvider>();
         builder.Services.AddHttpClient<ICloudIdentityStatusClient, CloudIdentityStatusClient>();
         builder.Services.AddHttpClient<ICloudAiReadClient, CloudAiReadClient>();
+        builder.Services.AddScoped<
+            ICloudDelegationAccessTokenProvider,
+            CloudDelegationAccessTokenProvider>();
         builder.Services.AddScoped<IChatClientProvider, OpenAiChatClientProvider>();
         builder.Services.AddScoped<IChatClientProvider, AnthropicChatClientProvider>();
         builder.Services.AddTransient<AiProviderRetryHandler>();

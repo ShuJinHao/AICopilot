@@ -29,8 +29,8 @@ internal static class HttpApiOptionsConfiguration
         builder.Services.Configure<JwtSettings>(configurationSection);
         builder.Services.Configure<CloudOidcOptions>(
             builder.Configuration.GetSection(CloudOidcOptions.SectionName));
-        builder.Services.Configure<CloudOidcBootstrapAdminBindingOptions>(
-            builder.Configuration.GetSection(CloudOidcBootstrapAdminBindingOptions.SectionName));
+        builder.Services.Configure<CloudOidcCanonicalAdminOptions>(
+            builder.Configuration.GetSection(CloudOidcCanonicalAdminOptions.SectionName));
         builder.Services.Configure<CloudIdentityStatusOptions>(
             builder.Configuration.GetSection(CloudIdentityStatusOptions.SectionName));
         builder.Services.Configure<CloudReadonlyOptions>(
@@ -43,10 +43,10 @@ internal static class HttpApiOptionsConfiguration
             .Get<CloudOidcOptions>() ?? new CloudOidcOptions();
         cloudOidcOptions.EnsureValid(builder.Environment.EnvironmentName);
 
-        var cloudOidcBootstrapAdminBindingOptions = builder.Configuration
-            .GetSection(CloudOidcBootstrapAdminBindingOptions.SectionName)
-            .Get<CloudOidcBootstrapAdminBindingOptions>() ?? new CloudOidcBootstrapAdminBindingOptions();
-        cloudOidcBootstrapAdminBindingOptions.EnsureValid();
+        var cloudOidcCanonicalAdminOptions = builder.Configuration
+            .GetSection(CloudOidcCanonicalAdminOptions.SectionName)
+            .Get<CloudOidcCanonicalAdminOptions>() ?? new CloudOidcCanonicalAdminOptions();
+        cloudOidcCanonicalAdminOptions.EnsureValid();
 
         var cloudIdentityStatusSection = builder.Configuration.GetSection(CloudIdentityStatusOptions.SectionName);
         var cloudIdentityStatusOptions = cloudIdentityStatusSection.Get<CloudIdentityStatusOptions>()
@@ -59,7 +59,7 @@ internal static class HttpApiOptionsConfiguration
         var cloudAiReadOptions = builder.Configuration
             .GetSection(CloudAiReadOptions.SectionName)
             .Get<CloudAiReadOptions>() ?? new CloudAiReadOptions();
-        cloudAiReadOptions.EnsureValid();
+        cloudAiReadOptions.EnsureValid(requireDelegationProbe: cloudOidcOptions.IsConfigured());
 
         var cloudReadonlyOptions = builder.Configuration
             .GetSection(CloudReadonlyOptions.SectionName)

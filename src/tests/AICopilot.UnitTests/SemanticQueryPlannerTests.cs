@@ -86,6 +86,28 @@ public sealed class SemanticQueryPlannerTests
     }
 
     [Theory]
+    [InlineData("Analysis.ProductionData.Latest", false)]
+    [InlineData("Analysis.ProductionData.Range", true)]
+    [InlineData("Analysis.ProductionData.ByDevice", false)]
+    public void Planner_ShouldAcceptDeviceNameForEveryProductionIntent(
+        string intent,
+        bool requiresTimeRange)
+    {
+        var timeRange = requiresTimeRange
+            ? ",\"timeRange\":{\"field\":\"completedAt\",\"start\":\"2026-04-20T00:00:00Z\",\"end\":\"2026-04-21T00:00:00Z\"}"
+            : string.Empty;
+        var result = _planner.Plan(
+            intent,
+            "{\"filters\":[{\"field\":\"deviceName\",\"operator\":\"eq\",\"value\":\"P2 模切\"}]" +
+            timeRange +
+            "}");
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.Plan!.Filters.Should().ContainSingle(filter =>
+            filter.Field == "deviceName" && filter.Value == "P2 模切");
+    }
+
+    [Theory]
     [InlineData("Analysis.Device.List", "{\"fields\":[\"password\"]}", "projection whitelist")]
     [InlineData("Analysis.DeviceLog.Range", "{\"filters\":[{\"field\":\"deviceCode\",\"operator\":\"eq\",\"value\":\"DEV-01\"}]}", "timeRange")]
     [InlineData("Analysis.Recipe.Detail", "{\"filters\":[{\"field\":\"processName\",\"operator\":\"eq\",\"value\":\"Cutting\"}]}", "recipeId")]
@@ -227,64 +249,41 @@ public sealed class SemanticQueryPlannerTests
     }
 
     [Theory]
-    [InlineData("查询今天正极模切05的弹夹、冲切数量和速度", "cp", "正极模切05", "today")]
-    [InlineData("查询昨日负极模切12生产记录", "ap", "负极模切12", "yesterday")]
-    [InlineData("查询最近24小时正极模切生产记录", "cp", null, "last_24h")]
-    public void Planner_ShouldCompleteCpApProductionSemantics(
-        string query,
-        string expectedTypeKey,
-        string? expectedPlcName,
-        string expectedPreset)
+    [InlineData("查询今天正极模切05的弹夹、冲切数量和速度")]
+    [InlineData("查询昨日负极模切12生产记录")]
+    [InlineData("查询最近24小时正极模切生产记录")]
+    public void Planner_ShouldNotInferDevicePlcOrTypeKeyFromCurrentSiteNames(string query)
     {
         var result = _planner.Plan("Analysis.ProductionData.ByDevice", query);
 
-        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
-        result.Plan.Should().NotBeNull();
-        result.Plan!.Filters.Should().Contain(filter =>
-            filter.Field == "typeKey" &&
-            filter.Operator == SemanticFilterOperator.Equal &&
-            filter.Value == expectedTypeKey);
-        result.Plan.Filters.Should().Contain(filter =>
-            filter.Field == "preset" &&
-            filter.Operator == SemanticFilterOperator.Equal &&
-            filter.Value == expectedPreset);
-        if (expectedPlcName is null)
-        {
-            result.Plan.Filters.Should().NotContain(filter => filter.Field == "plcName");
-        }
-        else
-        {
-            result.Plan.Filters.Should().Contain(filter =>
-                filter.Field == "plcName" &&
-                filter.Operator == SemanticFilterOperator.Equal &&
-                filter.Value == expectedPlcName);
-        }
+        result.IsSuccess.Should().BeFalse();
+        result.FailureKind.Should().Be(SemanticPlanningFailureKind.NeedClarification);
+        result.Plan.Should().BeNull();
     }
 
     [Fact]
-    public void Planner_ShouldNormalizeChineseTypeKeyAlias()
+    public void Planner_ShouldKeepCloudDeclaredTypeKeyWithoutNameAliasMapping()
     {
         var result = _planner.Plan(
             "Analysis.ProductionData.ByDevice",
-            """{"queryText":"查询正极模切生产记录","filters":[{"field":"typeKey","operator":"eq","value":"正极模切"},{"field":"preset","operator":"eq","value":"today"}]}""");
+            """{"queryText":"查询设备的模切完成记录","filters":[{"field":"deviceCode","operator":"eq","value":"DEV-001"},{"field":"typeKey","operator":"eq","value":"die-cutting-completion"},{"field":"preset","operator":"eq","value":"today"}]}""");
 
         result.IsSuccess.Should().BeTrue(result.ErrorMessage);
         result.Plan!.Filters.Should().Contain(filter =>
             filter.Field == "typeKey" &&
-            filter.Value == "cp");
+            filter.Value == "die-cutting-completion");
     }
 
     [Fact]
-    public void Planner_ShouldAcceptPlcNameAsSingleDeviceScope()
+    public void Planner_ShouldRejectPlcNameAsAReplacementForDevicePluginScope()
     {
         var result = _planner.Plan(
             "Analysis.ProductionData.ByDevice",
             """{"queryText":"查询正极模切05","filters":[{"field":"plcName","operator":"eq","value":"正极模切05"}]}""");
 
-        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
-        result.Plan!.Filters.Should().ContainSingle(filter =>
-            filter.Field == "plcName" &&
-            filter.Value == "正极模切05");
+        result.IsSuccess.Should().BeFalse();
+        result.FailureKind.Should().Be(SemanticPlanningFailureKind.NeedClarification);
+        result.Plan.Should().BeNull();
     }
 
     [Fact]

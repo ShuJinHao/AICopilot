@@ -49,13 +49,13 @@ public sealed class BusinessQueryPipelineTests
     }
 
     [Theory]
-    [InlineData(BusinessQueryOutcome.Unsupported, true)]
-    [InlineData(BusinessQueryOutcome.Unavailable, true)]
+    [InlineData(BusinessQueryOutcome.Unsupported, false)]
+    [InlineData(BusinessQueryOutcome.Unavailable, false)]
     [InlineData(BusinessQueryOutcome.Success, false)]
     [InlineData(BusinessQueryOutcome.Empty, false)]
     [InlineData(BusinessQueryOutcome.NeedClarification, false)]
     [InlineData(BusinessQueryOutcome.Unauthorized, false)]
-    public void FallbackPolicy_ShouldOnlyAllowEligibleSameSourceOutcomes(
+    public void FallbackPolicy_ShouldFailClosedForEveryRealCloudProviderOutcome(
         BusinessQueryOutcome outcome,
         bool expected)
     {
@@ -74,6 +74,7 @@ public sealed class BusinessQueryPipelineTests
             StandardBusinessDataSourceProfiles.CloudReadOnly);
 
         decision.IsEligible.Should().Be(expected);
+        decision.ReasonCode.Should().Be("real_cloud_text_to_sql_temporarily_closed");
     }
 
     [Fact]
@@ -95,7 +96,7 @@ public sealed class BusinessQueryPipelineTests
                 cloudContext,
                 crossSourceResult,
                 StandardBusinessDataSourceProfiles.CloudReadOnly)
-            .ReasonCode.Should().Be("cross_source_fallback_forbidden");
+            .ReasonCode.Should().Be("real_cloud_text_to_sql_temporarily_closed");
 
         var simulationContext = CreateContext(
             DataSourceExternalSystemType.SimulationBusiness,
@@ -114,6 +115,81 @@ public sealed class BusinessQueryPipelineTests
                 simulationResult,
                 simulationProfile)
             .ReasonCode.Should().Be("explicit_source_selection_required");
+    }
+
+    [Fact]
+    public void FallbackPolicy_ShouldCloseRealCloudBeforeProductionScopeEvaluation()
+    {
+        var unsealedPlan = new SemanticQueryPlan(
+            "Analysis.ProductionData.ByDevice",
+            SemanticQueryTarget.ProductionData,
+            SemanticQueryKind.ByDevice,
+            "query",
+            new SemanticProjection(["recordId"]),
+            [new SemanticFilter("deviceId", SemanticFilterOperator.Equal, Guid.NewGuid().ToString("D"))],
+            null,
+            null,
+            20);
+        var context = CreateContext(
+                DataSourceExternalSystemType.CloudReadOnly,
+                sourceExplicitlySelected: true) with
+            {
+                Capability = BusinessDataCapability.ProductionRecord,
+                SemanticPlan = unsealedPlan
+            };
+        var result = BusinessQueryProviderResult.FromOutcome(
+            context,
+            "cloud-plugin",
+            BusinessQueryOutcome.Unavailable,
+            "safe");
+
+        var decision = BusinessQueryFallbackPolicy.EvaluateSameSourceTextToSql(
+            context,
+            result,
+            StandardBusinessDataSourceProfiles.CloudReadOnly);
+
+        decision.IsEligible.Should().BeFalse();
+        decision.ReasonCode.Should().Be("real_cloud_text_to_sql_temporarily_closed");
+    }
+
+    [Fact]
+    public void FallbackPolicy_ShouldFailClosedForProductionEvenAfterExactScopeIsSealed()
+    {
+        var sealedPlan = new SemanticQueryPlan(
+            "Analysis.ProductionData.ByDevice",
+            SemanticQueryTarget.ProductionData,
+            SemanticQueryKind.ByDevice,
+            "query",
+            new SemanticProjection(["recordId"]),
+            [
+                new SemanticFilter("deviceId", SemanticFilterOperator.Equal, Guid.NewGuid().ToString("D")),
+                new SemanticFilter("plcCode", SemanticFilterOperator.Equal, "PLC-01"),
+                new SemanticFilter("typeKey", SemanticFilterOperator.Equal, "die-cutting-completion")
+            ],
+            null,
+            null,
+            20);
+        var context = CreateContext(
+                DataSourceExternalSystemType.CloudReadOnly,
+                sourceExplicitlySelected: true) with
+            {
+                Capability = BusinessDataCapability.ProductionRecord,
+                SemanticPlan = sealedPlan
+            };
+        var result = BusinessQueryProviderResult.FromOutcome(
+            context,
+            "cloud-plugin",
+            BusinessQueryOutcome.Unavailable,
+            "safe");
+
+        var decision = BusinessQueryFallbackPolicy.EvaluateSameSourceTextToSql(
+            context,
+            result,
+            StandardBusinessDataSourceProfiles.CloudReadOnly);
+
+        decision.IsEligible.Should().BeFalse();
+        decision.ReasonCode.Should().Be(
+            "real_cloud_text_to_sql_temporarily_closed");
     }
 
     [Fact]
@@ -431,6 +507,113 @@ public sealed class BusinessQueryPipelineTests
     }
 
     [Fact]
+    public void Invalidate_ShouldRemoveConfirmedAndPendingContextForOnlyThatSession()
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 9, 8, 0, 0, TimeSpan.Zero));
+        var store = new BusinessQueryContextStore(clock, TimeSpan.FromMinutes(30));
+        var first = CreateContext(
+            DataSourceExternalSystemType.CloudReadOnly,
+            sourceExplicitlySelected: true).Confirm(clock.UtcNow);
+        var second = CreateContext(
+            DataSourceExternalSystemType.CloudReadOnly,
+            sourceExplicitlySelected: true) with { SessionId = Guid.NewGuid() };
+        second = second.Confirm(clock.UtcNow);
+        store.Remember(first);
+        store.Remember(second);
+
+        store.Invalidate(first.SessionId);
+
+        var incomplete = new BusinessQueryConfirmation(false, false, false, false, false);
+        store.Resolve(first with
+        {
+            Confirmation = incomplete,
+            ConfirmedAtUtc = null
+        }).IsConfirmed.Should().BeFalse();
+        store.Resolve(second with
+        {
+            Confirmation = incomplete,
+            ConfirmedAtUtc = null
+        }).IsConfirmed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Resolve_ConfirmedProductionMetadataChanged_ShouldRequireNewConfirmation()
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 9, 8, 0, 0, TimeSpan.Zero));
+        var store = new BusinessQueryContextStore(clock, TimeSpan.FromMinutes(30));
+        var sessionId = Guid.NewGuid();
+        var dataSourceId = Guid.NewGuid();
+        var confirmed = CreateProductionContext(
+                sessionId,
+                dataSourceId,
+                pluginVersion: "2.0.12",
+                schemaVersion: 1,
+                BusinessQueryConfirmation.Complete)
+            .Confirm(clock.UtcNow);
+        store.Remember(confirmed);
+        var requested = CreateProductionContext(
+            sessionId,
+            dataSourceId,
+            pluginVersion: "2.0.13",
+            schemaVersion: 2,
+            new BusinessQueryConfirmation(false, false, false, false, false));
+
+        var resolved = store.Resolve(requested);
+
+        resolved.IsConfirmed.Should().BeFalse();
+        resolved.ConfirmedAtUtc.Should().BeNull();
+        resolved.Confirmation.Filters.Should().BeFalse();
+        resolved.SemanticPlan!.ProductionMetadataSeal!.PluginVersion.Should().Be("2.0.13");
+    }
+
+    [Theory]
+    [InlineData("result", "pass")]
+    [InlineData("preset", "today")]
+    [InlineData("fieldMode", "summary")]
+    public void Resolve_ConfirmedProductionFilterChanged_ShouldRequireNewConfirmation(
+        string field,
+        string value)
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 9, 8, 0, 0, TimeSpan.Zero));
+        var store = new BusinessQueryContextStore(clock, TimeSpan.FromMinutes(30));
+        var sessionId = Guid.NewGuid();
+        var dataSourceId = Guid.NewGuid();
+        var confirmed = CreateProductionContext(
+                sessionId,
+                dataSourceId,
+                pluginVersion: "2.0.12",
+                schemaVersion: 1,
+                BusinessQueryConfirmation.Complete)
+            .Confirm(clock.UtcNow);
+        store.Remember(confirmed);
+        var requested = CreateProductionContext(
+            sessionId,
+            dataSourceId,
+            pluginVersion: "2.0.12",
+            schemaVersion: 1,
+            new BusinessQueryConfirmation(false, false, false, false, false));
+        requested = requested with
+        {
+            SemanticPlan = requested.SemanticPlan! with
+            {
+                Filters = requested.SemanticPlan.Filters
+                    .Append(new SemanticFilter(field, SemanticFilterOperator.Equal, value))
+                    .OrderBy(filter => filter.Field, StringComparer.Ordinal)
+                    .ToArray()
+            }
+        };
+
+        var resolved = store.Resolve(requested);
+
+        resolved.IsConfirmed.Should().BeFalse();
+        resolved.ConfirmedAtUtc.Should().BeNull();
+        resolved.Confirmation.Filters.Should().BeFalse();
+    }
+
+    [Fact]
     public void ProviderRegistry_ShouldRequireExplicitSimulationSelection()
     {
         var provider = new StubBusinessQueryProvider(
@@ -476,7 +659,7 @@ public sealed class BusinessQueryPipelineTests
                 context,
                 pluginResult,
                 StandardBusinessDataSourceProfiles.CloudReadOnly)
-            .ReasonCode.Should().Be("capability_fallback_disabled");
+            .ReasonCode.Should().Be("real_cloud_text_to_sql_temporarily_closed");
     }
 
     [Fact]
@@ -846,6 +1029,46 @@ public sealed class BusinessQueryPipelineTests
             "query",
             sourceExplicitlySelected,
             BusinessQueryConfirmation.Complete);
+    }
+
+    private static BusinessQueryContext CreateProductionContext(
+        Guid sessionId,
+        Guid dataSourceId,
+        string pluginVersion,
+        int schemaVersion,
+        BusinessQueryConfirmation confirmation)
+    {
+        var deviceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        return new BusinessQueryContext(
+            sessionId,
+            StandardBusinessDataSourceProfiles.CloudReadOnly.Code,
+            dataSourceId,
+            DataSourceExternalSystemType.CloudReadOnly,
+            BusinessDataCapability.ProductionRecord,
+            "query",
+            SourceExplicitlySelected: true,
+            confirmation,
+            new SemanticQueryPlan(
+                "Analysis.ProductionData.ByDevice",
+                SemanticQueryTarget.ProductionData,
+                SemanticQueryKind.ByDevice,
+                "query",
+                new SemanticProjection(["recordId"]),
+                [
+                    new SemanticFilter("deviceId", SemanticFilterOperator.Equal, deviceId.ToString("D")),
+                    new SemanticFilter("plcCode", SemanticFilterOperator.Equal, "P2-PLC05"),
+                    new SemanticFilter("typeKey", SemanticFilterOperator.Equal, "die-cutting-completion")
+                ],
+                null,
+                null,
+                20,
+                new ProductionQueryMetadataSeal(
+                    deviceId,
+                    "P2-PLC05",
+                    "die-cutting-completion",
+                    pluginVersion,
+                    $"die-cutting-completion.v{schemaVersion}",
+                    schemaVersion)));
     }
 
     private static IBusinessDataSourceProfileRegistry CreateProfileRegistry(

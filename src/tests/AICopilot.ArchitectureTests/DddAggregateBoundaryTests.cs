@@ -66,6 +66,7 @@ public sealed class DddAggregateBoundaryTests
             ["OutboxMessage"] = "Audit",
             ["PersistenceCommitMarker"] = "RuntimeRecord",
             ["ApplicationUser"] = "IdentityRecord",
+            ["CloudDelegationGrant"] = "IdentityRecord",
             ["ExternalIdentityBinding"] = "IdentityRecord",
             ["IdentityRoleClaim`1"] = "IdentityRecord",
             ["IdentityRole`1"] = "IdentityRecord",

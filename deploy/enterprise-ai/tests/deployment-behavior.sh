@@ -54,7 +54,7 @@ sha256_file() {
 }
 
 mkdir -p "$BIN_DIR" "$REMOTE_DIR/releases/history" "$DATA_DIR"
-git clone --quiet "$SOURCE_ROOT" "$REPO_DIR"
+git clone --quiet --no-local "$SOURCE_ROOT" "$REPO_DIR"
 git -C "$REPO_DIR" checkout --quiet -B main "$SOURCE_BASE_SHA"
 
 # The production entry deliberately refuses a dirty source tree. Create a clean,
@@ -71,7 +71,7 @@ if ! git -C "$REPO_DIR" diff --cached --quiet; then
     commit --quiet -m 'test: snapshot current deployment files'
 fi
 SOURCE_SHA="$(git -C "$REPO_DIR" rev-parse HEAD)"
-git clone --quiet --bare "$REPO_DIR" "$ORIGIN_DIR"
+git clone --quiet --no-local --bare "$REPO_DIR" "$ORIGIN_DIR"
 git -C "$REPO_DIR" remote set-url origin "$ORIGIN_DIR"
 
 cat > "$BIN_DIR/dotnet" <<'EOF'
@@ -355,6 +355,7 @@ POSTGRES_DB=aicopilot
 POSTGRES_PASSWORD=PgStrongSecretValue1234
 RABBITMQ_PASSWORD=RbStrongSecretValue1234
 QDRANT_KEY=QdStrongSecretValue1234
+AICOPILOT_BOOTSTRAP_ADMIN_USERNAME=bootstrap-admin
 AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD=AdminStrong1234
 AICOPILOT_API_KEY_ENCRYPTION_KEY=EncryptionKeyValue01234567890123456789
 AICOPILOT_JWT_SECRET_KEY=JwtSecretValue012345678901234567890123456789012345678901234567890123
@@ -363,8 +364,9 @@ CLOUD_READONLY_REAL_ENABLED=false
 CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=false
 CLOUD_AI_READ_ENABLED=false
 CLOUD_AI_READ_BASE_URL=http://cloud.factory.internal:81
-CLOUD_IDENTITY_STATUS_ENABLED=false
+CLOUD_IDENTITY_STATUS_ENABLED=true
 CLOUD_IDENTITY_STATUS_BASE_URL=http://cloud.factory.internal:81
+AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET=IdentityStatusSigningSecretValue0123456789
 DATA_ANALYSIS_CLOUD_READONLY_ENABLED=false
 AICOPILOT_MODEL_SMOKE_ENABLED=false
 AICOPILOT_MODEL_SMOKE_BASE_URL=http://model.factory.internal:40034/v1
@@ -492,7 +494,7 @@ assert_file_contains "$TEST_ROOT/sha-mismatch.log" "candidate SHA mismatch"
 
 printf 'TEST clean local HEAD behind fresh origin/main tip is rejected\n'
 ADVANCER_DIR="$TEST_ROOT/origin-advancer"
-git clone --quiet "$ORIGIN_DIR" "$ADVANCER_DIR"
+git clone --quiet --no-local "$ORIGIN_DIR" "$ADVANCER_DIR"
 printf 'advance\n' > "$ADVANCER_DIR/remote-advance.txt"
 git -C "$ADVANCER_DIR" add remote-advance.txt
 git -C "$ADVANCER_DIR" -c user.name='AICopilot deployment test' -c user.email='aicopilot-deployment-test@invalid.example' commit --quiet -m 'test: advance remote tip'

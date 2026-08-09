@@ -1,4 +1,5 @@
 using System.Net;
+using AICopilot.Services.Contracts;
 
 namespace AICopilot.HttpApi.Infrastructure;
 
@@ -33,7 +34,7 @@ public sealed class CloudOidcOptions
 
     public string ExternalCookieName { get; init; } = "__Host-AICopilot-CloudOidc-External";
 
-    public string[] Scopes { get; init; } = ["openid", "profile"];
+    public string[] Scopes { get; init; } = ["openid", "profile", CloudDelegationDefaults.Scope];
 
     public bool IsConfigured()
     {
@@ -74,6 +75,18 @@ public sealed class CloudOidcOptions
         if (string.IsNullOrWhiteSpace(FrontendCompletionPath))
         {
             throw new InvalidOperationException("CloudOidc:FrontendCompletionPath is required when CloudOidc is enabled.");
+        }
+
+        var requestedScopes = Scopes
+            .Where(scope => !string.IsNullOrWhiteSpace(scope))
+            .Select(scope => scope.Trim())
+            .ToHashSet(StringComparer.Ordinal);
+        if (!requestedScopes.Contains("openid") ||
+            !requestedScopes.Contains("profile") ||
+            !requestedScopes.Contains(CloudDelegationDefaults.Scope))
+        {
+            throw new InvalidOperationException(
+                "CloudOidc:Scopes must contain openid, profile, and iiot.ai.read.");
         }
 
         var issuer = ParseHttpUri(Issuer);

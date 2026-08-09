@@ -11,7 +11,7 @@ namespace AICopilot.UnitTests;
 public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
 {
     [Fact]
-    public async Task GenerateAsync_ShouldUseConfiguredRuntimeSessionAndStructuredJson()
+    public async Task GenerateAsync_RealCloud_ShouldFailBeforeRuntimeSession()
     {
         var runtimeFactory = new FakeRuntimeAgentFactory();
         runtimeFactory.EnqueueStructuredResultJson(
@@ -32,32 +32,10 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
             StandardBusinessDataSourceProfiles.CloudReadOnly,
             []));
 
-        result.IsSuccess.Should().BeTrue();
-        result.Sql.Should().Contain("@client_code");
-        result.Parameters.Should().ContainKey("client_code")
-            .WhoseValue.Should().Be("DEV-001");
-
-        runtimeFactory.LastCreateRequest.Should().NotBeNull();
-        runtimeFactory.LastCreateRequest!.Template.Name.Should().Be("business_readonly_text_to_sql");
-        runtimeFactory.LastCreateRequest.Options.Tools.Should().BeEmpty();
-        runtimeFactory.LastCreateRequest.Options.Temperature.Should().Be(0);
-        runtimeFactory.LastRun.Should().NotBeNull();
-        runtimeFactory.LastRun!.Options!.Options.Tools.Should().BeEmpty();
-        runtimeFactory.LastRun.Options.Options.Temperature.Should().Be(0);
-        runtimeFactory.LastRun.InputText.Should().Contain("governedSchema");
-        runtimeFactory.LastRun.InputText.Should().Contain("allowedSchemas");
-        runtimeFactory.LastRun.InputText.Should().Contain("schema.table");
-        runtimeFactory.LastRun.InputText.Should().Contain("columnTypes");
-        runtimeFactory.LastRun.InputText.Should().Contain("valueHint");
-        runtimeFactory.LastRun.InputText.Should().Contain("joinHints");
-        runtimeFactory.LastRun.InputText.Should().Contain("devices");
-        runtimeFactory.LastRun.InputText.Should().Contain("client_code");
-        runtimeFactory.LastRun.InputText.Should().Contain("uuid");
-        runtimeFactory.LastRun.InputText.Should().Contain("Allowed values are ERROR, WARN, INFO");
-        runtimeFactory.LastRun.InputText.Should().Contain("device_logs.device_id");
-        runtimeFactory.LastRun.InputText.Should().Contain("devices.id");
-        runtimeFactory.LastRun.InputText.Should().NotContain("Password=");
-        runtimeFactory.LastRun.InputText.Should().NotContain("bootstrap_secret_hash");
+        result.IsSuccess.Should().BeFalse();
+        result.FailureReason.Should().Contain("Real Cloud Text-to-SQL");
+        runtimeFactory.LastCreateRequest.Should().BeNull();
+        runtimeFactory.LastRun.Should().BeNull();
     }
 
     [Fact]
@@ -79,7 +57,7 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
         var result = await generator.GenerateAsync(new BusinessTextToSqlGenerationRequest(
             "查看 DEV-001 设备",
             10,
-            StandardBusinessDataSourceProfiles.CloudReadOnly,
+            CreateNonCloudProfile(),
             []));
 
         result.IsSuccess.Should().BeFalse();
@@ -98,7 +76,22 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
             }
             """);
         var generator = CreateGenerator(runtimeFactory);
-        var profile = new BusinessDataSourceProfile(
+        var profile = CreateNonCloudProfile();
+
+        await generator.GenerateAsync(new BusinessTextToSqlGenerationRequest(
+            "查看 MES 设备",
+            10,
+            profile,
+            []));
+
+        runtimeFactory.LastRun!.InputText.Should().Contain("\"dialect\":\"SQL Server\"");
+        runtimeFactory.LastRun.InputText.Should().Contain("mes_devices");
+        runtimeFactory.LastRun.InputText.Should().Contain("uniqueidentifier");
+        runtimeFactory.LastRun.InputText.Should().NotContain("\"table\":\"devices\"");
+    }
+
+    private static BusinessDataSourceProfile CreateNonCloudProfile() =>
+        new(
             "mes-readonly",
             DataSourceExternalSystemType.NonCloud,
             DatabaseProviderType.SqlServer,
@@ -133,18 +126,6 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
                     StringComparer.OrdinalIgnoreCase),
                 []));
 
-        await generator.GenerateAsync(new BusinessTextToSqlGenerationRequest(
-            "查看 MES 设备",
-            10,
-            profile,
-            []));
-
-        runtimeFactory.LastRun!.InputText.Should().Contain("\"dialect\":\"SQL Server\"");
-        runtimeFactory.LastRun.InputText.Should().Contain("mes_devices");
-        runtimeFactory.LastRun.InputText.Should().Contain("uniqueidentifier");
-        runtimeFactory.LastRun.InputText.Should().NotContain("\"table\":\"devices\"");
-    }
-
     private static BusinessLlmTextToSqlGenerator CreateGenerator(FakeRuntimeAgentFactory runtimeFactory)
     {
         var model = FakeRuntimeAgentFactory.CreateModel();
@@ -159,6 +140,7 @@ public sealed class CloudReadOnlyLlmTextToSqlGeneratorTests
             configuredFactory,
             Options.Create(new CloudReadOnlyTextToSqlOptions
             {
+                Enabled = true,
                 TemplateName = "business_readonly_text_to_sql"
             }));
     }

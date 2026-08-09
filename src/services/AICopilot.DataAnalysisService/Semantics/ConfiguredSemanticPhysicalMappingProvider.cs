@@ -35,22 +35,19 @@ public sealed class ConfiguredSemanticPhysicalMappingProvider : ISemanticPhysica
             "DataAnalysis:CloudReadOnly:Enabled",
             "AICopilot:DataAnalysis:CloudReadOnly:Enabled",
             fallback: false);
+        if (directCloudReadOnlyEnabled)
+        {
+            throw new InvalidOperationException(
+                "Real Cloud Direct DB semantic mappings are temporarily closed and cannot be enabled by configuration.");
+        }
 
-        var sharedDatabaseName = directCloudReadOnlyEnabled
-            ? GetValue(
-                configuration,
-                "DataAnalysis:CloudReadOnly:DatabaseName",
-                "AICopilot:DataAnalysis:CloudReadOnly:DatabaseName",
-                DefaultDatabaseName)
-            : GetValue(
-                configuration,
-                "SemanticMappings:DatabaseName",
-                "AICopilot:SemanticMappings:DatabaseName",
-                DefaultDatabaseName);
+        var sharedDatabaseName = GetValue(
+            configuration,
+            "SemanticMappings:DatabaseName",
+            "AICopilot:SemanticMappings:DatabaseName",
+            DefaultDatabaseName);
 
-        var defaults = directCloudReadOnlyEnabled
-            ? CreateRealCloudReadOnlyDefaults()
-            : CreateSimulationDefaults();
+        var defaults = CreateSimulationDefaults();
 
         return defaults.ToDictionary(
             item => item.Target,

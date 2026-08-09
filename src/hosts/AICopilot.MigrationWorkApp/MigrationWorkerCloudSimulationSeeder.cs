@@ -44,7 +44,7 @@ internal static class MigrationWorkerCloudSimulationSeeder
         if (!string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                "CloudReadonly:Mode=Simulation is only allowed in Development. Production deployments must use Real Cloud AiRead and must not seed simulation data sources.");
+                "CloudReadonly:Mode=Simulation is only allowed in Development. Production deployments must use typed Cloud AiRead with runtime current-user delegation and must not seed simulation data sources.");
         }
 
         var enabled = configuration["CloudReadonly:Simulation:Enabled"];

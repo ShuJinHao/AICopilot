@@ -293,6 +293,102 @@ internal static class CloudAiReadDocumentAdapter
         return BuildResult(sourcePath, "Cloud AiRead API（生产记录正式只读数据）", limit, root, items, rows);
     }
 
+    public static CloudAiReadResult<CloudAiReadDevicePlcDto> MapDevicePlcs(
+        JsonElement root,
+        string sourcePath,
+        int limit)
+    {
+        var records = CloudAiReadJsonValueReader.ExtractRecords(
+            root,
+            limit,
+            CloudAiReadOperation.DevicePlc);
+        var items = records.Select(record => new CloudAiReadDevicePlcDto(
+            CloudAiReadJsonValueReader.GetRequiredGuid(record, "deviceId"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "deviceName"),
+            CloudAiReadJsonValueReader.GetRequiredGuid(record, "processId"),
+            CloudAiReadJsonValueReader.GetString(record, "pluginVersion"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "plcCode"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "plcName"),
+            CloudAiReadJsonValueReader.GetRequiredBoolean(record, "isAuthoritative"),
+            CloudAiReadJsonValueReader.GetString(record, "configurationVersion"),
+            CloudAiReadJsonValueReader.GetDate(record, "snapshotCapturedAtUtc"),
+            CloudAiReadJsonValueReader.GetDate(record, "snapshotReceivedAtUtc"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "freshness"),
+            CloudAiReadJsonValueReader.GetBoolean(record, "enabled"),
+            CloudAiReadJsonValueReader.GetString(record, "protocol"),
+            CloudAiReadJsonValueReader.GetString(record, "address"),
+            CloudAiReadJsonValueReader.GetString(record, "runtimeStatus"),
+            CloudAiReadJsonValueReader.GetBoolean(record, "isConnected"),
+            CloudAiReadJsonValueReader.GetDate(record, "lastCommunicationAtUtc"),
+            CloudAiReadJsonValueReader.GetString(record, "lastError"),
+            CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
+
+        var rows = items.Select(item => new Dictionary<string, object?>
+        {
+            ["deviceId"] = item.DeviceId,
+            ["deviceName"] = item.DeviceName,
+            ["processId"] = item.ProcessId,
+            ["pluginVersion"] = item.PluginVersion,
+            ["plcCode"] = item.PlcCode,
+            ["plcName"] = item.PlcName,
+            ["isAuthoritative"] = item.IsAuthoritative,
+            ["configurationVersion"] = item.ConfigurationVersion,
+            ["snapshotCapturedAtUtc"] = item.SnapshotCapturedAtUtc,
+            ["snapshotReceivedAtUtc"] = item.SnapshotReceivedAtUtc,
+            ["freshness"] = item.Freshness,
+            ["enabled"] = item.Enabled,
+            ["protocol"] = item.Protocol,
+            ["address"] = item.Address,
+            ["runtimeStatus"] = item.RuntimeStatus,
+            ["isConnected"] = item.IsConnected,
+            ["lastCommunicationAtUtc"] = item.LastCommunicationAtUtc,
+            ["lastError"] = item.LastError
+        }).ToArray();
+
+        return BuildResult(sourcePath, "Cloud AiRead API（设备 PLC 动态元数据）", limit, root, items, rows);
+    }
+
+    public static CloudAiReadResult<CloudAiReadDataSchemaDto> MapDataSchemas(
+        JsonElement root,
+        string sourcePath,
+        int limit)
+    {
+        var records = CloudAiReadJsonValueReader.ExtractRecords(
+            root,
+            limit,
+            CloudAiReadOperation.DataSchema);
+        var items = records.Select(record => new CloudAiReadDataSchemaDto(
+            CloudAiReadJsonValueReader.GetRequiredGuid(record, "deviceId"),
+            CloudAiReadJsonValueReader.GetString(record, "plcCode"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "pluginVersion"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "typeKey"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "displayName"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "schemaName"),
+            CloudAiReadJsonValueReader.GetRequiredInt(record, "schemaVersion"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "scope"),
+            CloudAiReadJsonValueReader.GetStringArray(record, "queryModes"),
+            CloudAiReadJsonValueReader.GetObjectArray(record, "fields")
+                .Select(MapDataSchemaField)
+                .ToArray(),
+            CloudAiReadJsonValueReader.ExtractAdditionalFields(record))).ToArray();
+
+        var rows = items.Select(item => new Dictionary<string, object?>
+        {
+            ["deviceId"] = item.DeviceId,
+            ["plcCode"] = item.PlcCode,
+            ["pluginVersion"] = item.PluginVersion,
+            ["typeKey"] = item.TypeKey,
+            ["displayName"] = item.DisplayName,
+            ["schemaName"] = item.SchemaName,
+            ["schemaVersion"] = item.SchemaVersion,
+            ["scope"] = item.Scope,
+            ["queryModes"] = item.QueryModes,
+            ["fields"] = item.Fields
+        }).ToArray();
+
+        return BuildResult(sourcePath, "Cloud AiRead API（插件业务记录 Schema）", limit, root, items, rows);
+    }
+
     private static CloudAiReadProductionFieldSchemaDto MapProductionFieldSchema(JsonElement record)
     {
         return new CloudAiReadProductionFieldSchemaDto(
@@ -302,6 +398,19 @@ internal static class CloudAiReadDocumentAdapter
             CloudAiReadJsonValueReader.GetString(record, "unit"),
             CloudAiReadJsonValueReader.GetInt(record, "precision"),
             CloudAiReadJsonValueReader.GetRequiredBoolean(record, "required"),
+            CloudAiReadJsonValueReader.ExtractAdditionalFields(record));
+    }
+
+    private static CloudAiReadDataSchemaFieldDto MapDataSchemaField(JsonElement record)
+    {
+        return new CloudAiReadDataSchemaFieldDto(
+            CloudAiReadJsonValueReader.GetRequiredString(record, "key"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "label"),
+            CloudAiReadJsonValueReader.GetRequiredString(record, "type"),
+            CloudAiReadJsonValueReader.GetString(record, "unit"),
+            CloudAiReadJsonValueReader.GetInt(record, "precision"),
+            CloudAiReadJsonValueReader.GetRequiredBoolean(record, "required"),
+            CloudAiReadJsonValueReader.GetRequiredBoolean(record, "isPublic"),
             CloudAiReadJsonValueReader.ExtractAdditionalFields(record));
     }
 

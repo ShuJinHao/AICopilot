@@ -20,6 +20,12 @@ internal sealed partial class BusinessLlmTextToSqlGenerator(
         BusinessTextToSqlGenerationRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (request.SourceProfile.SourceType == DataSourceExternalSystemType.CloudReadOnly)
+        {
+            return BusinessTextToSqlGenerationResult.Failure(
+                "Real Cloud Text-to-SQL generation is temporarily closed.");
+        }
+
         var resolvedOptions = options?.Value ?? new CloudReadOnlyTextToSqlOptions();
         if (!resolvedOptions.Enabled)
         {

@@ -34,6 +34,25 @@ public sealed class BusinessReadonlyQueryExecutor(
             return Result.NotFound();
         }
 
+        if (database.ExternalSystemType == BusinessDataExternalSystemType.CloudReadOnly)
+        {
+            const string closedMessage =
+                "Real Cloud Direct DB/Text-to-SQL is temporarily closed; use typed Cloud AiRead with a current user delegation.";
+            await auditRecorder.WriteAsync(
+                database,
+                sql,
+                AuditResults.Rejected,
+                closedMessage,
+                rowCount: 0,
+                isTruncated: false,
+                durationMs: 0,
+                selectionMode,
+                warningCode: "REAL_CLOUD_DIRECT_DB_CLOSED",
+                auditAction,
+                cancellationToken);
+            return Result.Invalid(closedMessage);
+        }
+
         if (!await accessService.CanQueryAsync(database, cancellationToken))
         {
             await auditRecorder.WriteAsync(

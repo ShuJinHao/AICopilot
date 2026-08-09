@@ -36,6 +36,7 @@ public sealed class OpenApiContractTests(OpenApiContractFixture fixture)
         AssertPath(document, "/api/identity/cloud-oidc/confirm-existing", "post");
         AssertPath(document, "/api/identity/cloud-oidc/cancel", "post");
         AssertPath(document, "/api/identity/me", "get");
+        AssertPath(document, "/api/identity/cloud-delegation/revoke-current", "post");
         AssertPath(document, "/api/identity/role/list", "get");
         AssertPath(document, "/api/identity/user/list", "get");
         AssertPath(document, "/api/system/build-identity", "get");

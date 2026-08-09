@@ -20,5 +20,7 @@ public interface ICurrentUser
 
     string? CloudStatusVersion { get; }
 
+    string? CloudDelegationId => null;
+
     bool IsAuthenticated { get; }
 }

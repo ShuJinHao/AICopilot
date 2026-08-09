@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using AICopilot.HttpApi.Infrastructure;
+using AICopilot.Services.Contracts;
 using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.InProcessTests;
@@ -12,9 +13,14 @@ public sealed class CloudOidcFinalizationWorkflowTests
         var signOutCount = 0;
 
         var result = await CloudOidcFinalizationWorkflow.ExecuteAsync(
-            _ => Task.FromResult<ClaimsPrincipal?>(CreateCloudPrincipal()),
+            _ => Task.FromResult<CloudOidcExternalSession?>(CreateExternalSession()),
             "https://cloud.example.com",
-            (profile, _) => Task.FromResult(Result.Success(new TestLoginResult(profile.EmployeeNo!, "ai-token"))),
+            (profile, delegation, _) =>
+            {
+                delegation.AccessToken.Should().Be("runtime-delegation-token");
+                return Task.FromResult(Result.Success(
+                    new TestLoginResult(profile.EmployeeNo!, "ai-token")));
+            },
             _ =>
             {
                 signOutCount++;
@@ -32,9 +38,9 @@ public sealed class CloudOidcFinalizationWorkflowTests
         var signOutCount = 0;
 
         var result = await CloudOidcFinalizationWorkflow.ExecuteAsync<TestLoginResult>(
-            _ => Task.FromResult<ClaimsPrincipal?>(null),
+            _ => Task.FromResult<CloudOidcExternalSession?>(null),
             "https://cloud.example.com",
-            (_, _) => throw new InvalidOperationException("finalize must not run"),
+            (_, _, _) => throw new InvalidOperationException("finalize must not run"),
             _ =>
             {
                 signOutCount++;
@@ -51,9 +57,9 @@ public sealed class CloudOidcFinalizationWorkflowTests
         var signOutCount = 0;
 
         var result = await CloudOidcFinalizationWorkflow.ExecuteAsync(
-            _ => Task.FromResult<ClaimsPrincipal?>(CreateCloudPrincipal()),
+            _ => Task.FromResult<CloudOidcExternalSession?>(CreateExternalSession()),
             "https://cloud.example.com",
-            (_, _) => Task.FromResult<Result<TestLoginResult>>(Result.Unauthorized(new ApiProblemDescriptor(
+            (_, _, _) => Task.FromResult<Result<TestLoginResult>>(Result.Unauthorized(new ApiProblemDescriptor(
                 AuthProblemCodes.ExternalIdentityConflict,
                 "binding conflict"))),
             _ =>
@@ -72,9 +78,9 @@ public sealed class CloudOidcFinalizationWorkflowTests
         var signOutCount = 0;
 
         var result = await CloudOidcFinalizationWorkflow.ExecuteAsync(
-            _ => Task.FromResult<ClaimsPrincipal?>(CreateCloudPrincipal()),
+            _ => Task.FromResult<CloudOidcExternalSession?>(CreateExternalSession()),
             "https://cloud.example.com",
-            (_, _) => Task.FromResult<Result<TestLoginResult>>(Result.Unauthorized(
+            (_, _, _) => Task.FromResult<Result<TestLoginResult>>(Result.Unauthorized(
                 new ApiProblemDescriptor(
                     AuthProblemCodes.ExternalIdentityConfirmationRequired,
                     "confirmation required"))),
@@ -97,9 +103,9 @@ public sealed class CloudOidcFinalizationWorkflowTests
         var signOutCount = 0;
 
         var action = () => CloudOidcFinalizationWorkflow.ExecuteAsync<TestLoginResult>(
-            _ => Task.FromResult<ClaimsPrincipal?>(CreateCloudPrincipal()),
+            _ => Task.FromResult<CloudOidcExternalSession?>(CreateExternalSession()),
             "https://cloud.example.com",
-            (_, _) => throw new InvalidOperationException("finalize failed"),
+            (_, _, _) => throw new InvalidOperationException("finalize failed"),
             _ =>
             {
                 signOutCount++;
@@ -120,9 +126,9 @@ public sealed class CloudOidcFinalizationWorkflowTests
         var signOutToken = new CancellationToken(canceled: true);
 
         var action = () => CloudOidcFinalizationWorkflow.ExecuteAsync<TestLoginResult>(
-            _ => Task.FromException<ClaimsPrincipal?>(primary),
+            _ => Task.FromException<CloudOidcExternalSession?>(primary),
             "https://cloud.example.com",
-            (_, _) => throw new InvalidOperationException("finalize must not run"),
+            (_, _, _) => throw new InvalidOperationException("finalize must not run"),
             token =>
             {
                 signOutCount++;
@@ -146,9 +152,9 @@ public sealed class CloudOidcFinalizationWorkflowTests
         var signOutCount = 0;
 
         var action = () => CloudOidcFinalizationWorkflow.ExecuteAsync<TestLoginResult>(
-            _ => Task.FromResult<ClaimsPrincipal?>(CreateCloudPrincipal()),
+            _ => Task.FromResult<CloudOidcExternalSession?>(CreateExternalSession()),
             "https://cloud.example.com",
-            (_, _) => Task.FromException<Result<TestLoginResult>>(primary),
+            (_, _, _) => Task.FromException<Result<TestLoginResult>>(primary),
             token =>
             {
                 token.CanBeCanceled.Should().BeFalse();
@@ -170,9 +176,10 @@ public sealed class CloudOidcFinalizationWorkflowTests
         var signOutCount = 0;
 
         var action = () => CloudOidcFinalizationWorkflow.ExecuteAsync(
-            _ => Task.FromResult<ClaimsPrincipal?>(CreateCloudPrincipal()),
+            _ => Task.FromResult<CloudOidcExternalSession?>(CreateExternalSession()),
             "https://cloud.example.com",
-            (profile, _) => Task.FromResult(Result.Success(new TestLoginResult(profile.EmployeeNo!, "ai-token"))),
+            (profile, _, _) => Task.FromResult(Result.Success(
+                new TestLoginResult(profile.EmployeeNo!, "ai-token"))),
             token =>
             {
                 token.CanBeCanceled.Should().BeFalse();
@@ -189,7 +196,7 @@ public sealed class CloudOidcFinalizationWorkflowTests
     {
         return new ClaimsPrincipal(new ClaimsIdentity(
             [
-                new Claim("sub", "cloud-user-1"),
+                new Claim("sub", "10000000-0000-0000-0000-000000000001"),
                 new Claim("preferred_username", "E0001"),
                 new Claim("name", "E0001"),
                 new Claim("tenant_id", CloudOidcIdentityProfile.DefaultTenantId),
@@ -200,6 +207,23 @@ public sealed class CloudOidcFinalizationWorkflowTests
                 new Claim("status_version", "v1")
             ],
             "oidc"));
+    }
+
+    private static CloudOidcExternalSession CreateExternalSession()
+    {
+        return new CloudOidcExternalSession(
+            CreateCloudPrincipal(),
+            new CloudDelegationTokenInput(
+                "runtime-delegation-token",
+                DateTime.UtcNow.AddMinutes(30),
+                new CloudDelegationTokenEvidence(
+                    "https://cloud.example.com",
+                    "10000000-0000-0000-0000-000000000001",
+                    "10000000-0000-0000-0000-000000000001",
+                    CloudOidcIdentityProfile.DefaultTenantId,
+                    CloudDelegationDefaults.Audience,
+                    CloudDelegationDefaults.Actor,
+                    [CloudDelegationDefaults.Scope])));
     }
 
     private sealed record TestLoginResult(string UserName, string Token);

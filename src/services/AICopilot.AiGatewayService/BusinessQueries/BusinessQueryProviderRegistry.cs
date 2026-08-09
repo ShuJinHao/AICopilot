@@ -207,7 +207,8 @@ internal sealed class CloudAiReadBusinessQueryProvider(
                 context,
                 ProviderCode,
                 MapOutcome(ex.Code),
-                MapSafeMessage(ex.Code));
+                MapSafeMessage(ex.Code),
+                failureCode: ex.Code);
         }
     }
 
@@ -218,6 +219,7 @@ internal sealed class CloudAiReadBusinessQueryProvider(
             CloudAiReadProblemCodes.MissingRequiredParameter or
                 CloudAiReadProblemCodes.InvalidRequest =>
                 BusinessQueryOutcome.NeedClarification,
+            CloudAiReadProblemCodes.DelegationRequired or
             CloudAiReadProblemCodes.Unauthorized or
                 CloudAiReadProblemCodes.Forbidden or
                 CloudAiReadProblemCodes.RequestBlocked =>
@@ -289,6 +291,8 @@ internal sealed class CloudAiReadBusinessQueryProvider(
             CloudAiReadProblemCodes.MissingRequiredParameter or
                 CloudAiReadProblemCodes.InvalidRequest =>
                 "Cloud AiRead requires additional query conditions.",
+            CloudAiReadProblemCodes.DelegationRequired =>
+                "The current user must log in through Cloud again before using Cloud AiRead.",
             CloudAiReadProblemCodes.Unauthorized or
                 CloudAiReadProblemCodes.Forbidden or
                 CloudAiReadProblemCodes.RequestBlocked =>

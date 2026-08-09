@@ -1,6 +1,4 @@
 using System.Text.RegularExpressions;
-using AICopilot.Services.Contracts;
-
 namespace AICopilot.DeploymentTests;
 
 public sealed class DeploymentPreflightBehaviorTests
@@ -63,6 +61,44 @@ public sealed class DeploymentPreflightBehaviorTests
             validResult.ExitCode.Should().Be(0, validResult.Output);
             validResult.Output.Should().Contain("AICopilot deploy environment validation passed");
 
+            var missingDelegationProbeEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "missing-delegation-probe.env",
+                "http://cloud.factory.internal:81",
+                cloudAiReadBaseUrl: string.Empty);
+
+            var missingDelegationProbeResult = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string>
+                {
+                    ["ENV_FILE"] = missingDelegationProbeEnvPath
+                });
+
+            missingDelegationProbeResult.ExitCode.Should().Be(64, missingDelegationProbeResult.Output);
+            missingDelegationProbeResult.Output.Should().Contain(
+                "Missing required HTTP URL in .env: CLOUD_AI_READ_BASE_URL");
+            missingDelegationProbeResult.Output.Should().NotContain("docker compose");
+
+            var missingIdentityStatusUrlEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "missing-identity-status-url.env",
+                "http://cloud.factory.internal:81",
+                cloudIdentityStatusBaseUrl: string.Empty);
+
+            var missingIdentityStatusUrlResult = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string>
+                {
+                    ["ENV_FILE"] = missingIdentityStatusUrlEnvPath
+                });
+
+            missingIdentityStatusUrlResult.ExitCode.Should().Be(64, missingIdentityStatusUrlResult.Output);
+            missingIdentityStatusUrlResult.Output.Should().Contain(
+                "Missing required HTTP URL in .env: CLOUD_IDENTITY_STATUS_BASE_URL");
+            missingIdentityStatusUrlResult.Output.Should().NotContain("docker compose");
+
             var publicHttpOidcEnvPath = WriteDeployValidateEnv(
                 tempDirectory,
                 "public-http-oidc.env",
@@ -81,6 +117,176 @@ public sealed class DeploymentPreflightBehaviorTests
         {
             RepositoryTestSupport.TryDeleteDirectory(tempDirectory);
         }
+    }
+
+    [Fact]
+    public async Task DeployReleaseValidateOnly_ShouldRejectCanonicalCloudEmployeeAsEmergencyAdmin()
+    {
+        var scriptPath = Path.Combine(
+            RepositoryTestSupport.Root,
+            "deploy",
+            "enterprise-ai",
+            "deploy-release.sh");
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "aicopilot-deploy-emergency-admin-conflict",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            var envPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "conflict.env",
+                "http://cloud.factory.internal:81",
+                "101650");
+
+            var result = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string> { ["ENV_FILE"] = envPath });
+
+            result.ExitCode.Should().Be(64, result.Output);
+            result.Output.Should().Contain(
+                "EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT");
+            result.Output.Should().NotContain("docker compose");
+        }
+        finally
+        {
+            RepositoryTestSupport.TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task DeployReleaseValidateOnly_ShouldKeepTypedAiReadRealWhileDirectDbRemainsClosed()
+    {
+        var scriptPath = Path.Combine(
+            RepositoryTestSupport.Root,
+            "deploy",
+            "enterprise-ai",
+            "deploy-release.sh");
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "aicopilot-deploy-typed-ai-read",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            var enabledEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "typed-enabled.env",
+                "http://cloud.factory.internal:81",
+                cloudReadonlyMode: "Real",
+                cloudAiReadEnabled: true,
+                cloudReadonlyRealEnabled: true,
+                cloudReadonlyAllowProductionRead: true);
+            var enabledResult = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string>
+                {
+                    ["ENV_FILE"] = enabledEnvPath
+                });
+
+            enabledResult.ExitCode.Should().Be(0, enabledResult.Output);
+
+            var contradictoryEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "typed-contradictory.env",
+                "http://cloud.factory.internal:81",
+                cloudAiReadEnabled: true);
+            var contradictoryResult = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string>
+                {
+                    ["ENV_FILE"] = contradictoryEnvPath
+                });
+
+            contradictoryResult.ExitCode.Should().Be(64, contradictoryResult.Output);
+            contradictoryResult.Output.Should().Contain("CLOUD_AI_READ_STATE_CONFLICT");
+            contradictoryResult.Output.Should().NotContain("docker compose");
+
+            var retiredCredentials = new Dictionary<string, string>
+            {
+                ["CLOUD_AI_SERVICE_ACCOUNT_TOKEN"] = "retired-static-token",
+                ["CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN"] = "retired-static-token-alias",
+                ["DATA_ANALYSIS_CLOUD_READONLY_PASSWORD"] = "retired-direct-db-password"
+            };
+            foreach (var (key, value) in retiredCredentials)
+            {
+                var legacyCredentialEnvPath = WriteDeployValidateEnv(
+                    tempDirectory,
+                    $"typed-legacy-{key}.env",
+                    "http://cloud.factory.internal:81");
+                await File.AppendAllTextAsync(
+                    legacyCredentialEnvPath,
+                    $"\n{key}={value}\n");
+                var legacyCredentialResult = await RepositoryTestSupport.RunAsync(
+                    "bash",
+                    [scriptPath, "--validate-only"],
+                    environmentVariables: new Dictionary<string, string>
+                    {
+                        ["ENV_FILE"] = legacyCredentialEnvPath
+                    });
+
+                legacyCredentialResult.ExitCode.Should().Be(64, legacyCredentialResult.Output);
+                legacyCredentialResult.Output.Should().Contain("LEGACY_CLOUD_CREDENTIAL_FORBIDDEN");
+                legacyCredentialResult.Output.Should().NotContain(value);
+            }
+        }
+        finally
+        {
+            RepositoryTestSupport.TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public void EmergencyDeployWorkflow_ShouldPreserveTypedAiReadStateAndForceDirectDbClosed()
+    {
+        var workflow = File.ReadAllText(Path.Combine(
+            RepositoryTestSupport.Root,
+            ".github",
+            "workflows",
+            "aicopilot-deploy.yml"));
+
+        workflow.Should().NotContain("set_env_value \"$DEPLOY_TARGET_DIR/.env\" CLOUD_READONLY_MODE");
+        workflow.Should().NotContain("set_env_value \"$DEPLOY_TARGET_DIR/.env\" CLOUD_READONLY_REAL_ENABLED");
+        workflow.Should().NotContain("set_env_value \"$DEPLOY_TARGET_DIR/.env\" CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ");
+        workflow.Should().Contain(
+            "set_env_value \"$DEPLOY_TARGET_DIR/.env\" DATA_ANALYSIS_CLOUD_READONLY_ENABLED false");
+        workflow.Should().Contain("typed AiRead state is preserved from the validated deployment environment");
+        workflow.Should().Contain("CLOUD_AI_SERVICE_ACCOUNT_TOKEN");
+        workflow.Should().Contain("CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN");
+        workflow.Should().Contain("DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD");
+
+        var retiredCredentialValidationIndex = workflow.IndexOf(
+            "if grep -Eq \"$retired_sensitive_pattern\" <<< \"$DEPLOY_ENV_FILE\"; then",
+            StringComparison.Ordinal);
+        var runnerAttestationIndex = workflow.IndexOf(
+            "bash deploy/enterprise-ai/scripts/check-runner-security-attestation.sh",
+            StringComparison.Ordinal);
+        var deployDirectoryCreationIndex = workflow.IndexOf(
+            "mkdir -p \"$DEPLOY_TARGET_DIR\"",
+            StringComparison.Ordinal);
+        var deployEnvironmentWriteIndex = workflow.IndexOf(
+            "printf '%s\\n' \"$DEPLOY_ENV_FILE\" > \"$DEPLOY_TARGET_DIR/.env\"",
+            StringComparison.Ordinal);
+
+        retiredCredentialValidationIndex.Should().BeGreaterThan(0);
+        retiredCredentialValidationIndex.Should().BeLessThan(runnerAttestationIndex);
+        retiredCredentialValidationIndex.Should().BeLessThan(deployDirectoryCreationIndex);
+        retiredCredentialValidationIndex.Should().BeLessThan(deployEnvironmentWriteIndex);
+
+        var retiredCredentialPatternMatch = Regex.Match(
+            workflow,
+            "retired_sensitive_pattern='(?<pattern>[^']+)'",
+            RegexOptions.CultureInvariant);
+        retiredCredentialPatternMatch.Success.Should().BeTrue();
+        Regex.IsMatch(
+                "CLOUD_AI_SERVICE_ACCOUNT_TOKEN=",
+                retiredCredentialPatternMatch.Groups["pattern"].Value,
+                RegexOptions.CultureInvariant)
+            .Should().BeTrue("even an empty retired credential assignment must fail before deploy writes");
     }
 
     [Fact]
@@ -132,29 +338,36 @@ public sealed class DeploymentPreflightBehaviorTests
     }
 
     [Fact]
-    public void CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables()
+    public async Task ClosedCloudDirectDbDeployment_ShouldFailBeforeCredentialsOrNetwork()
     {
-        var applyGrantSql = File.ReadAllText(Path.Combine(
-            RepositoryTestSupport.Root,
-            "deploy",
-            "enterprise-ai",
-            "cloud-readonly",
-            "apply-readonly-grants.sql"));
-        var checkGrantSql = File.ReadAllText(Path.Combine(
-            RepositoryTestSupport.Root,
-            "deploy",
-            "enterprise-ai",
-            "cloud-readonly",
-            "check-readonly-grants.sql"));
+        var deployRoot = Path.Combine(RepositoryTestSupport.Root, "deploy", "enterprise-ai");
+        var compose = File.ReadAllText(Path.Combine(deployRoot, "docker-compose.yaml"));
+        var envTemplate = File.ReadAllText(Path.Combine(deployRoot, ".env.example"));
+        var deployRelease = File.ReadAllText(Path.Combine(deployRoot, "deploy-release.sh"));
 
-        ExtractGrantedTables(applyGrantSql)
-            .Should()
-            .BeEquivalentTo(CloudReadOnlyGovernedSchema.AllowedTables);
-        ExtractGrantedTables(checkGrantSql)
-            .Should()
-            .BeEquivalentTo(CloudReadOnlyGovernedSchema.AllowedTables);
-        applyGrantSql.Should().NotContain("GRANT SELECT ON ALL TABLES");
-        applyGrantSql.Should().NotContain("ALTER DEFAULT PRIVILEGES");
+        compose.Should().Contain("DataAnalysis__CloudReadOnly__Enabled: \"false\"");
+        compose.Should().Contain("DataAnalysis__CloudReadOnlyTextToSql__Enabled: \"false\"");
+        compose.Should().NotContain("CloudAiRead__ServiceAccountToken");
+        compose.Should().NotContain("DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING");
+        envTemplate.Should().NotContain("DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING");
+        envTemplate.Should().NotContain("DATA_ANALYSIS_CLOUD_READONLY_PASSWORD");
+        deployRelease.Should().Contain(
+            "Real Cloud Direct DB/Text-to-SQL is temporarily closed; DATA_ANALYSIS_CLOUD_READONLY_ENABLED must remain false.");
+
+        foreach (var scriptName in new[]
+                 {
+                     "apply-cloud-readonly-grants.sh",
+                     "check-cloud-readonly-grants.sh"
+                 })
+        {
+            var scriptPath = Path.Combine(deployRoot, "scripts", scriptName);
+            var result = await RepositoryTestSupport.RunAsync("bash", [scriptPath, "--dry-run"]);
+
+            result.ExitCode.Should().Be(64, result.Output);
+            result.Output.Should().Contain("Real Cloud Direct DB/Text-to-SQL is temporarily closed");
+            result.Output.Should().NotContain("docker exec");
+            result.Output.Should().NotContain("docker network");
+        }
     }
 
     [Fact]
@@ -179,20 +392,17 @@ public sealed class DeploymentPreflightBehaviorTests
         result.Output.Should().NotContain("Checking model provider connectivity");
     }
 
-    private static IReadOnlyCollection<string> ExtractGrantedTables(string sql)
-    {
-        return Regex
-            .Matches(sql, @"public\.(?<table>[a-z_]+)", RegexOptions.CultureInvariant)
-            .Select(match => match.Groups["table"].Value)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
     private static string WriteDeployValidateEnv(
         string directory,
         string fileName,
-        string cloudOidcIssuer)
+        string cloudOidcIssuer,
+        string bootstrapAdminUserName = "bootstrap-admin",
+        string cloudReadonlyMode = "Disabled",
+        bool cloudAiReadEnabled = false,
+        bool cloudReadonlyRealEnabled = false,
+        bool cloudReadonlyAllowProductionRead = false,
+        string cloudAiReadBaseUrl = "http://cloud.factory.internal:81",
+        string cloudIdentityStatusBaseUrl = "http://cloud.factory.internal:81")
     {
         var envPath = Path.Combine(directory, fileName);
         File.WriteAllText(
@@ -204,16 +414,18 @@ CLOUD_PLATFORM_URL=http://cloud.factory.internal:81
 POSTGRES_PASSWORD=PgStrongSecretValue1234
 RABBITMQ_PASSWORD=RbStrongSecretValue1234
 QDRANT_KEY=QdStrongSecretValue1234
+AICOPILOT_BOOTSTRAP_ADMIN_USERNAME={{bootstrapAdminUserName}}
 AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD=AdminStrong1234
 AICOPILOT_API_KEY_ENCRYPTION_KEY=EncryptionKeyValue01234567890123456789
 AICOPILOT_JWT_SECRET_KEY=JwtSecretValue012345678901234567890123456789012345678901234567890123
-CLOUD_READONLY_MODE=Disabled
-CLOUD_READONLY_REAL_ENABLED=false
-CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=false
-CLOUD_AI_READ_ENABLED=false
-CLOUD_AI_READ_BASE_URL=http://cloud.factory.internal:81
-CLOUD_IDENTITY_STATUS_ENABLED=false
-CLOUD_IDENTITY_STATUS_BASE_URL=http://cloud.factory.internal:81
+CLOUD_READONLY_MODE={{cloudReadonlyMode}}
+CLOUD_READONLY_REAL_ENABLED={{cloudReadonlyRealEnabled.ToString().ToLowerInvariant()}}
+CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ={{cloudReadonlyAllowProductionRead.ToString().ToLowerInvariant()}}
+CLOUD_AI_READ_ENABLED={{cloudAiReadEnabled.ToString().ToLowerInvariant()}}
+CLOUD_AI_READ_BASE_URL={{cloudAiReadBaseUrl}}
+CLOUD_IDENTITY_STATUS_ENABLED=true
+CLOUD_IDENTITY_STATUS_BASE_URL={{cloudIdentityStatusBaseUrl}}
+AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET=IdentityStatusSigningSecretValue0123456789
 DATA_ANALYSIS_CLOUD_READONLY_ENABLED=false
 AICOPILOT_MODEL_SMOKE_ENABLED=false
 AICOPILOT_MODEL_SMOKE_BASE_URL=http://model.factory.internal:40034/v1

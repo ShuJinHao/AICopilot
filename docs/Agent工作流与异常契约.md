@@ -1,5 +1,7 @@
 # Agent 工作流与异常契约
 
+当前状态：第 0～7 批候选代码继续保留；复审问题尚未全部收口，当前候选代码不是生产基线。
+
 本文档是 AICopilot 主聊天 MAF / Harness 技术契约的唯一正文；该唯一性专指 `AgentModeProvider` 与模式 API、AgentSession / SSE、工具批准、`ToolInvocationGuardChatClient`、Harness 裁剪扩展点和 BOM 升级流程，不取代 Cloud、MCP、DDD 等专题的业务与治理规则。其它活动规则只保留这些主题的产品语义、消费端硬边界或状态并链接本文，不复制实现约束。主聊天只有 Microsoft Agent Framework Harness 一条运行主链；历史实现只通过 Git 追溯，未完成方向见 `docs/AI架构路线图.md`。
 
 ## 1. 唯一运行主链
@@ -8,7 +10,7 @@
 - 前端只有一个聊天输入框。用户输入无论当前是 `Plan` 还是 `Execute` 都进入 Harness；不得显示或调用已退出的任务面板、业务审批、文件工作台或聊天附件。
 - 对话运行时公开入口只保留 Session、消息历史、Chat、Agent mode 与 Harness tool approval。`/agent/task/**`、`/agent/approval/**`、`/workspace/**`、`/artifact/**`、`/upload/**`、`/approval-policy/**`、`session/timeline` 和 `session/safety-attestation` 当前必须不可达。
 - Harness 主聊天固定使用 `Microsoft.Agents.AI.Harness` / `Microsoft.Agents.AI` `1.16.0`，每轮最多 8 次模型调用。必须关闭 FileMemory、WebSearch、AgentSkills、BackgroundAgents、LoopEvaluators 与 compaction，不注册 FileAccessStore、Shell 或文件 Artifact；聊天只允许文本和服务端可信 inline Widget。
-- 模型端点、认证、配额、熔断和遥测由轻量 `IChatClient` 工厂负责，且作用于每一次真实模型调用。Text-to-SQL、分类和结构化生成直接使用轻量客户端，禁止嵌套 Harness；主聊天不得恢复 `Microsoft.Agents.AI.Workflows` 依赖。
+- 模型端点、认证、配额、熔断和遥测由轻量 `IChatClient` 工厂负责，且作用于每一次真实模型调用。分类和结构化生成直接使用轻量客户端，禁止嵌套 Harness；封存的 Text-to-SQL 代码当前不得被调用。主聊天不得恢复 `Microsoft.Agents.AI.Workflows` 依赖。
 - `ConversationTemplate.ModelId` 决定主回答模型；Harness 创建后只从 `ScopedRuntimeAgent.ConfigurationSnapshot` 记录实际最终模型 provenance，请求不得临时覆盖。
 - Harness 裁剪只允许使用官方 `HarnessAgentOptions`、`AgentModeProviderOptions`、context provider、approval 与 `IChatClient` 扩展点；禁止 fork MAF、反射私有成员或复制模式状态机。MAF / Harness 升级必须作为独立 BOM 批次，核心包保持同版本；先核对官方 release notes 与公开 API，再运行真实框架合同测试，上游语义变化时跟随框架。
 - `ToolInvocationGuardChatClient` 只在每次实际 provider 请求上，以 Harness 产生的有效 `ChatOptions.Tools` 建立精确允许集合；不得删除、重排或按 Plan / Execute 过滤 MAF 与应用传入的工具，官方 `mode_get` / `mode_set` 保持可见。provider 返回未公开工具、多工具违约或 standing approval 信号时继续 fail-closed；这些校验与模式完全无关。
@@ -27,7 +29,7 @@
 - AgentSession 明文上限 2 MiB，采用 30 天滑动 TTL。运行前在会话锁内写 `Running + turn id`；每次真实模型调用后写会话连续性 checkpoint。正常完成、等待批准和模式切换都要保存完整状态。
 - AgentSession checkpoint 只用于会话连续性，不是 durable Tool checkpoint、任务队列、lease/fencing 或工具恢复点，也不证明远端工具已经完成。取得锁后发现遗留 `Running` 时只允许转为 `Interrupted`；Interrupted 后不得恢复或重放模型、工具及旧批准。状态缺失、schema 不匹配、损坏、超限或过期统一返回 `agent_session_reset_required` 并要求新建会话。
 - 状态使用 ASP.NET Core Data Protection 固定用途字符串认证加密，`ApplicationName` 固定为 `AICopilot.AgentSessions`。生产 key ring 固定持久化到 `/var/lib/aicopilot/data-protection-keys`；目录必须预先存在、归属运行用户、owner 可读写执行，且 group/other 不可写。密钥、状态明文和解密错误不得写入日志。
-- 当前部署拓扑只支持 `SingleInstance`。HTTP API 启动时必须拒绝其它拓扑、错误路径、符号链接、错误 owner 或不安全权限；多实例必须先另立共享 key provider 契约，不得复用本地目录假装共享。
+- `SingleInstance` 技术实现已经完成，本节是唯一技术正文，不再把它列为源码缺口。当前部署拓扑只支持 `SingleInstance`；HTTP API 启动时必须拒绝其它拓扑、错误路径、符号链接、错误 owner 或不安全权限。多实例必须先另立共享 key provider 契约，不得复用本地目录假装共享。
 
 ## 2. 模型可见工具
 
@@ -41,12 +43,13 @@
 - MCP discovery 的 canonical identity 固定为 `serverName + ProtocolTool.Name`。每个 server 的连接与 `ListTools` discovery 使用独立 30 秒 deadline；超时先撤下旧插件并隔离登记，再继续后续 server，迟到结果只允许被观察和释放。`inputSchema` / `outputSchema` / typed annotation 任一缺失、非法或与本地治理元数据冲突时，登记标记不可执行且运行时工具撤下。每轮 refresh 必须同时比较数据库 `RowVersion` 与远端 schema/hint、有效权限/审批/审计/数据边界/schema version/timeout 组成的指纹；删除、漂移或 discovery 失败不得保留旧插件。
 - MCP 调用前再次执行同一 `AiToolSafetyPolicy` 并验证 canonical 参数，调用 deadline 固定来自受保护登记的 `TimeoutSeconds`；只有该 deadline 到期才映射为 `tool_execution_timeout`，caller cancellation 与宿主停止不得误判。调用后只允许通过 MCP 专用封闭 output schema 的 bounded structured content 进入模型。全局 v1 输出契约仍只接受 object；MCP 专用契约才允许 scalar、array、object 等原生 JSON 类型，且不生成 `{ result: ... }` 兼容包装；文本替代、未知 shape 和远端 error 全部 fail-closed。
 - `DiagnosticAdvisorPlugin/GenerateDiagnosticChecklist` 必须有唯一、精确、版本化登记；不得依赖宽泛插件放行。
-- 主 Harness 必须设置 `DisableToolAutoApproval=true` 与 `ChatOptions.AllowMultipleToolCalls=false`，且不得配置 `ToolApprovalAgentOptions` / `AutoApprovalRules`。需要批准的工具继续使用官方 `ApprovalRequiredAIFunction` 逐次询问；关闭的是支持 standing rules 和多批准排队的 `ToolApprovalAgent` 中间件。禁止“不再询问”及 `AlwaysApproveToolApprovalResponseContent` 等永久批准信号。单工具限制只属于主聊天；Text-to-SQL、分类和结构化生成等轻量内部 Agent 保持各自现行调用策略。
+- 主 Harness 必须设置 `DisableToolAutoApproval=true` 与 `ChatOptions.AllowMultipleToolCalls=false`，且不得配置 `ToolApprovalAgentOptions` / `AutoApprovalRules`。需要批准的工具继续使用官方 `ApprovalRequiredAIFunction` 逐次询问；关闭的是支持 standing rules 和多批准排队的 `ToolApprovalAgent` 中间件。禁止“不再询问”及 `AlwaysApproveToolApprovalResponseContent` 等永久批准信号。单工具限制只属于主聊天；分类和结构化生成等允许的轻量内部 Agent 保持各自现行调用策略，Text-to-SQL 当前不属于可调用路径。
 
 ### 2.2 BusinessQuery
 
-- `BusinessQuery` 是服务端受治理工具，每次调用先校验 `AiGateway.Chat` 权限；模式不能授予或撤销该工具。模型可见的业务查询工具只有 `BusinessQuery`，Text-to-SQL 只作为工具内部能力，绝不以独立工具暴露给模型。
-- typed-first、结构化结果矩阵、查询确认、Text-to-SQL、Simulation 与 fallback 决策只由 [Cloud 只读数据分析契约](./Cloud只读数据分析契约.md) 定义，本 Agent 契约不复制其 policy 或实现矩阵。
+- `BusinessQuery` 是服务端受治理工具，每次调用先校验 `AiGateway.Chat` 权限；模式不能授予或撤销该工具。`AiGateway.Chat` 只允许使用该工具，不授予任何 Cloud 数据范围；每次交互式读取还必须绑定并验证当前 Cloud 用户委托，缺失、过期、撤销、无效或范围不足时失败关闭，禁止回落 Global。
+- 模型可见的业务查询工具只有 `BusinessQuery`。当前真实 Cloud 只保留 typed AiRead，Direct DB/Text-to-SQL 整体关闭；`Unsupported`、`Unavailable`、静态系统 Token、人工批准或模型判断均不得触发 SQL。
+- typed AiRead、当前用户委托、结构化结果矩阵、查询确认、已关闭的 Text-to-SQL、Simulation 与 fallback 决策只由 [Cloud 只读数据分析契约](./Cloud只读数据分析契约.md) 定义，本 Agent 契约不复制其 policy 或实现矩阵。
 - 模型只接收 bounded、脱敏的业务摘要和治理证据，不得接收 SQL、原始行、连接信息、内部 schema、provider raw output 或未授权字段。
 
 ### 2.3 KnowledgeQuery
@@ -138,7 +141,8 @@ dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj -
 | `cloud_identity_unverified` | Cloud 身份未验证 |
 | `external_identity_confirmation_required` | 外部身份绑定需要确认 |
 | `external_identity_conflict` | 外部身份绑定冲突 |
-| `last_enabled_admin_required` | 必须保留至少一个启用的管理员 |
+| `emergency_admin_canonical_cloud_admin_conflict` | 遗留 emergency admin 与规范 Cloud 管理员工号冲突，拒绝自动绑定 |
+| `last_enabled_admin_required` | 必须保留至少一个启用的 `Admin` |
 | `request_validation_failed` | 请求校验失败 |
 | `internal_server_error` | 意外错误 |
 | `persistence_commit_outcome_unknown` | 写入结果未知，禁止自动重试 |
@@ -171,6 +175,7 @@ dotnet test src/tests/AICopilot.InProcessTests/AICopilot.InProcessTests.csproj -
 | `cloud_ai_read_request_blocked` | Cloud AiRead 请求被阻断 |
 | `cloud_ai_read_invalid_request` | Cloud AiRead 参数无效 |
 | `cloud_ai_read_unauthorized` | Cloud AiRead 未认证 |
+| `cloud_delegation_required` | 当前用户缺少有效 Cloud 委托，需重新完成 Cloud 登录 |
 | `cloud_ai_read_forbidden` | Cloud AiRead 无权限 |
 | `cloud_ai_read_not_found` | Cloud 资源不存在 |
 | `cloud_ai_read_rate_limited` | Cloud AiRead 被限流 |

@@ -86,7 +86,7 @@ async function logout() {
   if (chatNavigationLocked.value) {
     return
   }
-  authStore.clearAuth()
+  await authStore.logout()
   chatStore.reset()
   await router.replace('/login')
 }

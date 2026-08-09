@@ -36,7 +36,7 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
     }
 
     [Fact]
-    public void Provider_ShouldExposeDirectCloudReadOnlyMappings_WhenEnabled()
+    public void Provider_ShouldRejectDirectCloudReadOnlyMappings_WhenEnabled()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -44,35 +44,10 @@ public sealed class ConfiguredSemanticPhysicalMappingProviderTests
                 ["DataAnalysis:CloudReadOnly:Enabled"] = "true"
             })
             .Build();
-        var provider = new ConfiguredSemanticPhysicalMappingProvider(configuration);
+        var action = () => new ConfiguredSemanticPhysicalMappingProvider(configuration);
 
-        provider.TryGetMapping(SemanticQueryTarget.Device, out var deviceMapping).Should().BeTrue();
-        provider.TryGetMapping(SemanticQueryTarget.DeviceLog, out var deviceLogMapping).Should().BeTrue();
-        provider.TryGetMapping(SemanticQueryTarget.Capacity, out var capacityMapping).Should().BeTrue();
-        provider.TryGetMapping(SemanticQueryTarget.ProductionData, out var productionMapping).Should().BeTrue();
-
-        deviceMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceSourceName);
-        deviceMapping.FromClause.Should().Be("devices d");
-        deviceMapping.FieldMappings["deviceCode"].Should().Be("d.client_code");
-        deviceMapping.FieldMappings["processId"].Should().Be("d.process_id");
-        deviceMapping.FieldMappings.Should().NotContainKey("status");
-        deviceMapping.FieldMappings.Should().NotContainKey("lineName");
-        deviceMapping.FieldMappings.Should().NotContainKey("updatedAt");
-        deviceLogMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealDeviceLogSourceName);
-        deviceLogMapping.FieldMappings["source"].Should().Be("'Cloud'");
-        deviceLogMapping.FieldMappings["deviceName"].Should().Be("d.device_name");
-        deviceLogMapping.FieldMappings["processName"].Should().Be("mp.process_name");
-        deviceLogMapping.IsFilterFieldAllowed("processName").Should().BeTrue();
-        deviceLogMapping.IsFilterFieldAllowed("source").Should().BeFalse();
-        capacityMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealCapacitySourceName);
-        capacityMapping.FromClause.Should().Contain("LEFT JOIN mfg_processes mp");
-        capacityMapping.FieldMappings["processName"].Should().Be("mp.process_name");
-        capacityMapping.FieldMappings["outputQty"].Should().Be("h.total_count");
-        productionMapping.SourceName.Should().Be(ConfiguredSemanticPhysicalMappingProvider.RealProductionDataSourceName);
-        productionMapping.FromClause.Should().Contain("LEFT JOIN mfg_processes mp");
-        productionMapping.FieldMappings["processName"].Should().Be("mp.process_name");
-        productionMapping.FieldMappings["typeKey"].Should().Be("p.type_key");
-        productionMapping.FieldMappings.Should().NotContainKey("stationName");
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*temporarily closed*");
     }
 
     [Fact]

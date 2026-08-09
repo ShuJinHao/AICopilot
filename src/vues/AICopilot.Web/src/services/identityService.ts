@@ -59,6 +59,12 @@ export const identityService = {
     })
   },
 
+  async revokeCurrentCloudDelegation() {
+    return await apiClient.request<void>('/identity/cloud-delegation/revoke-current', {
+      method: 'POST',
+    })
+  },
+
   async getAuditLogs(query: AuditLogQuery) {
     return await apiClient.get<AuditLogListResponse>('/identity/audit-log/list', { ...query })
   },

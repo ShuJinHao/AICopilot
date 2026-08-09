@@ -18,6 +18,20 @@ public sealed class IdentityHttpBoundaryTests(CoreAICopilotAppFixture fixture)
     };
 
     [Fact]
+    public async Task RevokeCurrentCloudDelegation_ShouldAcceptNoBodyForAuthenticatedLocalSession()
+    {
+        var login = await LoginAsync();
+        fixture.HttpClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", login.Token);
+
+        using var response = await fixture.HttpClient.PostAsync(
+            "/api/identity/cloud-delegation/revoke-current",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    [Fact]
     public async Task ProtectedEndpoint_ShouldUseRealAuthenticationMiddlewareAndTraceProblem()
     {
         fixture.ClearAuthToken();
