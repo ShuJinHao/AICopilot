@@ -258,6 +258,24 @@ public sealed class DeploymentPreflightBehaviorTests
         workflow.Should().Contain("CLOUD_AI_SERVICE_ACCOUNT_TOKEN");
         workflow.Should().Contain("CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN");
         workflow.Should().Contain("DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD");
+
+        var retiredCredentialValidationIndex = workflow.IndexOf(
+            "if grep -Eq \"$retired_sensitive_pattern\" <<< \"$DEPLOY_ENV_FILE\"; then",
+            StringComparison.Ordinal);
+        var runnerAttestationIndex = workflow.IndexOf(
+            "bash deploy/enterprise-ai/scripts/check-runner-security-attestation.sh",
+            StringComparison.Ordinal);
+        var deployDirectoryCreationIndex = workflow.IndexOf(
+            "mkdir -p \"$DEPLOY_TARGET_DIR\"",
+            StringComparison.Ordinal);
+        var deployEnvironmentWriteIndex = workflow.IndexOf(
+            "printf '%s\\n' \"$DEPLOY_ENV_FILE\" > \"$DEPLOY_TARGET_DIR/.env\"",
+            StringComparison.Ordinal);
+
+        retiredCredentialValidationIndex.Should().BeGreaterThan(0);
+        retiredCredentialValidationIndex.Should().BeLessThan(runnerAttestationIndex);
+        retiredCredentialValidationIndex.Should().BeLessThan(deployDirectoryCreationIndex);
+        retiredCredentialValidationIndex.Should().BeLessThan(deployEnvironmentWriteIndex);
     }
 
     [Fact]

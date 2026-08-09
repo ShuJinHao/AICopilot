@@ -101,6 +101,11 @@ jobs:
               exit 64
             fi
           done
+          retired_sensitive_pattern='^(CLOUD_AI_SERVICE_ACCOUNT_TOKEN|CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN|CloudAiRead__ServiceAccountToken|CLOUD_IDENTITY_STATUS_SERVICE_TOKEN|CloudIdentityStatus__ServiceAccountToken|DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD|DATABASE|DOCKER_NETWORK|DB_HOST_ALIAS))=.+$'
+          if grep -Eq "$retired_sensitive_pattern" <<< "$DEPLOY_ENV_FILE"; then
+            echo "DEPLOY_ENV_FILE contains retired interactive AiRead or direct Cloud DB credentials; refusing emergency deployment." >&2
+            exit 64
+          fi
           bash deploy/enterprise-ai/scripts/check-runner-security-attestation.sh --deploy-dir "$DEPLOY_TARGET_DIR"
           command -v docker >/dev/null
           command -v curl >/dev/null
@@ -153,11 +158,6 @@ jobs:
           fi
           umask 077
           printf '%s\n' "$DEPLOY_ENV_FILE" > "$DEPLOY_TARGET_DIR/.env"
-          retired_sensitive_pattern='^(CLOUD_AI_SERVICE_ACCOUNT_TOKEN|CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN|CloudAiRead__ServiceAccountToken|CLOUD_IDENTITY_STATUS_SERVICE_TOKEN|CloudIdentityStatus__ServiceAccountToken|DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD|DATABASE|DOCKER_NETWORK|DB_HOST_ALIAS))=.+$'
-          if grep -Eq "$retired_sensitive_pattern" "$DEPLOY_TARGET_DIR/.env"; then
-            echo "DEPLOY_ENV_FILE contains retired interactive AiRead or direct Cloud DB credentials; refusing emergency deployment." >&2
-            exit 64
-          fi
           set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_ENABLED false
           echo "Real Cloud Direct DB/Text-to-SQL remains disabled; typed AiRead state is preserved from the validated deployment environment."
           chmod +x "$DEPLOY_TARGET_DIR"/*.sh
