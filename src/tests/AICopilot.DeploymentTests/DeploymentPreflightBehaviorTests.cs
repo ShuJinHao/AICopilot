@@ -61,6 +61,25 @@ public sealed class DeploymentPreflightBehaviorTests
             validResult.ExitCode.Should().Be(0, validResult.Output);
             validResult.Output.Should().Contain("AICopilot deploy environment validation passed");
 
+            var missingDelegationProbeEnvPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "missing-delegation-probe.env",
+                "http://cloud.factory.internal:81",
+                cloudAiReadBaseUrl: string.Empty);
+
+            var missingDelegationProbeResult = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string>
+                {
+                    ["ENV_FILE"] = missingDelegationProbeEnvPath
+                });
+
+            missingDelegationProbeResult.ExitCode.Should().Be(64, missingDelegationProbeResult.Output);
+            missingDelegationProbeResult.Output.Should().Contain(
+                "Missing required HTTP URL in .env: CLOUD_AI_READ_BASE_URL");
+            missingDelegationProbeResult.Output.Should().NotContain("docker compose");
+
             var publicHttpOidcEnvPath = WriteDeployValidateEnv(
                 tempDirectory,
                 "public-http-oidc.env",
@@ -333,7 +352,8 @@ public sealed class DeploymentPreflightBehaviorTests
         string cloudReadonlyMode = "Disabled",
         bool cloudAiReadEnabled = false,
         bool cloudReadonlyRealEnabled = false,
-        bool cloudReadonlyAllowProductionRead = false)
+        bool cloudReadonlyAllowProductionRead = false,
+        string cloudAiReadBaseUrl = "http://cloud.factory.internal:81")
     {
         var envPath = Path.Combine(directory, fileName);
         File.WriteAllText(
@@ -353,7 +373,7 @@ CLOUD_READONLY_MODE={{cloudReadonlyMode}}
 CLOUD_READONLY_REAL_ENABLED={{cloudReadonlyRealEnabled.ToString().ToLowerInvariant()}}
 CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ={{cloudReadonlyAllowProductionRead.ToString().ToLowerInvariant()}}
 CLOUD_AI_READ_ENABLED={{cloudAiReadEnabled.ToString().ToLowerInvariant()}}
-CLOUD_AI_READ_BASE_URL=http://cloud.factory.internal:81
+CLOUD_AI_READ_BASE_URL={{cloudAiReadBaseUrl}}
 CLOUD_IDENTITY_STATUS_ENABLED=true
 CLOUD_IDENTITY_STATUS_BASE_URL=http://cloud.factory.internal:81
 AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET=IdentityStatusSigningSecretValue0123456789

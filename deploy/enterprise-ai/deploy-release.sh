@@ -1751,7 +1751,9 @@ ensure_http_only_environment() {
   require_http_url_value AICOPILOT_PUBLIC_URL
   require_http_url_value CLOUD_PLATFORM_URL
 
-  if [ -n "${CLOUD_AI_READ_BASE_URL:-}" ]; then
+  if is_truthy "${CLOUD_AI_READ_ENABLED:-false}" ||
+     is_truthy "${CLOUD_OIDC_ENABLED:-false}" ||
+     [ -n "${CLOUD_AI_READ_BASE_URL:-}" ]; then
     require_http_url_value CLOUD_AI_READ_BASE_URL
   fi
 
