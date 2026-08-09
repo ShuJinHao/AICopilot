@@ -391,7 +391,8 @@ public sealed record BusinessQueryContext(
                    requested.SemanticPlan?.Target == SemanticQueryTarget.ProductionData &&
                    ProductionQueryScopePolicy.HasSameConfirmedScope(
                        SemanticPlan,
-                       requested.SemanticPlan);
+                       requested.SemanticPlan) &&
+                   ScopeMatches(SemanticPlan.Filters, requested.SemanticPlan.Filters);
         }
 
         return ScopeMatches(SemanticPlan?.Filters, requested.SemanticPlan?.Filters);

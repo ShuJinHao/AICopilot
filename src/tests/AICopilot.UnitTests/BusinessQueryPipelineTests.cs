@@ -568,6 +568,51 @@ public sealed class BusinessQueryPipelineTests
         resolved.SemanticPlan!.ProductionMetadataSeal!.PluginVersion.Should().Be("2.0.13");
     }
 
+    [Theory]
+    [InlineData("result", "pass")]
+    [InlineData("preset", "today")]
+    [InlineData("fieldMode", "summary")]
+    public void Resolve_ConfirmedProductionFilterChanged_ShouldRequireNewConfirmation(
+        string field,
+        string value)
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 9, 8, 0, 0, TimeSpan.Zero));
+        var store = new BusinessQueryContextStore(clock, TimeSpan.FromMinutes(30));
+        var sessionId = Guid.NewGuid();
+        var dataSourceId = Guid.NewGuid();
+        var confirmed = CreateProductionContext(
+                sessionId,
+                dataSourceId,
+                pluginVersion: "2.0.12",
+                schemaVersion: 1,
+                BusinessQueryConfirmation.Complete)
+            .Confirm(clock.UtcNow);
+        store.Remember(confirmed);
+        var requested = CreateProductionContext(
+            sessionId,
+            dataSourceId,
+            pluginVersion: "2.0.12",
+            schemaVersion: 1,
+            new BusinessQueryConfirmation(false, false, false, false, false));
+        requested = requested with
+        {
+            SemanticPlan = requested.SemanticPlan! with
+            {
+                Filters = requested.SemanticPlan.Filters
+                    .Append(new SemanticFilter(field, SemanticFilterOperator.Equal, value))
+                    .OrderBy(filter => filter.Field, StringComparer.Ordinal)
+                    .ToArray()
+            }
+        };
+
+        var resolved = store.Resolve(requested);
+
+        resolved.IsConfirmed.Should().BeFalse();
+        resolved.ConfirmedAtUtc.Should().BeNull();
+        resolved.Confirmation.Filters.Should().BeFalse();
+    }
+
     [Fact]
     public void ProviderRegistry_ShouldRequireExplicitSimulationSelection()
     {
