@@ -153,7 +153,7 @@ jobs:
           fi
           umask 077
           printf '%s\n' "$DEPLOY_ENV_FILE" > "$DEPLOY_TARGET_DIR/.env"
-          retired_sensitive_pattern='^(CLOUD_AI_SERVICE_ACCOUNT_TOKEN|DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD|DATABASE|DOCKER_NETWORK|DB_HOST_ALIAS))=.+$'
+          retired_sensitive_pattern='^(CLOUD_AI_SERVICE_ACCOUNT_TOKEN|CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN|CloudAiRead__ServiceAccountToken|CLOUD_IDENTITY_STATUS_SERVICE_TOKEN|CloudIdentityStatus__ServiceAccountToken|DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD|DATABASE|DOCKER_NETWORK|DB_HOST_ALIAS))=.+$'
           if grep -Eq "$retired_sensitive_pattern" "$DEPLOY_TARGET_DIR/.env"; then
             echo "DEPLOY_ENV_FILE contains retired interactive AiRead or direct Cloud DB credentials; refusing emergency deployment." >&2
             exit 64

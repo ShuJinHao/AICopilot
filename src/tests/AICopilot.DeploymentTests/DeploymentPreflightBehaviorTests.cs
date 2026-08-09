@@ -168,24 +168,33 @@ public sealed class DeploymentPreflightBehaviorTests
             contradictoryResult.Output.Should().Contain("CLOUD_AI_READ_STATE_CONFLICT");
             contradictoryResult.Output.Should().NotContain("docker compose");
 
-            var legacyCredentialEnvPath = WriteDeployValidateEnv(
-                tempDirectory,
-                "typed-legacy-token.env",
-                "http://cloud.factory.internal:81");
-            await File.AppendAllTextAsync(
-                legacyCredentialEnvPath,
-                "\nCLOUD_AI_SERVICE_ACCOUNT_TOKEN=retired-static-token\n");
-            var legacyCredentialResult = await RepositoryTestSupport.RunAsync(
-                "bash",
-                [scriptPath, "--validate-only"],
-                environmentVariables: new Dictionary<string, string>
-                {
-                    ["ENV_FILE"] = legacyCredentialEnvPath
-                });
+            var retiredCredentials = new Dictionary<string, string>
+            {
+                ["CLOUD_AI_SERVICE_ACCOUNT_TOKEN"] = "retired-static-token",
+                ["CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN"] = "retired-static-token-alias",
+                ["DATA_ANALYSIS_CLOUD_READONLY_PASSWORD"] = "retired-direct-db-password"
+            };
+            foreach (var (key, value) in retiredCredentials)
+            {
+                var legacyCredentialEnvPath = WriteDeployValidateEnv(
+                    tempDirectory,
+                    $"typed-legacy-{key}.env",
+                    "http://cloud.factory.internal:81");
+                await File.AppendAllTextAsync(
+                    legacyCredentialEnvPath,
+                    $"\n{key}={value}\n");
+                var legacyCredentialResult = await RepositoryTestSupport.RunAsync(
+                    "bash",
+                    [scriptPath, "--validate-only"],
+                    environmentVariables: new Dictionary<string, string>
+                    {
+                        ["ENV_FILE"] = legacyCredentialEnvPath
+                    });
 
-            legacyCredentialResult.ExitCode.Should().Be(64, legacyCredentialResult.Output);
-            legacyCredentialResult.Output.Should().Contain("LEGACY_CLOUD_CREDENTIAL_FORBIDDEN");
-            legacyCredentialResult.Output.Should().NotContain("retired-static-token");
+                legacyCredentialResult.ExitCode.Should().Be(64, legacyCredentialResult.Output);
+                legacyCredentialResult.Output.Should().Contain("LEGACY_CLOUD_CREDENTIAL_FORBIDDEN");
+                legacyCredentialResult.Output.Should().NotContain(value);
+            }
         }
         finally
         {
@@ -208,6 +217,9 @@ public sealed class DeploymentPreflightBehaviorTests
         workflow.Should().Contain(
             "set_env_value \"$DEPLOY_TARGET_DIR/.env\" DATA_ANALYSIS_CLOUD_READONLY_ENABLED false");
         workflow.Should().Contain("typed AiRead state is preserved from the validated deployment environment");
+        workflow.Should().Contain("CLOUD_AI_SERVICE_ACCOUNT_TOKEN");
+        workflow.Should().Contain("CLOUD_AI_READ_SERVICE_ACCOUNT_TOKEN");
+        workflow.Should().Contain("DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD");
     }
 
     [Fact]
