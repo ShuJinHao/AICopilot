@@ -4,6 +4,7 @@ using System.Text.Json;
 using AICopilot.HttpApi.Infrastructure;
 using AICopilot.Services.Contracts;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.InProcessTests;
 
@@ -98,23 +99,71 @@ public sealed class CloudOidcDelegationProofTests
                     : JsonContent.Create(new { detail })
             };
         }));
-        var validator = new CloudDelegationTokenContractValidator(httpClient);
+        var validator = new CloudDelegationTokenContractValidator(
+            httpClient,
+            Options.Create(new CloudAiReadOptions
+            {
+                Enabled = true,
+                BaseUrl = "https://ai-read.example.com"
+            }));
 
         var proof = await validator.ValidateAsync(
-            "https://cloud.example.com",
             "opaque-delegated-token",
             CancellationToken.None);
 
         (proof is not null).Should().Be(expectedValid);
         capturedRequest.Should().NotBeNull();
         capturedRequest!.RequestUri.Should().Be(
-            "https://cloud.example.com/api/v1/ai/read/processes?maxRows=1");
+            "https://ai-read.example.com/api/v1/ai/read/processes?maxRows=1");
         capturedRequest.Headers.Authorization!.Scheme.Should().Be("Bearer");
         capturedRequest.Headers.Authorization.Parameter.Should().Be("opaque-delegated-token");
         if (proof is not null)
         {
             proof.Should().Be(ValidContractProof());
         }
+    }
+
+    [Fact]
+    public async Task ContractProof_ShouldProbeAiReadOriginWhileKeepingOidcIssuerInEvidence()
+    {
+        Uri? capturedUri = null;
+        using var httpClient = new HttpClient(new StubHandler(request =>
+        {
+            capturedUri = request.RequestUri;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new { })
+            };
+        }));
+        var validator = new CloudDelegationTokenContractValidator(
+            httpClient,
+            Options.Create(new CloudAiReadOptions
+            {
+                Enabled = true,
+                BaseUrl = "https://ai-read.example.com"
+            }));
+        var properties = new AuthenticationProperties();
+        CloudOidcDelegationProof.CaptureGrantedScopes(
+            properties,
+            CloudDelegationDefaults.Scope,
+            [CloudDelegationDefaults.Scope]);
+        using var userInfo = JsonDocument.Parse(
+            """{"sub":"10000000-0000-0000-0000-000000000001","tenant_id":"tenant-a"}""");
+        CloudOidcDelegationProof.TryCaptureUserInfo(userInfo, properties, out _).Should().BeTrue();
+
+        var proof = await validator.ValidateAsync(
+            "opaque-delegated-token",
+            CancellationToken.None);
+        var created = CloudOidcDelegationProof.TryCreateEvidence(
+            properties,
+            new CloudOidcOptions { Issuer = "https://identity.example.com" },
+            proof!,
+            out var evidence);
+
+        capturedUri.Should().Be(
+            "https://ai-read.example.com/api/v1/ai/read/processes?maxRows=1");
+        created.Should().BeTrue();
+        evidence.Issuer.Should().Be("https://identity.example.com");
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using AICopilot.Services.Contracts;
+using Microsoft.Extensions.Options;
 
 namespace AICopilot.HttpApi.Infrastructure;
 
@@ -12,12 +13,13 @@ public sealed record CloudDelegationTokenContractProof(
 public interface ICloudDelegationTokenContractValidator
 {
     Task<CloudDelegationTokenContractProof?> ValidateAsync(
-        string issuer,
         string accessToken,
         CancellationToken cancellationToken = default);
 }
 
-internal sealed class CloudDelegationTokenContractValidator(HttpClient httpClient)
+internal sealed class CloudDelegationTokenContractValidator(
+    HttpClient httpClient,
+    IOptions<CloudAiReadOptions> cloudAiReadOptions)
     : ICloudDelegationTokenContractValidator
 {
     private const string ProbePath = "/api/v1/ai/read/processes?maxRows=1";
@@ -26,20 +28,21 @@ internal sealed class CloudDelegationTokenContractValidator(HttpClient httpClien
     private const int MaximumProblemBytes = 4096;
 
     public async Task<CloudDelegationTokenContractProof?> ValidateAsync(
-        string issuer,
         string accessToken,
         CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(issuer?.TrimEnd('/'), UriKind.Absolute, out var issuerUri) ||
-            issuerUri.Scheme is not ("http" or "https") ||
+        var options = cloudAiReadOptions.Value;
+        if (!options.Enabled ||
+            !Uri.TryCreate(options.BaseUrl?.TrimEnd('/'), UriKind.Absolute, out var aiReadBaseUri) ||
+            aiReadBaseUri.Scheme is not ("http" or "https") ||
             string.IsNullOrWhiteSpace(accessToken))
         {
             return null;
         }
 
-        var probeUri = new Uri(issuerUri, ProbePath);
-        if (!string.Equals(probeUri.Scheme, issuerUri.Scheme, StringComparison.Ordinal) ||
-            !string.Equals(probeUri.Authority, issuerUri.Authority, StringComparison.OrdinalIgnoreCase))
+        var probeUri = new Uri(aiReadBaseUri, ProbePath);
+        if (!string.Equals(probeUri.Scheme, aiReadBaseUri.Scheme, StringComparison.Ordinal) ||
+            !string.Equals(probeUri.Authority, aiReadBaseUri.Authority, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }

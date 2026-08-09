@@ -289,7 +289,6 @@ public class IdentityController(
         }
 
         var contractProof = await delegationTokenContractValidator.ValidateAsync(
-            cloudOidcOptions.Value.Issuer,
             accessToken,
             cancellationToken);
         if (contractProof is null ||
