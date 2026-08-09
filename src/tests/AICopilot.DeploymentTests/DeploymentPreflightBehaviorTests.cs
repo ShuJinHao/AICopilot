@@ -1,6 +1,4 @@
 using System.Text.RegularExpressions;
-using AICopilot.Services.Contracts;
-
 namespace AICopilot.DeploymentTests;
 
 public sealed class DeploymentPreflightBehaviorTests
@@ -84,6 +82,43 @@ public sealed class DeploymentPreflightBehaviorTests
     }
 
     [Fact]
+    public async Task DeployReleaseValidateOnly_ShouldRejectCanonicalCloudEmployeeAsEmergencyAdmin()
+    {
+        var scriptPath = Path.Combine(
+            RepositoryTestSupport.Root,
+            "deploy",
+            "enterprise-ai",
+            "deploy-release.sh");
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "aicopilot-deploy-emergency-admin-conflict",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            var envPath = WriteDeployValidateEnv(
+                tempDirectory,
+                "conflict.env",
+                "http://cloud.factory.internal:81",
+                "101650");
+
+            var result = await RepositoryTestSupport.RunAsync(
+                "bash",
+                [scriptPath, "--validate-only"],
+                environmentVariables: new Dictionary<string, string> { ["ENV_FILE"] = envPath });
+
+            result.ExitCode.Should().Be(64, result.Output);
+            result.Output.Should().Contain(
+                "EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT");
+            result.Output.Should().NotContain("docker compose");
+        }
+        finally
+        {
+            RepositoryTestSupport.TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
     public async Task TrackedShellScripts_ShouldMatchExecutionClassification()
     {
         var result = await RepositoryTestSupport.RunAsync(
@@ -132,29 +167,36 @@ public sealed class DeploymentPreflightBehaviorTests
     }
 
     [Fact]
-    public void CloudReadonlyGrantSql_ShouldMatchGovernedRuntimeTables()
+    public async Task ClosedCloudDirectDbDeployment_ShouldFailBeforeCredentialsOrNetwork()
     {
-        var applyGrantSql = File.ReadAllText(Path.Combine(
-            RepositoryTestSupport.Root,
-            "deploy",
-            "enterprise-ai",
-            "cloud-readonly",
-            "apply-readonly-grants.sql"));
-        var checkGrantSql = File.ReadAllText(Path.Combine(
-            RepositoryTestSupport.Root,
-            "deploy",
-            "enterprise-ai",
-            "cloud-readonly",
-            "check-readonly-grants.sql"));
+        var deployRoot = Path.Combine(RepositoryTestSupport.Root, "deploy", "enterprise-ai");
+        var compose = File.ReadAllText(Path.Combine(deployRoot, "docker-compose.yaml"));
+        var envTemplate = File.ReadAllText(Path.Combine(deployRoot, ".env.example"));
+        var deployRelease = File.ReadAllText(Path.Combine(deployRoot, "deploy-release.sh"));
 
-        ExtractGrantedTables(applyGrantSql)
-            .Should()
-            .BeEquivalentTo(CloudReadOnlyGovernedSchema.AllowedTables);
-        ExtractGrantedTables(checkGrantSql)
-            .Should()
-            .BeEquivalentTo(CloudReadOnlyGovernedSchema.AllowedTables);
-        applyGrantSql.Should().NotContain("GRANT SELECT ON ALL TABLES");
-        applyGrantSql.Should().NotContain("ALTER DEFAULT PRIVILEGES");
+        compose.Should().Contain("DataAnalysis__CloudReadOnly__Enabled: \"false\"");
+        compose.Should().Contain("DataAnalysis__CloudReadOnlyTextToSql__Enabled: \"false\"");
+        compose.Should().NotContain("CloudAiRead__ServiceAccountToken");
+        compose.Should().NotContain("DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING");
+        envTemplate.Should().NotContain("DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING");
+        envTemplate.Should().NotContain("DATA_ANALYSIS_CLOUD_READONLY_PASSWORD");
+        deployRelease.Should().Contain(
+            "Real Cloud Direct DB/Text-to-SQL is temporarily closed; DATA_ANALYSIS_CLOUD_READONLY_ENABLED must remain false.");
+
+        foreach (var scriptName in new[]
+                 {
+                     "apply-cloud-readonly-grants.sh",
+                     "check-cloud-readonly-grants.sh"
+                 })
+        {
+            var scriptPath = Path.Combine(deployRoot, "scripts", scriptName);
+            var result = await RepositoryTestSupport.RunAsync("bash", [scriptPath, "--dry-run"]);
+
+            result.ExitCode.Should().Be(64, result.Output);
+            result.Output.Should().Contain("Real Cloud Direct DB/Text-to-SQL is temporarily closed");
+            result.Output.Should().NotContain("docker exec");
+            result.Output.Should().NotContain("docker network");
+        }
     }
 
     [Fact]
@@ -179,20 +221,11 @@ public sealed class DeploymentPreflightBehaviorTests
         result.Output.Should().NotContain("Checking model provider connectivity");
     }
 
-    private static IReadOnlyCollection<string> ExtractGrantedTables(string sql)
-    {
-        return Regex
-            .Matches(sql, @"public\.(?<table>[a-z_]+)", RegexOptions.CultureInvariant)
-            .Select(match => match.Groups["table"].Value)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
     private static string WriteDeployValidateEnv(
         string directory,
         string fileName,
-        string cloudOidcIssuer)
+        string cloudOidcIssuer,
+        string bootstrapAdminUserName = "bootstrap-admin")
     {
         var envPath = Path.Combine(directory, fileName);
         File.WriteAllText(
@@ -204,6 +237,7 @@ CLOUD_PLATFORM_URL=http://cloud.factory.internal:81
 POSTGRES_PASSWORD=PgStrongSecretValue1234
 RABBITMQ_PASSWORD=RbStrongSecretValue1234
 QDRANT_KEY=QdStrongSecretValue1234
+AICOPILOT_BOOTSTRAP_ADMIN_USERNAME={{bootstrapAdminUserName}}
 AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD=AdminStrong1234
 AICOPILOT_API_KEY_ENCRYPTION_KEY=EncryptionKeyValue01234567890123456789
 AICOPILOT_JWT_SECRET_KEY=JwtSecretValue012345678901234567890123456789012345678901234567890123
@@ -212,8 +246,9 @@ CLOUD_READONLY_REAL_ENABLED=false
 CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=false
 CLOUD_AI_READ_ENABLED=false
 CLOUD_AI_READ_BASE_URL=http://cloud.factory.internal:81
-CLOUD_IDENTITY_STATUS_ENABLED=false
+CLOUD_IDENTITY_STATUS_ENABLED=true
 CLOUD_IDENTITY_STATUS_BASE_URL=http://cloud.factory.internal:81
+AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET=IdentityStatusSigningSecretValue0123456789
 DATA_ANALYSIS_CLOUD_READONLY_ENABLED=false
 AICOPILOT_MODEL_SMOKE_ENABLED=false
 AICOPILOT_MODEL_SMOKE_BASE_URL=http://model.factory.internal:40034/v1

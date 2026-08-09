@@ -4,7 +4,7 @@
 
 本文件是 AICopilot 部署的唯一项目级操作入口。新接手日常部署先读工作区根 `deploy/README.md` 和 `deploy/Deploy-Changed.ps1`，再按需查看本文件、仓库 `AGENTS.md`、`docs/AICopilot业务规则.md` 与 `docs/AICopilot安全部署契约.md`。
 
-> 当前状态（2026-07-11）：AICopilot 全量应用已完成真实 Harbor、生产 Runner、PostgreSQL 备份、migration、rollout 与健康检查；自动增量入口的编译门禁、依赖影响测试和生产 SHA 只读 inspect 已通过，但尚未用新的单服务业务变更执行生产发布，因此不得把全量成功冒充增量生产 E2E。
+> 当前状态（2026-08-08）：既有生产发布证据继续保留，但第 0～7 批候选代码复审问题尚未全部收口，当前候选代码不是生产基线；不得用历史全量成功、准备态或候选证据冒充当前增量生产 E2E。
 
 本目录按双层口径维护：
 
@@ -16,9 +16,9 @@
 
 - 生产环境使用 Docker Compose 单机编排，服务器目录为 `/srv/enterprise-ai/deploy`。
 - 工作区日常标准发布走 `pwsh ./deploy/Deploy-Changed.ps1 -Targets AICopilot`；入口只接受 clean、已提交的 main，可 push 现有 HEAD但不创建提交或修改 tracked 文件；复用同 SHA 证据，只补受影响 Architecture/Security/DeploymentContract，再按依赖闭包发布受影响镜像。全量、coverage、mutation、duplication 和 CrossProject 不属于部署。
-- 三端从零部署走 `pwsh ./deploy/Deploy-FromZero.ps1 -Targets Cloud,AICopilot,Edge -ConfirmFromZero`；本机根密钥只从 macOS Keychain canonical schema 读取，缺键时远端零写入。AI 阶段只做 readonly 权限、migration、模型 seed 和健康。
+- 三端从零部署走 `pwsh ./deploy/Deploy-FromZero.ps1 -Targets Cloud,AICopilot,Edge -ConfirmFromZero`；本机根密钥只从 macOS Keychain canonical schema 读取，缺键时远端零写入。部署只向 Cloud 和 AICopilot 注入同一份专用身份状态签名密钥，不再生成或保存固定长期 Token；AICopilot 在内存中生成 5 分钟 Token 并在剩余 60 秒时续签。AI 阶段显式保持 Direct DB/Text-to-SQL 关闭，并执行 migration、模型 seed 和健康；不得读取、创建或校验 Cloud readonly role/grant，不得把冻结资产解释为查询启用。
 - AICopilot 选择 HttpApi/DataWorker/RagWorker 时自动包含 migration；任何包含 migration 的发布必须同时选择 HttpApi/DataWorker/RagWorker/Web 完整 runtime 组，migration-only 或部分组直接拒绝。所有生产入口先停稳全部四个旧 runtime，再生成最终 PostgreSQL dump/checksum、持久化不可自动恢复的 started marker，并对完整候选 runtime 组执行 `--no-deps` 更新；PostgreSQL、RabbitMQ、Qdrant 不随应用发布重建。
-- Runner/Compose/scripts/cloud-readonly 支持文件升级、深度安全巡检、cleanup 和 Harbor GC 均是独立维护任务，不得塞回日常应用热路径。
+- Runner/Compose/scripts 以及冻结的 `cloud-readonly` 资产升级、深度安全巡检、cleanup 和 Harbor GC 均是独立维护任务，不得塞回日常应用热路径；关闭态运行时和从零部署不得执行 readonly grant/probe。
 - 多 agent 可以同时准备本地候选，但远端 support install、release state、容器变更和 cleanup 必须由托管锁串行化；第二个发布遇到 active lock 时立即返回 `75`，不得静默等待或绕锁重发。
 - `aicopilot-image` / `aicopilot-deploy` 只保留带确认词的灾备入口；日常生产发布不得等待这些 workflow。
 - 单个镜像 build/push 默认 15 分钟超时，Harbor 登录/API 检查默认 2 分钟超时，SSH deploy 默认 30 分钟超时；超时必须停止并按脚本输出诊断 Docker buildx、Harbor tag、服务器 compose/logs 和 release 状态，不得继续 watch 或无限等待。
@@ -28,7 +28,7 @@
 - AICopilot 应用镜像不保留历史版本；Harbor 和服务器本机只保留当前生产正在运行的 `sha-*` 应用镜像。
 - 日常链使用服务器预置且 mode `0600` 的真实 `.env`，support sync 明确排除它；从零部署按 Keychain 生成该文件。Markdown、旧 env 与 GitHub `DEPLOY_ENV_FILE` 不作为标准流程 fallback。
 - 当前内网部署红线是 HTTP-only。部署脚本、compose、nginx 模板和验收命令不得把 HTTPS redirection、HSTS、443 listener、证书申请/续期或 OIDC HTTPS metadata 强制校验作为当前门槛；安全加固改走内网隔离、端口收敛、同源代理、CORS 白名单、强 secret、短期 token、非 root 容器、只读边界和除 HSTS 外的安全响应头。
-- AICopilot 对 Cloud 业务数据保持只读边界；不得通过 MCP、Tool、Agent workflow、后台任务或隐藏适配器写 Cloud。
+- AICopilot 对 Cloud 业务数据保持只读边界；交互式读取只允许携带当前有效 Cloud 用户委托的 typed AiRead，缺失或无效委托直接拒绝。不得通过静态系统 Token、Direct DB、Text-to-SQL、MCP、Tool、Agent workflow、后台任务或隐藏适配器扩大读取范围或写 Cloud。
 - 当前标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode。
 - AICopilot 日常真实慢路径只剩选中镜像 build/Harbor push、migration 和健康检查，不存在等价的“HTTP 上传限速 1000M”概念。support sync、深度 attestation 和 cleanup 已拆出。
 - 正式日常发布只构建 fresh remote tip 的固定 Git SHA，并使用独立 detached worktree；不得读取或要求清理正在被其他 agent 修改的原工作树。
@@ -74,7 +74,7 @@ deploy/enterprise-ai/
 DEPLOY_TARGET_DIR=/srv/enterprise-ai/deploy
 ```
 
-标准发布的 Harbor、模型、管理员、Cloud readonly 与数据库凭据全部来自 macOS Keychain。`DEPLOY_ENV_FILE`、GitHub Cloud readonly secrets、Markdown 和旧 env 都不得作为普通部署 fallback；Emergency workflow 的独立 secret 只在用户明确授权灾备时按对应 workflow 检查。
+标准发布的 Harbor、模型、本地 emergency admin 与身份状态系统签名密钥分别由 macOS Keychain 的独立字段承载。Cloud OIDC `101650` 是非秘密固定业务值，不进入 Keychain；emergency admin 不得与 `101650` 共用用户名、密码、seed 或自动绑定配置。交互式 AiRead 使用 OIDC 运行时短期委托，Cloud readonly/数据库凭据在关闭态不得读取或注入；`DEPLOY_ENV_FILE`、GitHub Cloud readonly secrets、Markdown 和旧 env 都不得作为普通部署 fallback。
 标准 non-root 发布还要求 `releases/current-release*`、`staged-release*`、`previous-release*`、`current-release.summary.md` 和 deploy support files 对标准部署用户可读可写；root 应急路径一旦写入这些状态，关闭任务前必须恢复 owner/mode。
 
 Runner 机器侧验收：
@@ -91,29 +91,18 @@ cd /srv/enterprise-ai/deploy
 平台侧留痕使用 `runner-platform-attestation.template.md` 复制一份填写，填好的记录不要提交真实 secret 或敏感截图；完成后用
 `scripts/check-platform-attestation-record.sh --record <filled-attestation.md>` 做静态完整性校验。该 linter 会拒绝模板占位符、未勾选项、空签署人和 `pending` / `not implemented` / `N/A` 等弱证明词，并要求记录包含 GitHub production environment secret 限制、`contents: read`、`self-hosted + iiot-linux-prod`、生产/secret workflow 无 GitHub hosted runner 的证据；如果 OIDC/Vault 或等价短期凭据尚未落地，记录里只能写成已批准的基础设施例外，并按结构化字段给出 `Ticket or change id`、`Exception owner`、`Due date` 和 `Current mitigation`。该 linter 只检查事实记录是否完整，不能替代 GitHub、Vault、OIDC 或 runner 真实验收。
 
-真实 Cloud 只读数据库的连接配置、模式开关和 readonly role 不再通过 GitHub production environment
-secret 或手动 workflow 写入生产。新环境或清空重建统一由工作区
-`deploy/Deploy-FromZero.ps1` 从 macOS Keychain canonical schema 生成受限服务器 `.env`、
-建立并验证只读授权；普通增量部署只消费既有配置，不修改它。
-该模式只注册 AICopilot 自身的 DataAnalysis `CloudReadOnly` 数据源，不写 Cloud 业务表；数据库账号必须先确认为只读账号。
-Cloud Postgres 不发布到宿主端口，AICopilot 部署脚本会创建外部 Docker 网络
-`enterprise-ai-cloud-readonly`，并把 Cloud compose 的 `deploy/postgres` 容器连接为别名
-`cloud-postgres`。只读连接串推荐使用：
-`Host=cloud-postgres;Port=5432;Database=iiot-db;Username=<readonly_user>;Password=<readonly_password>`。
-Cloud PostgreSQL readonly role 的授权权威载体是
+当前真实 Cloud Direct DB/Text-to-SQL 整体关闭，运行 mode 必须保持 disabled，不得注册 AICopilot `CloudReadOnly` DataAnalysis 数据源或执行 SQL。从零部署和运行容器不得读取或注入 Cloud readonly 用户、密码、连接串、role/grant，不得创建 AICopilot 到 Cloud Postgres 的网络；GitHub production environment secret、手动 workflow 和旧服务器 `.env` 都不能恢复这些输入。
+
+以下文件仅作为冻结资产保留，不进入当前部署、运行或生产凭据清单。Cloud PostgreSQL readonly role 的历史授权载体是
 `deploy/enterprise-ai/cloud-readonly/apply-readonly-grants.sql` 和
 `deploy/enterprise-ai/cloud-readonly/check-readonly-grants.sql`。它们只对
 `devices`、`mfg_processes`、`device_logs`、`hourly_capacity`、`pass_station_records`
 做显式表级 `GRANT SELECT`，并校验写权限、schema create 权限均不存在；不得改成
 `GRANT SELECT ON ALL TABLES`、默认权限、未来表自动授权或列级/表级混用口径。
 `deploy/enterprise-ai/scripts/apply-cloud-readonly-grants.sh` 和
-`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh` 只作为统一从零入口的内部实现，
-或在用户明确批准的独立基础设施维护中由服务器受限 `.env` 调用；它们不是第二套标准操作入口，
-不得读取 GitHub secrets、生成本机 canonical 密钥或维护内联 GRANT 清单。
+`deploy/enterprise-ai/scripts/check-cloud-readonly-grants.sh` 在当前关闭态不得由从零入口、标准发布、容器启动或运行时调用。只有未来委托范围贯穿 SQL 且 AST 行谓词或数据库 RLS 能独立证明范围、并经另批复审批准后，才可重新评估这些资产。
 
-启用 direct DB 后，服务器 `deploy-release.sh` 会在重启服务前自动执行
-`scripts/check-cloud-readonly-grants.sh`；preflight 失败必须停止部署并先修 readonly
-授权，不允许把权限缺口伪装成“数据源暂时不可用”继续发布。
+`Unsupported`、`Unavailable`、人工批准、配置修改或冻结脚本校验成功都不能打开 direct DB；策略层和执行层必须在生成器与 connector 前双重拒绝。
 
 服务器到私有模型 API 的连通性必须能绕开 AICopilot 应用独立验证：
 `scripts/check-model-provider-openai.sh` 会直接调用 OpenAI-compatible
@@ -151,15 +140,17 @@ docker compose run --rm --no-deps --user root --entrypoint /usr/bin/install \
   aicopilot-httpapi -d -o app -g app -m 0700 /var/lib/aicopilot/data-protection-keys
 ```
 
-当前只允许 `AiGateway__Deployment__Mode=SingleInstance`；不得横向启动多个 HttpApi 实例共享本地 key
-目录。多实例必须先引入独立共享 key provider 并更新本契约，不能用复制目录或临时 key 绕过。
+当前只允许 `AiGateway__Deployment__Mode=SingleInstance`。该能力源码已经完成，唯一技术正文见
+[Agent 工作流与异常契约第 1.2 节](../../docs/Agent工作流与异常契约.md#12-agentsession-持久化)；本操作入口只保留部署取值，不再把它列为缺口或复制实现算法。
 HttpApi、DataWorker 与 RagWorker 必须挂载 compose 中同一个持久化卷。对账时序、commit marker 判定、worker 职责、参数不变量、损坏日志处理、受信写入者和平台支持矩阵统一以 [DDD 聚合根边界](../../docs/DDD聚合根边界.md) 为准；本文只保留部署挂载要求。
 `base-dotnet-aspnet:10.0-noble` 由 `mirror-base-images.sh` 生成时必须内置
 `libgssapi-krb5-2`、`tzdata`，并预创建 `/app`、compose 声明的 RAG 存储目录与 mode `0700` 的
 `/var/lib/aicopilot/data-protection-keys`，全部归属 `app:app`；应用 Dockerfile
 不得再用 `USER root` 或临时 `apt-get` 修运行环境。
 
-Cloud OIDC 首部署管理员收编由 `CLOUD_OIDC_BOOTSTRAP_ADMIN_AUTO_BIND_ENABLED` 控制，生产模板和 compose fallback 均默认关闭。只有在已核对目标本地 emergency Admin 与 Cloud `employee_no` 的短时首部署窗口中才能显式设为 `true`，绑定完成后必须立即恢复 `false`。它只允许复用 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME` 指定的本地 Admin；普通同名用户仍拒绝自动绑定，Cloud role 也不会映射为 AI role。
+Cloud OIDC 规范自动收编对象固定为 Cloud `employee_no=101650`。AI 中没有该账号时创建本地账号并赋予 `Admin` 后绑定；已有启用、有效且未冲突账号时确保其为 `Admin` 后直接绑定；禁用或已绑定其它 Cloud 主体时拒绝覆盖。`101650` 是唯一免本地密码确认的例外，不是系统唯一 `Admin`。
+
+本地 emergency admin 继续由 `AICOPILOT_BOOTSTRAP_ADMIN_USERNAME/PASSWORD` 等恢复配置独立管理，绝不参与 Cloud OIDC 自动绑定。Cloud OIDC 只使用非秘密固定业务值 `CloudOidc__CanonicalAdminEmployeeNo=101650`；两条配置链互不复用，普通用户仍按原有密码确认规则绑定。emergency admin 用户名规范化后等于 `101650` 时，应用启动和 `deploy-release.sh --validate-only` 必须以 `EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT` 失败，不自动改名、合并或删除。
 
 ## 基础镜像
 
@@ -300,7 +291,7 @@ cd /srv/enterprise-ai/deploy
 ./scripts/check-model-secret-migration.sh
 ```
 
-`legacy_count` 和 `unprotected_count` 必须全部为 `0`，`MigrationWorker__CheckSecretsOnly=true` 的只读解密检查也必须通过。如果失败，不要启动依赖模型或 Embedding 的运行服务；先重新运行 migration、恢复正确的 `AICOPILOT_API_KEY_ENCRYPTION_KEY`，或由管理员重新录入对应 API key。
+`legacy_count` 和 `unprotected_count` 必须全部为 `0`，`MigrationWorker__CheckSecretsOnly=true` 的只读解密检查也必须通过。如果失败，不要启动依赖模型或 Embedding 的运行服务；先重新运行 migration、恢复正确的 `AICOPILOT_API_KEY_ENCRYPTION_KEY`，或由具备模型配置权限的人员重新录入对应 API key。
 
 发布后安全验收脚本支持 dry-run，便于发布前确认命令展开：
 

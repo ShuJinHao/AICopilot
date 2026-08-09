@@ -12,6 +12,10 @@ namespace AICopilot.UnitTests;
 
 public sealed class CloudOidcLoginTests
 {
+    private const string DefaultCloudUserId = "10000000-0000-0000-0000-000000000001";
+    private const string CanonicalAdminCloudUserId = "10000000-0000-0000-0000-000000101650";
+    private const string PreviousCanonicalAdminCloudUserId = "20000000-0000-0000-0000-000000101650";
+
     [Fact]
     public async Task FinalizeCloudOidcLogin_ShouldJitCreateUserBinding_AndIssueLocalAiToken()
     {
@@ -22,7 +26,11 @@ public sealed class CloudOidcLoginTests
         var tokenGenerator = new RecordingJwtTokenGenerator();
         var handler = CreateHandler(userManager, roleManager, bindingStore, auditWriter, tokenGenerator);
 
-        var result = await handler.Handle(new FinalizeCloudOidcLoginCommand(CreateProfile()), CancellationToken.None);
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(),
+                CreateDelegationToken()),
+            CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Ok);
         result.Value!.UserName.Should().Be("E0001");
@@ -32,7 +40,7 @@ public sealed class CloudOidcLoginTests
         bindingStore.Bindings.Should().ContainSingle(binding =>
             binding.Provider == ExternalIdentityProviders.Cloud &&
             binding.TenantId == CloudOidcIdentityProfile.DefaultTenantId &&
-            binding.ExternalUserId == "cloud-user-1" &&
+            binding.ExternalUserId == DefaultCloudUserId &&
             binding.EmployeeNo == "E0001");
         tokenGenerator.LastUser.Should().NotBeNull();
         tokenGenerator.LastUser!.Roles.Should().BeEquivalentTo(IdentityRoleNames.User);
@@ -41,7 +49,14 @@ public sealed class CloudOidcLoginTests
             claim.Value == ExternalIdentityProviders.Cloud);
         tokenGenerator.LastUser.Claims.Should().Contain(claim =>
             claim.Type == ExternalIdentityJwtClaimTypes.CloudUserId &&
-            claim.Value == "cloud-user-1");
+            claim.Value == DefaultCloudUserId);
+        var delegationClaim = tokenGenerator.LastUser.Claims.Should()
+            .ContainSingle(claim =>
+                claim.Type == ExternalIdentityJwtClaimTypes.CloudDelegationId)
+            .Which;
+        Guid.TryParse(delegationClaim.Value, out var delegationId).Should().BeTrue();
+        delegationId.Should().NotBeEmpty();
+        tokenGenerator.LastUser.ExpiresAtUtc.Should().NotBeNull();
         auditWriter.Requests.Should().ContainSingle(request =>
             request.ActionCode == "Identity.CloudOidcFirstBind" &&
             request.Result == AuditResults.Succeeded);
@@ -68,7 +83,11 @@ public sealed class CloudOidcLoginTests
             new InMemoryIdentityAuditLogWriter(),
             new RecordingJwtTokenGenerator());
 
-        var result = await handler.Handle(new FinalizeCloudOidcLoginCommand(CreateProfile()), CancellationToken.None);
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(),
+                CreateDelegationToken()),
+            CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Unauthorized);
         result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should()
@@ -99,14 +118,17 @@ public sealed class CloudOidcLoginTests
             tokenGenerator);
 
         var result = await handler.Handle(
-            new ConfirmExistingCloudOidcAccountCommand(CreateProfile(), "Local-Password-1!"),
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(),
+                CreateDelegationToken(),
+                "Local-Password-1!"),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Ok);
         result.Value!.UserName.Should().Be("E0001");
         bindingStore.Bindings.Should().ContainSingle(binding =>
             binding.UserId == existingUser.Id &&
-            binding.ExternalUserId == "cloud-user-1");
+            binding.ExternalUserId == DefaultCloudUserId);
         tokenGenerator.LastUser!.Roles.Should().BeEquivalentTo(IdentityRoleNames.Admin);
         existingUser.SecurityStamp.Should().Be(originalSecurityStamp);
         auditWriter.Requests.Should().ContainSingle(request =>
@@ -134,7 +156,10 @@ public sealed class CloudOidcLoginTests
             new RecordingJwtTokenGenerator());
 
         var result = await handler.Handle(
-            new ConfirmExistingCloudOidcAccountCommand(CreateProfile(), "wrong-password"),
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(),
+                CreateDelegationToken(),
+                "wrong-password"),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Unauthorized);
@@ -165,7 +190,10 @@ public sealed class CloudOidcLoginTests
             new RecordingJwtTokenGenerator());
 
         var result = await handler.Handle(
-            new ConfirmExistingCloudOidcAccountCommand(CreateProfile(), "irrelevant-password"),
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(),
+                CreateDelegationToken(),
+                "irrelevant-password"),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Unauthorized);
@@ -192,7 +220,9 @@ public sealed class CloudOidcLoginTests
             invariantGuard: guard);
 
         var result = await handler.Handle(
-            new FinalizeCloudOidcLoginCommand(CreateProfile(preferredUserName: "e0001", employeeNo: "e0001")),
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(preferredUserName: "e0001", employeeNo: "e0001"),
+                CreateDelegationToken()),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Ok);
@@ -218,7 +248,9 @@ public sealed class CloudOidcLoginTests
             transactionService: transactionService);
 
         var result = await handler.Handle(
-            new FinalizeCloudOidcLoginCommand(CreateProfile()),
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(),
+                CreateDelegationToken()),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Unauthorized);
@@ -242,7 +274,9 @@ public sealed class CloudOidcLoginTests
             transactionService: new FailingTransactionalExecutionService(failure));
 
         var action = () => handler.Handle(
-            new FinalizeCloudOidcLoginCommand(CreateProfile()),
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(),
+                CreateDelegationToken()),
             CancellationToken.None);
 
         var assertion = await action.Should().ThrowAsync<InvalidOperationException>();
@@ -273,7 +307,7 @@ public sealed class CloudOidcLoginTests
         var audit = auditWriter.Requests.Should().ContainSingle().Which;
         audit.ActionCode.Should().Be(expectedActionCode);
         audit.Result.Should().Be(AuditResults.Rejected);
-        audit.Metadata.Should().ContainKey("cloudUserId").WhoseValue.Should().Be("cloud-user-1");
+        audit.Metadata.Should().ContainKey("cloudUserId").WhoseValue.Should().Be(DefaultCloudUserId);
         var serializedAudit = System.Text.Json.JsonSerializer.Serialize(audit);
         serializedAudit.Contains("password", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         serializedAudit.Contains("token", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
@@ -296,7 +330,7 @@ public sealed class CloudOidcLoginTests
             existingUser.Id,
             ExternalIdentityProviders.Cloud,
             CloudOidcIdentityProfile.DefaultTenantId,
-            "cloud-user-1",
+            DefaultCloudUserId,
             "employee-1",
             "E0001",
             "张三",
@@ -313,7 +347,10 @@ public sealed class CloudOidcLoginTests
             new RecordingJwtTokenGenerator());
 
         var result = await handler.Handle(
-            new ConfirmExistingCloudOidcAccountCommand(CreateProfile(), "Local-Password-1!"),
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(),
+                CreateDelegationToken(),
+                "Local-Password-1!"),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Ok);
@@ -322,7 +359,7 @@ public sealed class CloudOidcLoginTests
     }
 
     [Fact]
-    public async Task FinalizeCloudOidcLogin_ShouldAdoptBootstrapAdmin_WhenConfiguredAdminUserHasNoCloudBinding()
+    public async Task FinalizeCloudOidcLogin_ShouldBindExistingCanonicalAdminWithoutPassword()
     {
         var existingAdmin = new ApplicationUser
         {
@@ -340,19 +377,16 @@ public sealed class CloudOidcLoginTests
             new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
             bindingStore,
             auditWriter,
-            tokenGenerator,
-            new CloudOidcBootstrapAdminBindingOptions
-            {
-                BootstrapAdminAutoBindEnabled = true,
-                BootstrapAdminUserName = "101650"
-            });
+            tokenGenerator);
 
         var result = await handler.Handle(
-            new FinalizeCloudOidcLoginCommand(CreateProfile(
-                subject: "cloud-admin-101650",
-                preferredUserName: "101650",
-                employeeNo: "101650",
-                employeeId: "employee-admin")),
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(
+                    subject: CanonicalAdminCloudUserId,
+                    preferredUserName: "101650",
+                    employeeNo: "101650",
+                    employeeId: "employee-admin"),
+                CreateDelegationToken(CanonicalAdminCloudUserId)),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Ok);
@@ -362,23 +396,113 @@ public sealed class CloudOidcLoginTests
             binding.UserId == existingAdmin.Id &&
             binding.Provider == ExternalIdentityProviders.Cloud &&
             binding.TenantId == CloudOidcIdentityProfile.DefaultTenantId &&
-            binding.ExternalUserId == "cloud-admin-101650" &&
+            binding.ExternalUserId == CanonicalAdminCloudUserId &&
             binding.EmployeeNo == "101650");
         tokenGenerator.LastUser.Should().NotBeNull();
         tokenGenerator.LastUser!.Roles.Should().BeEquivalentTo(IdentityRoleNames.Admin);
         auditWriter.Requests.Should().ContainSingle(request =>
-            request.ActionCode == "Identity.CloudOidcBootstrapAdminAdopted" &&
+            request.ActionCode == "Identity.CloudOidcCanonicalAdminCollected" &&
             request.Result == AuditResults.Succeeded &&
             request.TargetId == existingAdmin.Id.ToString());
     }
 
     [Fact]
-    public async Task FinalizeCloudOidcLogin_ShouldRejectOrdinaryUserConflict_WhenBootstrapAdminAdoptionIsEnabled()
+    public async Task FinalizeCloudOidcLogin_ShouldRejectPasswordBearingLegacyCanonicalEmergencyAccount()
+    {
+        var legacyEmergencyAdmin = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = CloudOidcCanonicalAdminOptions.RequiredEmployeeNo,
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(legacyEmergencyAdmin);
+        userManager.SetPassword(legacyEmergencyAdmin, "Legacy-Emergency-Password-1!");
+        await userManager.AddToRoleAsync(legacyEmergencyAdmin, IdentityRoleNames.Admin);
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var tokenGenerator = new RecordingJwtTokenGenerator();
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
+            bindingStore,
+            auditWriter,
+            tokenGenerator);
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(
+                    subject: CanonicalAdminCloudUserId,
+                    preferredUserName: CloudOidcCanonicalAdminOptions.RequiredEmployeeNo,
+                    employeeNo: CloudOidcCanonicalAdminOptions.RequiredEmployeeNo,
+                    employeeId: "employee-admin"),
+                CreateDelegationToken(CanonicalAdminCloudUserId)),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        var problem = result.Errors!.OfType<ApiProblemDescriptor>().Single();
+        problem.Code.Should().Be(
+            AuthProblemCodes.EmergencyAdminCanonicalCloudAdminConflict);
+        problem.Detail.Should().Contain(
+            CloudOidcCanonicalAdminOptions.EmergencyAdminConflictReasonCode);
+        bindingStore.Bindings.Should().BeEmpty();
+        tokenGenerator.LastUser.Should().BeNull();
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudOidcCanonicalAdminEmergencyCollision" &&
+            request.Result == AuditResults.Rejected);
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldRejectCanonicalEmergencyPasswordPath()
+    {
+        var legacyEmergencyAdmin = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = CloudOidcCanonicalAdminOptions.RequiredEmployeeNo,
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(legacyEmergencyAdmin);
+        userManager.SetPassword(legacyEmergencyAdmin, "Legacy-Emergency-Password-1!");
+        await userManager.AddToRoleAsync(legacyEmergencyAdmin, IdentityRoleNames.Admin);
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var auditWriter = new InMemoryIdentityAuditLogWriter();
+        var tokenGenerator = new RecordingJwtTokenGenerator();
+        var handler = CreateConfirmHandler(
+            userManager,
+            bindingStore,
+            auditWriter,
+            tokenGenerator);
+
+        var result = await handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(
+                    subject: CanonicalAdminCloudUserId,
+                    preferredUserName: CloudOidcCanonicalAdminOptions.RequiredEmployeeNo,
+                    employeeNo: CloudOidcCanonicalAdminOptions.RequiredEmployeeNo,
+                    employeeId: "employee-admin"),
+                CreateDelegationToken(CanonicalAdminCloudUserId),
+                "Legacy-Emergency-Password-1!"),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        var problem = result.Errors!.OfType<ApiProblemDescriptor>().Single();
+        problem.Code.Should().Be(
+            AuthProblemCodes.EmergencyAdminCanonicalCloudAdminConflict);
+        problem.Detail.Should().Contain(
+            CloudOidcCanonicalAdminOptions.EmergencyAdminConflictReasonCode);
+        bindingStore.Bindings.Should().BeEmpty();
+        tokenGenerator.LastUser.Should().BeNull();
+        auditWriter.Requests.Should().ContainSingle(request =>
+            request.ActionCode == "Identity.CloudOidcCanonicalAdminEmergencyCollision" &&
+            request.Result == AuditResults.Rejected);
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldPromoteAndBindExistingCanonicalOrdinaryUser()
     {
         var existingUser = new ApplicationUser
         {
             Id = Guid.NewGuid(),
-            UserName = "E0001",
+            UserName = "101650",
             SecurityStamp = Guid.NewGuid().ToString("N")
         };
         var userManager = new InMemoryUserManager(existingUser);
@@ -389,22 +513,29 @@ public sealed class CloudOidcLoginTests
             new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
             bindingStore,
             new InMemoryIdentityAuditLogWriter(),
-            new RecordingJwtTokenGenerator(),
-            new CloudOidcBootstrapAdminBindingOptions
-            {
-                BootstrapAdminAutoBindEnabled = true,
-                BootstrapAdminUserName = "101650"
-            });
+            new RecordingJwtTokenGenerator());
 
-        var result = await handler.Handle(new FinalizeCloudOidcLoginCommand(CreateProfile()), CancellationToken.None);
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(
+                    subject: CanonicalAdminCloudUserId,
+                    preferredUserName: "101650",
+                    employeeNo: "101650",
+                    employeeId: "employee-admin"),
+                CreateDelegationToken(CanonicalAdminCloudUserId)),
+            CancellationToken.None);
 
-        result.Status.Should().Be(ResultStatus.Unauthorized);
-        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should().Be(AuthProblemCodes.ExternalIdentityConflict);
-        bindingStore.Bindings.Should().BeEmpty();
+        result.Status.Should().Be(ResultStatus.Ok);
+        userManager.GetAssignedRoles("101650").Should().BeEquivalentTo(
+            IdentityRoleNames.User,
+            IdentityRoleNames.Admin);
+        bindingStore.Bindings.Should().ContainSingle(binding =>
+            binding.UserId == existingUser.Id &&
+            binding.ExternalUserId == CanonicalAdminCloudUserId);
     }
 
     [Fact]
-    public async Task FinalizeCloudOidcLogin_ShouldRejectBootstrapAdminAdoption_WhenExistingAdminHasDifferentCloudBinding()
+    public async Task FinalizeCloudOidcLogin_ShouldRejectCanonicalAdminWhenBoundToDifferentCloudSubject()
     {
         var existingAdmin = new ApplicationUser
         {
@@ -419,7 +550,7 @@ public sealed class CloudOidcLoginTests
             existingAdmin.Id,
             ExternalIdentityProviders.Cloud,
             CloudOidcIdentityProfile.DefaultTenantId,
-            "cloud-admin-old-sub",
+            PreviousCanonicalAdminCloudUserId,
             "employee-admin",
             "101650",
             "管理员",
@@ -434,24 +565,289 @@ public sealed class CloudOidcLoginTests
             new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
             bindingStore,
             new InMemoryIdentityAuditLogWriter(),
-            new RecordingJwtTokenGenerator(),
-            new CloudOidcBootstrapAdminBindingOptions
-            {
-                BootstrapAdminAutoBindEnabled = true,
-                BootstrapAdminUserName = "101650"
-            });
+            new RecordingJwtTokenGenerator());
 
         var result = await handler.Handle(
-            new FinalizeCloudOidcLoginCommand(CreateProfile(
-                subject: "cloud-admin-new-sub",
-                preferredUserName: "101650",
-                employeeNo: "101650",
-                employeeId: "employee-admin")),
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(
+                    subject: CanonicalAdminCloudUserId,
+                    preferredUserName: "101650",
+                    employeeNo: "101650",
+                    employeeId: "employee-admin"),
+                CreateDelegationToken(CanonicalAdminCloudUserId)),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Unauthorized);
         result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should().Be(AuthProblemCodes.ExternalIdentityConflict);
-        bindingStore.Bindings.Should().ContainSingle(binding => binding.ExternalUserId == "cloud-admin-old-sub");
+        bindingStore.Bindings.Should().ContainSingle(binding =>
+            binding.ExternalUserId == PreviousCanonicalAdminCloudUserId);
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldCreateCanonicalAdminWhenMissing()
+    {
+        var userManager = new InMemoryUserManager();
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
+            bindingStore,
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator());
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(
+                    subject: CanonicalAdminCloudUserId,
+                    preferredUserName: "101650",
+                    employeeNo: "101650",
+                    employeeId: "employee-admin"),
+                CreateDelegationToken(CanonicalAdminCloudUserId)),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        userManager.StoredUsers.Should().ContainSingle(user => user.UserName == "101650");
+        userManager.GetAssignedRoles("101650").Should().BeEquivalentTo(
+            IdentityRoleNames.Admin);
+        bindingStore.Bindings.Should().ContainSingle(binding =>
+            binding.ExternalUserId == CanonicalAdminCloudUserId &&
+            binding.EmployeeNo == "101650");
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldRejectDisabledCanonicalLocalAccount()
+    {
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "101650",
+            SecurityStamp = Guid.NewGuid().ToString("N"),
+            LockoutEnabled = true,
+            LockoutEnd = DateTimeOffset.MaxValue
+        };
+        var userManager = new InMemoryUserManager(existingUser);
+        await userManager.AddToRoleAsync(existingUser, IdentityRoleNames.Admin);
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
+            bindingStore,
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator());
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(
+                    subject: CanonicalAdminCloudUserId,
+                    preferredUserName: "101650",
+                    employeeNo: "101650",
+                    employeeId: "employee-admin"),
+                CreateDelegationToken(CanonicalAdminCloudUserId)),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Unauthorized);
+        result.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should()
+            .Be(AuthProblemCodes.AccountDisabled);
+        bindingStore.Bindings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldReuseCanonicalBindingIdempotently()
+    {
+        var userManager = new InMemoryUserManager();
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var grantStore = new InMemoryCloudDelegationGrantStore();
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User, IdentityRoleNames.Admin),
+            bindingStore,
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            grantStore: grantStore);
+        var profile = CreateProfile(
+            subject: CanonicalAdminCloudUserId,
+            preferredUserName: "101650",
+            employeeNo: "101650",
+            employeeId: "employee-admin");
+
+        var first = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(profile, CreateDelegationToken(profile.Subject)),
+            CancellationToken.None);
+        var second = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(profile, CreateDelegationToken(profile.Subject)),
+            CancellationToken.None);
+
+        first.Status.Should().Be(ResultStatus.Ok);
+        second.Status.Should().Be(ResultStatus.Ok);
+        userManager.StoredUsers.Should().ContainSingle(user => user.UserName == "101650");
+        bindingStore.Bindings.Should().ContainSingle(binding =>
+            binding.ExternalUserId == CanonicalAdminCloudUserId);
+        grantStore.Requests.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldNotIssueAiTokenWhenDelegationPersistenceFails()
+    {
+        var tokenGenerator = new RecordingJwtTokenGenerator();
+        var failure = new InvalidOperationException("delegation store unavailable");
+        var handler = CreateHandler(
+            new InMemoryUserManager(),
+            new InMemoryRoleManager(IdentityRoleNames.User),
+            new InMemoryExternalIdentityBindingStore(),
+            new InMemoryIdentityAuditLogWriter(),
+            tokenGenerator,
+            grantStore: new InMemoryCloudDelegationGrantStore(failure));
+
+        var action = () => handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(),
+                CreateDelegationToken()),
+            CancellationToken.None);
+
+        var assertion = await action.Should().ThrowAsync<InvalidOperationException>();
+        assertion.Which.Should().BeSameAs(failure);
+        tokenGenerator.LastUser.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("issuer")]
+    [InlineData("subject")]
+    [InlineData("delegated-user")]
+    [InlineData("tenant")]
+    [InlineData("audience")]
+    [InlineData("actor")]
+    [InlineData("scope")]
+    public async Task FinalizeCloudOidcLogin_ShouldRejectMismatchedDelegationEvidenceBeforeMutation(
+        string mismatch)
+    {
+        var profile = CreateProfile();
+        var validEvidence = CreateDelegationToken().Evidence;
+        var invalidEvidence = mismatch switch
+        {
+            "issuer" => validEvidence with { Issuer = "https://other-cloud.example.com" },
+            "subject" => validEvidence with { Subject = Guid.NewGuid().ToString("D") },
+            "delegated-user" => validEvidence with { DelegatedUserId = Guid.NewGuid().ToString("D") },
+            "tenant" => validEvidence with { TenantId = "other-tenant" },
+            "audience" => validEvidence with { Audience = "other-audience" },
+            "actor" => validEvidence with { Actor = "other-actor" },
+            "scope" => validEvidence with { Scopes = ["other.scope"] },
+            _ => throw new ArgumentOutOfRangeException(nameof(mismatch))
+        };
+        var userManager = new InMemoryUserManager();
+        var grantStore = new InMemoryCloudDelegationGrantStore();
+        var handler = CreateHandler(
+            userManager,
+            new InMemoryRoleManager(IdentityRoleNames.User),
+            new InMemoryExternalIdentityBindingStore(),
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            grantStore: grantStore);
+
+        var action = () => handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                profile,
+                CreateDelegationToken(evidence: invalidEvidence)),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*delegation evidence*");
+        userManager.StoredUsers.Should().BeEmpty();
+        grantStore.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FinalizeCloudOidcLogin_ShouldCapDelegationAtThirtyMinutes()
+    {
+        var grantStore = new InMemoryCloudDelegationGrantStore();
+        var handler = CreateHandler(
+            new InMemoryUserManager(),
+            new InMemoryRoleManager(IdentityRoleNames.User),
+            new InMemoryExternalIdentityBindingStore(),
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            grantStore: grantStore);
+        var startedAtUtc = DateTime.UtcNow;
+
+        var result = await handler.Handle(
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(),
+                CreateDelegationToken(expiresAtUtc: startedAtUtc.AddHours(8))),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        grantStore.Requests.Should().ContainSingle();
+        grantStore.Requests[0].ExpiresAtUtc.Should()
+            .BeOnOrBefore(startedAtUtc.AddMinutes(CloudDelegationDefaults.LifetimeMinutes).AddSeconds(1));
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldValidateAndCapDelegationBeforePersistingGrant()
+    {
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "E0001",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingUser);
+        userManager.SetPassword(existingUser, "Local-Password-1!");
+        var grantStore = new InMemoryCloudDelegationGrantStore();
+        var handler = CreateConfirmHandler(
+            userManager,
+            new InMemoryExternalIdentityBindingStore(),
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            grantStore: grantStore);
+        var startedAtUtc = DateTime.UtcNow;
+
+        var result = await handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(),
+                CreateDelegationToken(expiresAtUtc: startedAtUtc.AddHours(8)),
+                "Local-Password-1!"),
+            CancellationToken.None);
+
+        result.Status.Should().Be(ResultStatus.Ok);
+        grantStore.Requests.Should().ContainSingle();
+        grantStore.Requests[0].ExpiresAtUtc.Should()
+            .BeOnOrBefore(startedAtUtc.AddMinutes(CloudDelegationDefaults.LifetimeMinutes).AddSeconds(1));
+    }
+
+    [Fact]
+    public async Task ConfirmExistingCloudOidcAccount_ShouldRejectMismatchedDelegationBeforePasswordOrBinding()
+    {
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "E0001",
+            SecurityStamp = Guid.NewGuid().ToString("N")
+        };
+        var userManager = new InMemoryUserManager(existingUser);
+        userManager.SetPassword(existingUser, "Local-Password-1!");
+        var bindingStore = new InMemoryExternalIdentityBindingStore();
+        var grantStore = new InMemoryCloudDelegationGrantStore();
+        var invalidEvidence = CreateDelegationToken().Evidence with
+        {
+            Audience = "wrong-audience"
+        };
+        var handler = CreateConfirmHandler(
+            userManager,
+            bindingStore,
+            new InMemoryIdentityAuditLogWriter(),
+            new RecordingJwtTokenGenerator(),
+            grantStore: grantStore);
+
+        var action = () => handler.Handle(
+            new ConfirmExistingCloudOidcAccountCommand(
+                CreateProfile(),
+                CreateDelegationToken(evidence: invalidEvidence),
+                "Local-Password-1!"),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*delegation evidence*");
+        bindingStore.Bindings.Should().BeEmpty();
+        grantStore.Requests.Should().BeEmpty();
     }
 
     [Fact]
@@ -469,7 +865,9 @@ public sealed class CloudOidcLoginTests
             transactionService: transactionService);
 
         var result = await handler.Handle(
-            new FinalizeCloudOidcLoginCommand(CreateProfile(accountEnabled: false)),
+            new FinalizeCloudOidcLoginCommand(
+                CreateProfile(accountEnabled: false),
+                CreateDelegationToken()),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Unauthorized);
@@ -705,18 +1103,17 @@ public sealed class CloudOidcLoginTests
     }
 
     [Fact]
-    public void CloudOidcBootstrapAdminBindingOptions_ShouldRejectEnabledEmptyBootstrapAdminUserName()
+    public void CloudOidcCanonicalAdminOptions_ShouldRejectAnyNonCanonicalEmployeeNumber()
     {
-        var options = new CloudOidcBootstrapAdminBindingOptions
+        var options = new CloudOidcCanonicalAdminOptions
         {
-            BootstrapAdminAutoBindEnabled = true,
-            BootstrapAdminUserName = ""
+            CanonicalAdminEmployeeNo = "E0001"
         };
 
         Action act = options.EnsureValid;
 
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*CloudOidc:BootstrapAdminUserName*");
+            .WithMessage("*CloudOidc:CanonicalAdminEmployeeNo*");
     }
 
     private static FinalizeCloudOidcLoginCommandHandler CreateHandler(
@@ -725,9 +1122,10 @@ public sealed class CloudOidcLoginTests
         InMemoryExternalIdentityBindingStore bindingStore,
         InMemoryIdentityAuditLogWriter auditWriter,
         RecordingJwtTokenGenerator tokenGenerator,
-        CloudOidcBootstrapAdminBindingOptions? bootstrapAdminBindingOptions = null,
+        CloudOidcCanonicalAdminOptions? canonicalAdminOptions = null,
         ITransactionalExecutionService? transactionService = null,
-        IExternalIdentityBindingInvariantGuard? invariantGuard = null)
+        IExternalIdentityBindingInvariantGuard? invariantGuard = null,
+        ICloudDelegationGrantStore? grantStore = null)
     {
         return new FinalizeCloudOidcLoginCommandHandler(
             userManager,
@@ -737,7 +1135,8 @@ public sealed class CloudOidcLoginTests
             invariantGuard ?? new NoOpExternalIdentityBindingInvariantGuard(),
             auditWriter,
             tokenGenerator,
-            Options.Create(bootstrapAdminBindingOptions ?? new CloudOidcBootstrapAdminBindingOptions()),
+            grantStore ?? new InMemoryCloudDelegationGrantStore(),
+            Options.Create(canonicalAdminOptions ?? new CloudOidcCanonicalAdminOptions()),
             transactionService ?? new InlineTransactionalExecutionService());
     }
 
@@ -747,7 +1146,8 @@ public sealed class CloudOidcLoginTests
         InMemoryIdentityAuditLogWriter auditWriter,
         RecordingJwtTokenGenerator tokenGenerator,
         ITransactionalExecutionService? transactionService = null,
-        IExternalIdentityBindingInvariantGuard? invariantGuard = null)
+        IExternalIdentityBindingInvariantGuard? invariantGuard = null,
+        ICloudDelegationGrantStore? grantStore = null)
     {
         return new ConfirmExistingCloudOidcAccountCommandHandler(
             userManager,
@@ -756,6 +1156,7 @@ public sealed class CloudOidcLoginTests
             invariantGuard ?? new NoOpExternalIdentityBindingInvariantGuard(),
             auditWriter,
             tokenGenerator,
+            grantStore ?? new InMemoryCloudDelegationGrantStore(),
             transactionService ?? new InlineTransactionalExecutionService());
     }
 
@@ -771,7 +1172,7 @@ public sealed class CloudOidcLoginTests
             {
                 Enabled = true,
                 BaseUrl = "https://cloud.example.com",
-                ServiceAccountToken = "service-token",
+                SigningSecret = "identity-status-signing-secret-32-bytes-minimum",
                 RefreshIntervalSeconds = 60,
                 TimeoutSeconds = 5
             }),
@@ -785,7 +1186,7 @@ public sealed class CloudOidcLoginTests
 
     private static CloudOidcIdentityProfile CreateProfile(
         bool accountEnabled = true,
-        string subject = "cloud-user-1",
+        string subject = DefaultCloudUserId,
         string preferredUserName = "E0001",
         string? employeeNo = "E0001",
         string? employeeId = "employee-1")
@@ -803,6 +1204,25 @@ public sealed class CloudOidcLoginTests
             "v1",
             accountEnabled,
             EmployeeActive: true);
+    }
+
+    private static CloudDelegationTokenInput CreateDelegationToken(
+        string subject = DefaultCloudUserId,
+        DateTime? expiresAtUtc = null,
+        CloudDelegationTokenEvidence? evidence = null)
+    {
+        evidence ??= new CloudDelegationTokenEvidence(
+            "https://cloud.example.com",
+            subject,
+            subject,
+            CloudOidcIdentityProfile.DefaultTenantId,
+            CloudDelegationDefaults.Audience,
+            CloudDelegationDefaults.Actor,
+            [CloudDelegationDefaults.Scope]);
+        return new CloudDelegationTokenInput(
+            "delegated-cloud-token",
+            expiresAtUtc ?? DateTime.UtcNow.AddMinutes(CloudDelegationDefaults.LifetimeMinutes),
+            evidence);
     }
 
     private static ClaimsPrincipal CreateCloudPrincipal(
@@ -965,6 +1385,85 @@ public sealed class CloudOidcLoginTests
             LastUser = user;
             return Task.FromResult("ai-token");
         }
+    }
+
+    private sealed class InMemoryCloudDelegationGrantStore(
+        Exception? createFailure = null) : ICloudDelegationGrantStore
+    {
+        private readonly Dictionary<Guid, (CreateCloudDelegationGrantRequest Request, string Token)> grants = [];
+
+        public List<CreateCloudDelegationGrantRequest> Requests { get; } = [];
+
+        public Task<CloudDelegationGrantSnapshot> CreateAsync(
+            CreateCloudDelegationGrantRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (createFailure is not null)
+            {
+                return Task.FromException<CloudDelegationGrantSnapshot>(createFailure);
+            }
+
+            Requests.Add(request);
+            grants.Add(request.GrantId, (request, request.AccessToken));
+            return Task.FromResult(new CloudDelegationGrantSnapshot(
+                request.GrantId,
+                request.AiUserId,
+                request.CloudUserId,
+                request.Issuer,
+                request.TenantId,
+                request.ExpiresAtUtc,
+                request.IssuedStatusVersion,
+                RevokedAtUtc: null,
+                request.CreatedAtUtc));
+        }
+
+        public Task<CloudDelegationAccessToken?> ResolveAsync(
+            Guid grantId,
+            Guid aiUserId,
+            DateTime utcNow,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!grants.TryGetValue(grantId, out var grant) ||
+                grant.Request.AiUserId != aiUserId ||
+                grant.Request.ExpiresAtUtc <= utcNow ||
+                string.IsNullOrEmpty(grant.Token))
+            {
+                return Task.FromResult<CloudDelegationAccessToken?>(null);
+            }
+
+            return Task.FromResult<CloudDelegationAccessToken?>(new CloudDelegationAccessToken(
+                grantId,
+                aiUserId,
+                grant.Request.CloudUserId,
+                grant.Token,
+                grant.Request.ExpiresAtUtc));
+        }
+
+        public Task<CloudDelegationRevocationResult> RevokeCurrentAsync(
+            Guid grantId,
+            Guid aiUserId,
+            DateTime utcNow,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!grants.TryGetValue(grantId, out var grant) ||
+                grant.Request.AiUserId != aiUserId)
+            {
+                return Task.FromResult(new CloudDelegationRevocationResult(false, false));
+            }
+
+            var alreadyRevoked = string.IsNullOrEmpty(grant.Token);
+            grants[grantId] = (grant.Request, string.Empty);
+            return Task.FromResult(new CloudDelegationRevocationResult(true, alreadyRevoked));
+        }
+
+        public Task<CloudDelegationPurgeResult> PurgeExpiredAsync(
+            DateTime utcNow,
+            int batchSize,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CloudDelegationPurgeResult(true, 0, 0));
     }
 
     private sealed class RecordingCloudIdentityStatusClient(CloudIdentityStatusCheckResult result)

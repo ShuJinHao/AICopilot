@@ -28,6 +28,7 @@ public sealed class MigrationOwnershipArchitectureTests
             "identity.AspNetRoleClaims",
             "identity.AspNetUserTokens",
             "identity.external_identity_bindings",
+            "identity.cloud_delegation_grants",
             "aigateway.language_models",
             "aigateway.conversation_templates",
             "aigateway.approval_policies",
@@ -61,10 +62,12 @@ public sealed class MigrationOwnershipArchitectureTests
             "identity.AspNetUserRoles",
             "identity.AspNetRoleClaims",
             "identity.AspNetUserTokens",
-            "identity.external_identity_bindings"
+            "identity.external_identity_bindings",
+            "identity.cloud_delegation_grants"
         });
 
         IsExcludedTable(dbContext, null, "audit_logs").Should().BeTrue();
+        dbContext.Database.HasPendingModelChanges().Should().BeFalse();
     }
 
     [Fact]
@@ -216,6 +219,7 @@ public sealed class MigrationOwnershipArchitectureTests
         ("identity", "AspNetRoleClaims"),
         ("identity", "AspNetUserTokens"),
         ("identity", "external_identity_bindings"),
+        ("identity", "cloud_delegation_grants"),
         ("aigateway", "language_models"),
         ("aigateway", "conversation_templates"),
         ("aigateway", "sessions"),

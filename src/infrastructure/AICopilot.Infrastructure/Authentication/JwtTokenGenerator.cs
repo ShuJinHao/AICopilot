@@ -33,12 +33,21 @@ public class JwtTokenGenerator(IOptions<JwtSettings> jwtSettings) : IJwtTokenGen
         authClaims.AddRange(user.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
         authClaims.AddRange(user.Claims);
 
+        var configuredExpiry = DateTime.UtcNow.AddMinutes(accessTokenExpirationMinutes);
+        var expiresAtUtc = user.ExpiresAtUtc.HasValue && user.ExpiresAtUtc.Value < configuredExpiry
+            ? user.ExpiresAtUtc.Value
+            : configuredExpiry;
+        if (expiresAtUtc <= DateTime.UtcNow)
+        {
+            throw new InvalidOperationException("The requested access token lifetime has already expired.");
+        }
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(authClaims),
             Issuer = issuer,
             Audience = audience,
-            Expires = DateTime.UtcNow.AddMinutes(accessTokenExpirationMinutes),
+            Expires = expiresAtUtc,
             SigningCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256)
         };
 

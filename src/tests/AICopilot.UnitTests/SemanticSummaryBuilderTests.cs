@@ -218,7 +218,11 @@ public sealed class SemanticSummaryBuilderTests
     [Fact]
     public void Builder_ShouldSummarizeProductionPassFail()
     {
-        var plan = CreatePlan(SemanticQueryTarget.ProductionData, SemanticQueryKind.ByDevice, ("typeKey", "cp"), ("plcName", "正极模切05"));
+        var plan = CreatePlan(
+            SemanticQueryTarget.ProductionData,
+            SemanticQueryKind.ByDevice,
+            ("typeKey", "die-cutting-completion"),
+            ("plcCode", "PLC-05"));
         var rows = new List<Dictionary<string, object?>>
         {
             CreateRow(
@@ -229,6 +233,14 @@ public sealed class SemanticSummaryBuilderTests
                 ("barcode", "CP-CLIP-0001"),
                 ("result", "OK"),
                 ("completedAt", "2026-07-24T09:00:00Z"),
+                ("fieldSchema", new CloudAiReadProductionFieldSchemaDto[]
+                {
+                    new("plcName", "PLC 名称", "string", null, null, true, new Dictionary<string, object?>()),
+                    new("clipSlot", "弹夹位", "string", null, null, true, new Dictionary<string, object?>()),
+                    new("startTime", "开始时间", "datetime", null, null, true, new Dictionary<string, object?>()),
+                    new("punchingQuantity", "冲切数量", "integer", null, 0, true, new Dictionary<string, object?>()),
+                    new("punchingSpeed", "冲切速度", "number", "m/s", 2, true, new Dictionary<string, object?>())
+                }),
                 ("fields", new Dictionary<string, object?>
                 {
                     ["plcName"] = "正极模切05",
@@ -245,6 +257,14 @@ public sealed class SemanticSummaryBuilderTests
                 ("barcode", "CP-CLIP-0002"),
                 ("result", "NG"),
                 ("completedAt", "2026-07-24T09:30:00Z"),
+                ("fieldSchema", new CloudAiReadProductionFieldSchemaDto[]
+                {
+                    new("plcName", "PLC 名称", "string", null, null, true, new Dictionary<string, object?>()),
+                    new("clipSlot", "弹夹位", "string", null, null, true, new Dictionary<string, object?>()),
+                    new("startTime", "开始时间", "datetime", null, null, true, new Dictionary<string, object?>()),
+                    new("punchingQuantity", "冲切数量", "integer", null, 0, true, new Dictionary<string, object?>()),
+                    new("punchingSpeed", "冲切速度", "number", "m/s", 2, true, new Dictionary<string, object?>())
+                }),
                 ("fields", new Dictionary<string, object?>
                 {
                     ["plcName"] = "正极模切05",
@@ -261,13 +281,45 @@ public sealed class SemanticSummaryBuilderTests
         summary.Metrics.Should().Contain(item => item.Name == "failCount" && item.Value == "1 条");
         summary.Metrics.Should().Contain(item => item.Name == "passRate" && item.Value == "50.00%");
         summary.Metrics.Should().Contain(item => item.Name == "groupBreakdown" && item.Value.Contains("正极模切 2条"));
-        summary.Highlights[0].Should().Contain("客户端 正极模切客户端");
-        summary.Highlights[0].Should().Contain("PLC 正极模切05");
+        summary.Highlights[0].Should().Contain("设备 正极模切客户端");
+        summary.Highlights[0].Should().Contain("PLC 名称 正极模切05");
         summary.Highlights[0].Should().Contain("弹夹位 MG1");
-        summary.Highlights[0].Should().Contain("弹夹号 CP-CLIP-0001");
+        summary.Highlights[0].Should().Contain("业务编号 CP-CLIP-0001");
         summary.Highlights[0].Should().Contain("冲切数量 123");
-        summary.Highlights[0].Should().Contain("冲切速度 1.25");
+        summary.Highlights[0].Should().Contain("冲切速度 1.25 m/s");
         summary.Highlights[0].Should().NotContain("ClientCode");
+    }
+
+    [Fact]
+    public void Builder_ShouldUseCloudSchemaInsteadOfFixedDieCuttingFields()
+    {
+        var plan = CreatePlan(
+            SemanticQueryTarget.ProductionData,
+            SemanticQueryKind.Latest,
+            ("typeKey", "energy-sample"),
+            ("plcCode", "PLC-01"));
+        var rows = new List<Dictionary<string, object?>>
+        {
+            CreateRow(
+                ("deviceName", "能耗采集设备"),
+                ("typeKey", "energy-sample"),
+                ("typeName", "能耗采样"),
+                ("completedAt", "2026-07-24T09:00:00Z"),
+                ("fieldSchema", new CloudAiReadProductionFieldSchemaDto[]
+                {
+                    new("power", "实时功率", "number", "kW", 1, true, new Dictionary<string, object?>())
+                }),
+                ("fields", new Dictionary<string, object?> { ["power"] = 12.34m }))
+        };
+
+        var summary = SemanticSummaryBuilder.Build(plan, rows);
+
+        summary.Highlights.Should().ContainSingle();
+        summary.Metrics.Should().NotContain(item => item.Name == "passRate");
+        summary.Highlights[0].Should().Contain("记录类别 能耗采样");
+        summary.Highlights[0].Should().Contain("实时功率 12.3 kW");
+        summary.Highlights[0].Should().NotContain("弹夹");
+        summary.Highlights[0].Should().NotContain("冲切");
     }
 
     [Fact]

@@ -4,14 +4,18 @@ using AICopilot.SharedKernel.Result;
 
 namespace AICopilot.HttpApi.Infrastructure;
 
+internal sealed record CloudOidcExternalSession(
+    ClaimsPrincipal Principal,
+    CloudDelegationTokenInput DelegationToken);
+
 internal static class CloudOidcFinalizationWorkflow
 {
     public const string SignOutFailureDataKey = "AICopilot.CloudOidc.SignOutFailureType";
 
     public static async Task<Result<T>> ExecuteAsync<T>(
-        Func<CancellationToken, Task<ClaimsPrincipal?>> authenticate,
+        Func<CancellationToken, Task<CloudOidcExternalSession?>> authenticate,
         string issuer,
-        Func<CloudOidcIdentityProfile, CancellationToken, Task<Result<T>>> finalize,
+        Func<CloudOidcIdentityProfile, CloudDelegationTokenInput, CancellationToken, Task<Result<T>>> finalize,
         Func<CancellationToken, Task> signOut,
         CancellationToken cancellationToken = default,
         Func<Result<T>, bool>? retainExternalSession = null)
@@ -24,20 +28,29 @@ internal static class CloudOidcFinalizationWorkflow
         var shouldSignOut = true;
         try
         {
-            var principal = await authenticate(cancellationToken);
-            if (principal is null)
+            var session = await authenticate(cancellationToken);
+            if (session is null ||
+                string.IsNullOrWhiteSpace(session.DelegationToken.AccessToken) ||
+                session.DelegationToken.ExpiresAtUtc <= DateTime.UtcNow)
             {
                 return Result.Unauthorized(new ApiProblemDescriptor(
                     AuthProblemCodes.CloudOidcInvalidPrincipal,
                     "Cloud 登录态无效或已过期，请重新从 Cloud 登录。"));
             }
 
-            if (!CloudOidcPrincipalMapper.TryMap(principal, issuer, out var profile, out var problem))
+            if (!CloudOidcPrincipalMapper.TryMap(
+                    session.Principal,
+                    issuer,
+                    out var profile,
+                    out var problem))
             {
                 return Result.Unauthorized(problem!);
             }
 
-            var result = await finalize(profile!, cancellationToken);
+            var result = await finalize(
+                profile!,
+                session.DelegationToken,
+                cancellationToken);
             shouldSignOut = retainExternalSession?.Invoke(result) != true;
             return result;
         }

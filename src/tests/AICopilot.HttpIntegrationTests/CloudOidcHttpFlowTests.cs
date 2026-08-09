@@ -48,6 +48,7 @@ public sealed class CloudOidcHttpFlowTests(CloudOidcHttpAppFixture fixture)
         firstBinding.StatusCode.Should().Be(HttpStatusCode.OK);
         var firstLogin = await ReadJsonAsync<LoginDto>(firstBinding);
         firstLogin.UserName.Should().Be(jitUserName);
+        fixture.Provider.AiReadContractProbeCount.Should().BeGreaterThan(0);
         AssertExternalCookieCleared(firstBinding, cookies);
 
         await CompleteCloudCallbackAsync(oidcClient, cookies);
@@ -249,11 +250,11 @@ public sealed class CloudOidcHttpFlowTests(CloudOidcHttpAppFixture fixture)
     }
 
     private static FakeCloudOidcIdentity CreateIdentity(
-        string subjectPrefix,
+        string _,
         string userName)
     {
         return new FakeCloudOidcIdentity(
-            $"{subjectPrefix}-{userName}",
+            Guid.NewGuid().ToString("D"),
             userName,
             userName,
             $"employee-{userName}",

@@ -31,10 +31,11 @@ public sealed class FakeCloudOidcProviderHost : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<string, PendingAuthorization> pendingCodes = new();
-    private readonly ConcurrentDictionary<string, FakeCloudOidcIdentity> accessTokens = new();
+    private readonly ConcurrentDictionary<string, IssuedAccessToken> accessTokens = new();
     private readonly RSA rsa = RSA.Create(2048);
     private readonly RsaSecurityKey signingKey;
     private WebApplication? app;
+    private int aiReadContractProbeCount;
     private FakeCloudOidcIdentity identity = new(
         "cloud-user-default",
         "E0001",
@@ -52,6 +53,8 @@ public sealed class FakeCloudOidcProviderHost : IAsyncDisposable
     public Uri BaseUri { get; private set; } = null!;
 
     public string Issuer => BaseUri.GetLeftPart(UriPartial.Authority);
+
+    public int AiReadContractProbeCount => Volatile.Read(ref aiReadContractProbeCount);
 
     public void SetIdentity(FakeCloudOidcIdentity value)
     {
@@ -90,13 +93,14 @@ public sealed class FakeCloudOidcProviderHost : IAsyncDisposable
             subject_types_supported = new[] { "public" },
             id_token_signing_alg_values_supported = new[] { SecurityAlgorithms.RsaSha256 },
             token_endpoint_auth_methods_supported = new[] { "none" },
-            scopes_supported = new[] { "openid", "profile" },
+            scopes_supported = new[] { "openid", "profile", "iiot.ai.read" },
             claims_supported = SupportedClaimNames
         }, JsonOptions));
         webApp.MapGet("/jwks", () => Results.Json(CreateJwks(), JsonOptions));
         webApp.MapGet("/authorize", HandleAuthorize);
         webApp.MapPost("/token", HandleTokenAsync);
         webApp.MapGet("/userinfo", HandleUserInfo);
+        webApp.MapGet("/api/v1/ai/read/processes", HandleAiReadContractProbe);
 
         await webApp.StartAsync(cancellationToken);
         app = webApp;
@@ -118,9 +122,12 @@ public sealed class FakeCloudOidcProviderHost : IAsyncDisposable
         var redirectUri = request.Query["redirect_uri"].ToString();
         var state = request.Query["state"].ToString();
         var nonce = request.Query["nonce"].ToString();
+        var scope = request.Query["scope"].ToString();
         if (string.IsNullOrWhiteSpace(redirectUri) ||
             string.IsNullOrWhiteSpace(state) ||
-            string.IsNullOrWhiteSpace(nonce))
+            string.IsNullOrWhiteSpace(nonce) ||
+            !scope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Contains("iiot.ai.read", StringComparer.Ordinal))
         {
             return Results.BadRequest();
         }
@@ -128,7 +135,8 @@ public sealed class FakeCloudOidcProviderHost : IAsyncDisposable
         var code = Guid.NewGuid().ToString("N");
         pendingCodes[code] = new PendingAuthorization(
             Volatile.Read(ref identity),
-            nonce);
+            nonce,
+            scope);
         return Results.Redirect(AppendQuery(
             redirectUri,
             ("code", code),
@@ -150,12 +158,17 @@ public sealed class FakeCloudOidcProviderHost : IAsyncDisposable
         }
 
         var accessToken = $"access-{Guid.NewGuid():N}";
-        accessTokens[accessToken] = pending.Identity;
+        accessTokens[accessToken] = new IssuedAccessToken(
+            pending.Identity,
+            pending.Scope,
+            "iiot-cloud-ai-read",
+            "ai-delegated-user");
         return Results.Json(new
         {
             token_type = "Bearer",
             access_token = accessToken,
             expires_in = 300,
+            scope = pending.Scope,
             id_token = CreateIdToken(pending)
         }, JsonOptions);
     }
@@ -170,7 +183,43 @@ public sealed class FakeCloudOidcProviderHost : IAsyncDisposable
             return Results.Unauthorized();
         }
 
-        return Results.Json(CreateClaimsPayload(value), JsonOptions);
+        return Results.Json(CreateClaimsPayload(value.Identity), JsonOptions);
+    }
+
+    private IResult HandleAiReadContractProbe(HttpRequest request)
+    {
+        Interlocked.Increment(ref aiReadContractProbeCount);
+        var authorization = request.Headers.Authorization.ToString();
+        const string bearerPrefix = "Bearer ";
+        if (!authorization.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase) ||
+            !accessTokens.TryGetValue(authorization[bearerPrefix.Length..], out var value))
+        {
+            return Results.Unauthorized();
+        }
+
+        var scopes = value.Scope.Split(
+            ' ',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (!scopes.Contains("iiot.ai.read", StringComparer.Ordinal) ||
+            !string.Equals(value.Audience, "iiot-cloud-ai-read", StringComparison.Ordinal) ||
+            !string.Equals(value.Actor, "ai-delegated-user", StringComparison.Ordinal))
+        {
+            return Results.Json(
+                new
+                {
+                    status = StatusCodes.Status403Forbidden,
+                    detail = "当前令牌不具备访问该资源的授权范围。"
+                },
+                JsonOptions,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        return Results.Json(new
+        {
+            items = Array.Empty<object>(),
+            rowCount = 0,
+            isTruncated = false
+        }, JsonOptions);
     }
 
     private string CreateIdToken(PendingAuthorization pending)
@@ -276,5 +325,12 @@ public sealed class FakeCloudOidcProviderHost : IAsyncDisposable
 
     private sealed record PendingAuthorization(
         FakeCloudOidcIdentity Identity,
-        string Nonce);
+        string Nonce,
+        string Scope);
+
+    private sealed record IssuedAccessToken(
+        FakeCloudOidcIdentity Identity,
+        string Scope,
+        string Audience,
+        string Actor);
 }

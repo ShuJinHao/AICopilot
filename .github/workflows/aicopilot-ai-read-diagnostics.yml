@@ -26,7 +26,6 @@ jobs:
           fi
 
           command -v docker >/dev/null
-          command -v curl >/dev/null
           docker compose version >/dev/null
 
           deploy_dir="${DEPLOY_TARGET_DIR:-/srv/enterprise-ai/deploy}"
@@ -83,21 +82,6 @@ jobs:
           readonly_real_allowed="$(read_env_value CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ)"
           ai_read_enabled="$(read_env_value CLOUD_AI_READ_ENABLED)"
           ai_read_base_url="$(read_env_value CLOUD_AI_READ_BASE_URL)"
-          ai_read_token="$(read_env_value CLOUD_AI_SERVICE_ACCOUNT_TOKEN)"
-          token_configured="no"
-          token_shape="empty"
-
-          if [ -n "$ai_read_token" ]; then
-            token_configured="yes"
-            case "$ai_read_token" in
-              eyJ*.*.*)
-                token_shape="jwt-like"
-                ;;
-              *)
-                token_shape="non-jwt-like"
-                ;;
-            esac
-          fi
 
           {
             echo "# AICopilot Cloud AiRead diagnostics"
@@ -112,8 +96,7 @@ jobs:
           emit_line "- CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ=${readonly_real_allowed:-<unset>}"
           emit_line "- CLOUD_AI_READ_ENABLED=${ai_read_enabled:-<unset>}"
           emit_line "- CLOUD_AI_READ_BASE_URL=${ai_read_base_url:-<unset>}"
-          emit_line "- CLOUD_AI_SERVICE_ACCOUNT_TOKEN_CONFIGURED=$token_configured"
-          emit_line "- CLOUD_AI_SERVICE_ACCOUNT_TOKEN_SHAPE=$token_shape"
+          emit_line "- Interactive authentication: runtime current-user delegation only"
 
           emit_heading "Container environment state"
           cd "$deploy_dir"
@@ -125,59 +108,8 @@ jobs:
             printf "CloudReadonly__Real__AllowProductionRead=%s\n" "${CloudReadonly__Real__AllowProductionRead:-}"
             printf "CloudAiRead__Enabled=%s\n" "${CloudAiRead__Enabled:-}"
             printf "CloudAiRead__BaseUrl=%s\n" "${CloudAiRead__BaseUrl:-}"
-            if [ -n "${CloudAiRead__ServiceAccountToken:-}" ]; then
-              printf "CloudAiRead__ServiceAccountToken_CONFIGURED=yes\n"
-            else
-              printf "CloudAiRead__ServiceAccountToken_CONFIGURED=no\n"
-            fi
           ' | tee -a "$GITHUB_STEP_SUMMARY"
 
-          emit_heading "Cloud AiRead endpoint probe"
-          if [ -z "$ai_read_token" ]; then
-            emit_line "- Probe skipped: CLOUD_AI_SERVICE_ACCOUNT_TOKEN is not configured."
-            emit_line "- Diagnosis: token_missing"
-            exit 0
-          fi
-
-          if [ -z "$ai_read_base_url" ]; then
-            emit_line "- Probe failed: CLOUD_AI_READ_BASE_URL is not configured."
-            emit_line "- Diagnosis: base_url_missing"
-            exit 64
-          fi
-
-          body_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ai-read-devices.XXXXXX")"
-          trap 'rm -f "$body_file"' EXIT
-          probe_url="${ai_read_base_url%/}/api/v1/ai/read/devices?maxRows=5"
-          status_code="$(curl -sS --max-time 15 -o "$body_file" -w "%{http_code}" \
-            -H "Authorization: Bearer $ai_read_token" \
-            "$probe_url" || true)"
-
-          emit_line "- Probe URL: ${probe_url}"
-          emit_line "- HTTP status: ${status_code:-curl_error}"
-
-          case "${status_code:-}" in
-            200)
-              emit_line "- Diagnosis: ai_read_ready"
-              ;;
-            401)
-              emit_line "- Diagnosis: token_invalid_or_expired"
-              ;;
-            403)
-              emit_line "- Diagnosis: token_missing_permission_or_scope"
-              ;;
-            000|"")
-              emit_line "- Diagnosis: cloud_endpoint_unreachable"
-              ;;
-            *)
-              emit_line "- Diagnosis: unexpected_status"
-              ;;
-          esac
-
-          {
-            echo ""
-            echo "Response preview:"
-            echo '```json'
-            head -c 500 "$body_file" || true
-            echo ""
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          emit_heading "Cloud AiRead authentication boundary"
+          emit_line "- Automated data probe skipped: workflow jobs have no current Cloud user delegation."
+          emit_line "- Diagnosis: delegated_user_required"

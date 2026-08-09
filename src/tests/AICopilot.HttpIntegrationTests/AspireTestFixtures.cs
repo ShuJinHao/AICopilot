@@ -18,9 +18,6 @@ public sealed class CoreAICopilotAppFixture : AICopilotAppFixture
         SetEnvironmentVariable(
             "CloudAiRead__BaseUrl",
             FakeAiBaseUri.ToString().TrimEnd('/'));
-        SetEnvironmentVariable(
-            "CloudAiRead__ServiceAccountToken",
-            "test-cloud-ai-read-token");
     }
 }
 

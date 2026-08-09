@@ -13,7 +13,8 @@ public sealed class CloudAiReadEndpointPolicyTests
     [InlineData("/api/v1/ai/read/capacity/hourly")]
     [InlineData("/api/v1/ai/read/device-logs")]
     [InlineData("/api/v1/ai/read/production-records")]
-    [InlineData("/api/v1/ai/identity/users/cloud-user-1/status")]
+    [InlineData("/api/v1/ai/read/device-plcs")]
+    [InlineData("/api/v1/ai/read/data-schemas")]
     public void Evaluate_ShouldAllowWhitelistedGetPaths(string path)
     {
         var decision = CloudAiReadEndpointPolicy.Evaluate(HttpMethod.Get, path);
@@ -40,6 +41,36 @@ public sealed class CloudAiReadEndpointPolicyTests
         CloudAiReadSemanticSupport.IsSupported(SemanticQueryTarget.Recipe).Should().BeFalse();
         CloudAiReadSemanticSupport.IsSupported(SemanticQueryTarget.Process).Should().BeTrue();
         CloudAiReadSemanticSupport.IsSupported(SemanticQueryTarget.ClientRelease).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AiReadPolicy_ShouldRejectIdentityStatusEndpoint()
+    {
+        CloudAiReadEndpointPolicy.Evaluate(
+                HttpMethod.Get,
+                "/api/v1/ai/identity/users/cloud-user-1/status")
+            .IsAllowed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IdentityStatusPolicy_ShouldAllowOnlyItsFixedGetEndpoint()
+    {
+        CloudIdentityStatusEndpointPolicy.Evaluate(
+                HttpMethod.Get,
+                "/api/v1/ai/identity/users/cloud-user-1/status")
+            .IsAllowed.Should().BeTrue();
+        CloudIdentityStatusEndpointPolicy.Evaluate(
+                HttpMethod.Get,
+                "/api/v1/ai/read/devices")
+            .IsAllowed.Should().BeFalse();
+        CloudIdentityStatusEndpointPolicy.Evaluate(
+                HttpMethod.Post,
+                "/api/v1/ai/identity/users/cloud-user-1/status")
+            .IsAllowed.Should().BeFalse();
+        CloudIdentityStatusEndpointPolicy.Evaluate(
+                HttpMethod.Get,
+                "/api/v1/ai/identity/users/cloud-user-1/extra/status")
+            .IsAllowed.Should().BeFalse();
     }
 
     [Theory]

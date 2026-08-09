@@ -74,7 +74,8 @@ public sealed class BusinessQueryExecutor(
     IBusinessDataSourceProfileRegistry businessDataSourceProfileRegistry,
     IBusinessQueryContextStore businessQueryContextStore,
     IBusinessDatabaseReadService? businessDatabaseReadService = null,
-    IBusinessTextToSqlFallbackRunner? businessTextToSqlFallbackRunner = null)
+    IBusinessTextToSqlFallbackRunner? businessTextToSqlFallbackRunner = null,
+    ICloudAiReadClient? cloudAiReadClient = null)
 {
     public const string RecipeDataReadBoundaryMarker = "当前 AI 不读取云端配方主数据或配方版本数据";
     public const string DeviceStatusSourceUnavailableMarker = "当前设备最后上报运行状态的正式 Cloud AiRead 数据源不可用";
@@ -125,6 +126,14 @@ public sealed class BusinessQueryExecutor(
             }
 
             var confirmedPlan = confirmedQuery.SemanticPlan;
+            if (confirmedPlan.Target == SemanticQueryTarget.ProductionData &&
+                !ProductionQueryScopePolicy.IsSealed(confirmedPlan))
+            {
+                return BusinessQueryExecutionResult.ConfirmationRequired(
+                    CloudAiReadProblemCodes.MissingRequiredParameter,
+                    "[系统提示]: 已确认的生产数据范围尚未通过 Cloud 唯一解析设备、PLC 和 TypeKey，请重新发起查询。");
+            }
+
             return await RunBusinessQueryProviderAsync(
                 confirmedPlan,
                 confirmedQuery,
@@ -186,6 +195,57 @@ public sealed class BusinessQueryExecutor(
             return BusinessQueryExecutionResult.Failure(
                 AppProblemCodes.CloudReadonlyIntentUnsupported,
                 $"当前不支持{targetLabel}语义数据查询。");
+        }
+
+        if (plan.Target == SemanticQueryTarget.ProductionData)
+        {
+            if (cloudAiReadClient is null || !cloudAiReadClient.IsEnabled)
+            {
+                return BusinessQueryExecutionResult.Failure(
+                    CloudAiReadProblemCodes.NotConfigured,
+                    "[系统提示]: Cloud PLC 与业务记录 Schema 动态元数据当前不可用，系统不会猜测查询范围。");
+            }
+
+            try
+            {
+                plan = await cloudAiReadClient.SealProductionScopeAsync(plan, cancellationToken);
+            }
+            catch (CloudAiReadException ex) when (
+                ex.Code is CloudAiReadProblemCodes.MissingRequiredParameter or
+                    CloudAiReadProblemCodes.InvalidRequest)
+            {
+                return BusinessQueryExecutionResult.ConfirmationRequired(
+                    ex.Code,
+                    $"[系统提示]: {ex.Message}");
+            }
+            catch (CloudAiReadException ex) when (
+                ex.Code == CloudAiReadProblemCodes.DelegationRequired)
+            {
+                return BusinessQueryExecutionResult.Failure(
+                    ex.Code,
+                    "[系统提示]: 当前用户缺少有效 Cloud 委托，请重新通过 Cloud 登录后再查询。");
+            }
+            catch (CloudAiReadException ex) when (
+                ex.Code == CloudAiReadProblemCodes.Unauthorized)
+            {
+                return BusinessQueryExecutionResult.Failure(
+                    ex.Code,
+                    "[系统提示]: 当前 Cloud 委托已失效或无法验证，请重新通过 Cloud 登录后再查询。");
+            }
+            catch (CloudAiReadException ex) when (
+                ex.Code is CloudAiReadProblemCodes.Forbidden or
+                    CloudAiReadProblemCodes.RequestBlocked)
+            {
+                return BusinessQueryExecutionResult.Failure(
+                    ex.Code,
+                    "[系统提示]: 当前 Cloud 用户权限或设备范围不足，系统已停止元数据读取。");
+            }
+            catch (CloudAiReadException)
+            {
+                return BusinessQueryExecutionResult.Failure(
+                    CloudAiReadProblemCodes.Unavailable,
+                    "[系统提示]: Cloud PLC 或业务记录 Schema 元数据不可用、已过期或与实际插件版本不一致，系统已停止查询。");
+            }
         }
 
         var requestedContext = new BusinessQueryContext(
@@ -268,6 +328,28 @@ public sealed class BusinessQueryExecutor(
 
         if (providerResult.Outcome == BusinessQueryOutcome.Unauthorized)
         {
+            if (providerResult.FailureCode == CloudAiReadProblemCodes.DelegationRequired)
+            {
+                return BusinessQueryExecutionResult.Failure(
+                    CloudAiReadProblemCodes.DelegationRequired,
+                    "[系统提示]: 当前用户缺少有效 Cloud 委托，请重新通过 Cloud 登录后再查询。");
+            }
+
+            if (providerResult.FailureCode == CloudAiReadProblemCodes.Unauthorized)
+            {
+                return BusinessQueryExecutionResult.Failure(
+                    CloudAiReadProblemCodes.Unauthorized,
+                    "[系统提示]: 当前 Cloud 委托已失效或无法验证，请重新通过 Cloud 登录后再查询。");
+            }
+
+            if (providerResult.FailureCode is CloudAiReadProblemCodes.Forbidden or
+                CloudAiReadProblemCodes.RequestBlocked)
+            {
+                return BusinessQueryExecutionResult.Failure(
+                    providerResult.FailureCode,
+                    $"[系统提示]: {targetLabel}查询权限或设备范围不足，系统已明确终止本次正式数据读取。");
+            }
+
             return BusinessQueryExecutionResult.Failure(
                 CloudAiReadProblemCodes.Forbidden,
                 $"[系统提示]: {targetLabel}查询权限或设备范围不足，系统已明确终止本次正式数据读取。");

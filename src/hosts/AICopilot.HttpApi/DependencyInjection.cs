@@ -3,6 +3,7 @@ using AICopilot.DataAnalysisService;
 using AICopilot.HttpApi.Infrastructure;
 using AICopilot.IdentityService;
 using AICopilot.Infrastructure.Authentication;
+using AICopilot.Infrastructure.CloudRead;
 using AICopilot.McpService;
 using AICopilot.RagService;
 using AICopilot.Services.Contracts;
@@ -37,6 +38,19 @@ public static class DependencyInjection
             HttpApiCorsConfiguration.AddHttpApiCors(builder.Services, builder.Configuration);
             builder.Services.AddScoped<ICurrentUser, CurrentUser>();
             builder.Services.AddHttpContextAccessor();
+            builder.Services
+                .AddHttpClient<
+                    ICloudDelegationTokenContractValidator,
+                    CloudDelegationTokenContractValidator>(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(10);
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+                {
+                    AllowAutoRedirect = false,
+                    UseCookies = false
+                });
+            builder.Services.AddHostedService<CloudDelegationGrantCleanupWorker>();
             HttpApiRateLimitingConfiguration.AddHttpApiRateLimiting(builder.Services, builder.Configuration);
             builder.Services.AddExceptionHandler<UseCaseExceptionHandler>();
             builder.Services.AddProblemDetails();

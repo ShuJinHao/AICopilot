@@ -2,6 +2,8 @@
 
 本文档是 AICopilot 部署安全的专题契约。项目规则见 `AGENTS.md` 和 `docs/AICopilot业务规则.md`；架构阶段与剩余退出条件见 `docs/AI架构路线图.md`，它不是生产验收记录。
 
+当前状态：第 0～7 批候选代码继续保留；复审问题尚未全部收口，当前候选代码不是生产基线。
+
 ## 1. 部署红线
 
 - 当前内网生产部署必须保持 HTTP-only。
@@ -65,15 +67,20 @@ Cloud OIDC 使用 HTTP issuer 时必须满足全部条件：
 - `deploy-release.sh --validate-only` 是不发布的配置校验入口；该模式不得拉镜像、不得执行 Docker Compose、不得改写 release tag，但必须提前暴露 root-owned release state 这类标准 non-root 路径问题。
 - 模型、Embedding、endpoint pool API key 必须是 `encv2:` AES-GCM 受保护格式；旧 `encv1:` 只能由 migration worker 迁移重加密，runtime provider 不得长期兼容旧格式或明文。
 - 私有模型 seed 的本机真实值只来自 macOS Keychain canonical schema，并由从零部署生成服务器受限 `.env`；标准流程不读取私密 Markdown 或旧 env。仓库默认使用占位 URL、空 API key 和禁用状态，API key 入库前必须加密为 `encv2:`。
-- Cloud readonly 连接、AiRead token、模式开关和 readonly role 不得通过 GitHub secrets 加手动 workflow 写入生产。新环境或清空重建只由工作区 `Deploy-FromZero.ps1` 从 Keychain 建立；用户明确批准的独立基础设施维护只能调用内部 apply/check 脚本并消费服务器受限 `.env`，不得形成第二套 secret 真值或应用重建入口。
-- Cloud/AI 人员管理员账号与 Cloud PostgreSQL readonly role 是两类身份：人员账号可以是纯数字工号，readonly role 使用独立技术名称；只读数据库配置必须精确指向生产真实库名 `iiot-db`，canonical schema 不得用角色名规则拒绝该数据库名。
+- 交互式 AiRead 不使用 Keychain 静态 AiRead Token；它只消费 Cloud OIDC 运行时为当前用户签发的短期委托。从零部署不再签发 30 天或其它固定身份状态 Token，只向 Cloud 和 AICopilot 注入同一份专用签名密钥。AICopilot 在内存中以固定 issuer `iiot-cloud-system`、audience `iiot-cloud-identity-status`、actor `ai-identity-status-system` 和 subject `aicopilot-identity-status` 生成 5 分钟 Token，剩余 60 秒时续签；首次 `401` 最多续签重试一次，再失败即关闭。Token Provider 不接受任意 actor、audience、subject 或权限输入。该密钥与策略均与 `/api/v1/ai/read/*` 分离，不得获得业务数据读权。
+- Cloud 和 AICopilot 的环境模板、compose、从零部署和普通 `Deploy-Changed` 必须从同一 secret owner 取得至少 32 UTF-8 字节的 identity-status 签名密钥。缺失、过短或两端 digest 不一致时必须在任何远程写入前失败；预检、日志和回执不得记录密钥值。
+- 真实 Cloud Direct DB/Text-to-SQL 关闭时，从零部署不读取、生成或注入 Cloud PostgreSQL readonly 账号、连接串、role 或 grant，也不创建 AICopilot 直连 Cloud 数据库的网络。现有 SQL/grant 文件只是冻结资产，运行时不得消费。
+- 本地 emergency admin 只用于 AI 恢复，用户名和密码由独立 emergency 配置承载；不得把 Cloud 工号写入该配置，也不得让 Cloud OIDC 自动绑定该账号。用户名规范化后等于 `101650` 时，应用启动和部署预检必须以 `EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT` 失败，不自动改名、合并或删除。
+- 迁移前已存在、尚无 Cloud 绑定且仍带本地密码的 `101650` 必须视为历史 emergency admin 冲突证据；Migration Worker 在身份 advisory lock 与事务内、角色同步和 seed 写入前以 `EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT` 失败，OIDC 首次绑定与本地密码确认端点同时以 `emergency_admin_canonical_cloud_admin_conflict` 失败关闭。
+- Cloud 工号 `101650` 的自动收编使用独立 Cloud OIDC 目标配置，规范值固定为 `101650`；不得复用 emergency admin 的用户名、密码、seed 或配置键。该例外只免本地密码确认，不代表系统只能有一个 `Admin`。
+- 当前真实 Cloud Direct DB/Text-to-SQL 整体关闭；部署模板、compose 和运行配置必须保持其 mode disabled。readonly 连接、role、grant/preflight 脚本可以作为冻结资产保留，但不得注册真实 Cloud 数据源或注入其凭据。Simulation 使用的无业务语义通用连接器可保留，不因框架存在而视为真实 Cloud 路径已注册。
 
 ## 7. 镜像、SSH 和 runner
 
 - AICopilot 生产镜像必须使用 Harbor mirror 基础镜像，不能默认从 Docker Hub 或 MCR 拉生产基础镜像。
 - 应用和 Web 运行容器必须非 root。
 - 日常标准发布路径是工作区 `Deploy-Changed.ps1`：只接受 clean、已提交的 `main`，可 push 现有 HEAD但不创建提交或修改 tracked 文件；复用同 SHA Architecture/Security/DeploymentContract 证据，只补受影响缺口，再按依赖闭包发布受影响镜像。全量、coverage、mutation、duplication、CrossProject 不属于部署，影响无法归属时停止。
-- 三端从零部署只走工作区 `Deploy-FromZero.ps1`；AICopilot 阶段执行 readonly 权限、migration、模型 seed 和健康检查。缺 Keychain 根密钥时远端零写入；设备、`ClientCode` 和设备 bootstrap secret 均不自动管理。
+- 三端从零部署只走工作区 `Deploy-FromZero.ps1`；AICopilot 阶段只配置 typed AiRead 委托传输、独立身份状态 Token、migration、模型 seed 和健康检查，Direct DB/Text-to-SQL 显式保持关闭。缺 Keychain 根密钥时远端零写入；设备、`ClientCode` 和设备 bootstrap secret 均不自动管理。
 - 稳定 Runner 必须使用专用 non-root 部署用户；root 只允许一次性修复 owner/mode，不得进入日常应用发布。
 - 当前如果与 Cloud 共用同一台生产宿主机，必须在工作区总入口明确共享宿主机事实、共享标准发布人和两个独立部署根；不得把 Cloud 根的权限漂移和 AICopilot 根的权限状态混写成同一个“整机问题”。
 - root 应急路径如果写入了 `releases/*`、`current-release.summary.md` 或 deploy support files，关闭任务前必须恢复 owner/mode，并重新验证标准 non-root `./deploy-release.sh --validate-only`。
@@ -154,5 +161,7 @@ curl -I http://<intranet-host>:82/api/identity/cloud-oidc/status
 ## 9. 未完成和外部依赖
 
 - 真实服务器 `.env`、真实 Cloud OIDC、真实 Harbor、真实容器和线上 HTTP header 必须在发布窗口验收；本地测试不能替代。
+- `101650` 与 emergency admin 分离、自动收编、当前用户 AiRead 短期委托、grant 注销/清理和身份状态 system Token 自动续期已形成本批候选源码；当前源码重建后的受影响验证范围和实际计数以 [AI 架构路线图](./AI架构路线图.md) 为唯一状态入口，不沿用历史计数。跨项目真实 E2E、生产迁移和部署仍未授权，因此仍不是生产身份基线。
+- Direct DB/Text-to-SQL 当前必须在策略、执行和部署三层保持失败关闭；不得以冻结 readonly grant 资产、人工批准或配置修改宣称可用。
 - GitHub self-hosted runner 权限收敛、GitHub environment secret 权限、OIDC/Vault 或等价短期凭据必须由平台侧验收并留痕。
 - CloudPlatform 是否 HTTP-only 以及 Cloud nginx / OIDC Provider 的安全头口径属于 Cloud 项目，不由 AICopilot 单独改动。

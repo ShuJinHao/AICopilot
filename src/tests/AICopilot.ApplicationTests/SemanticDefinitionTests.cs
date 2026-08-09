@@ -45,7 +45,7 @@ public sealed class SemanticDefinitionTests
         productionData.AllowedProjectionFields.Should().BeEquivalentTo(
             ["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt", "receivedAt", "fields", "fieldSchema"]);
         productionData.AllowedFilterFields.Should().BeEquivalentTo(
-            ["typeKey", "processId", "deviceId", "deviceCode", "plcCode", "plcName", "preset", "barcode", "result", "fieldMode"]);
+            ["typeKey", "processId", "processCode", "processName", "deviceId", "deviceCode", "plcCode", "plcName", "preset", "barcode", "result", "fieldMode"]);
         productionData.AllowedSortFields.Should().BeEquivalentTo(
             ["completedAt", "typeKey", "result"]);
 
@@ -63,7 +63,7 @@ public sealed class SemanticDefinitionTests
             ["channel", "targetRuntime", "status", "includeArchived"]);
         clientRelease.AllowedSortFields.Should().BeEmpty();
 
-        CloudAiReadSemanticSchemaRegistry.GetOperationSchemas().Should().HaveCount(8);
+        CloudAiReadSemanticSchemaRegistry.GetOperationSchemas().Should().HaveCount(10);
         new[] { device, deviceLog, capacity, productionData, process, clientRelease }
             .Should().OnlyContain(definition =>
                 definition.MaxLimit == CloudAiReadRowLimitPolicy.MaxRows);

@@ -31,7 +31,7 @@ $productionConfigurationSources = @(
         Where-Object { $_.Extension -in @('.yml', '.yaml') }
     Get-ChildItem -LiteralPath (Join-Path $root 'scripts') -Filter '*.sh' -File -Recurse
 )
-$retiredWritePattern = '(?m)gh\s+secret\s+set\s+(?:DATA_ANALYSIS_CLOUD_READONLY_(?:CONNECTION_STRING|USERNAME|PASSWORD)|CLOUD_AI_READ_BASE_URL|CLOUD_AI_SERVICE_ACCOUNT_TOKEN)|set_env_value\s+(?:DATA_ANALYSIS_CLOUD_READONLY|CLOUD_AI_READ)'
+$retiredWritePattern = '(?m)gh\s+secret\s+set\s+(?:DATA_ANALYSIS_CLOUD_READONLY_(?:CONNECTION_STRING|USERNAME|PASSWORD)|CLOUD_AI_READ_BASE_URL|CLOUD_AI_SERVICE_ACCOUNT_TOKEN)|set_env_value[^\r\n]*\s(?:DATA_ANALYSIS_CLOUD_READONLY_(?:CONNECTION_STRING|USERNAME|PASSWORD)|CLOUD_AI_SERVICE_ACCOUNT_TOKEN)\s'
 foreach ($source in $productionConfigurationSources) {
     $text = Get-Content -Raw -Encoding UTF8 -LiteralPath $source.FullName
     if ($text -match $retiredWritePattern) {
@@ -68,5 +68,5 @@ Require-Text '.github/workflows/aicopilot-routine-request.yml' 'name:\s*aicopilo
 Require-Text '.github/workflows/aicopilot-routine-request.yml' 'INSPECT_AICOPILOT_STATE' 'AICopilot production-state inspection must require its explicit read-only confirmation.'
 Require-Text '.github/workflows/aicopilot-routine-request.yml' 'Upload current production state' 'AICopilot production-state inspection must export an allowlisted receipt.'
 Forbid-Text '.github/workflows/aicopilot-routine-request.yml' 'request_base64|request_sha256|operation:\s*|Deliver immutable request|--request-stdin|inputs\.operation' 'AICopilot GitHub Actions transport must not retain a manually dispatchable deployment operation.'
-Require-Text 'docs/AICopilot业务规则.md' '只构建.*受影响|受影响.*镜像' 'AICopilot incremental image deployment red line is missing.'
+Require-Text 'docs/AICopilot安全部署契约.md' '只补受影响缺口.*受影响镜像' 'AICopilot incremental image deployment red line is missing.'
 Write-Host 'AICopilot deployment policy architecture test passed.'

@@ -6,7 +6,7 @@ public sealed class CloudReadOnlyTextToSqlOptions
     public const int DefaultMaxRepairAttempts = 3;
     public const int AbsoluteMaxRepairAttempts = 5;
 
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
 
     public string TemplateName { get; set; } = "business_readonly_text_to_sql";
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+printf 'Real Cloud Direct DB/Text-to-SQL is temporarily closed; grant verification is disabled.\n' >&2
+exit 64
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="${DEPLOY_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 ENV_FILE="${ENV_FILE:-$DEPLOY_DIR/.env}"

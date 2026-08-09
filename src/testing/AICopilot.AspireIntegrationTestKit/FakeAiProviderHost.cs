@@ -18,7 +18,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
     private static readonly Guid CloudDeviceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid CloudProcessId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid CloudLogId = Guid.Parse("33333333-3333-3333-3333-333333333333");
-    private const string CloudAiReadToken = "test-cloud-ai-read-token";
+    private const string CloudDelegatedUserToken = "test-cloud-delegated-user-token";
 
     private WebApplication? _app;
     private int toolResultRequestCount;
@@ -277,7 +277,7 @@ public sealed class FakeAiProviderHost : IAsyncDisposable
     {
         return string.Equals(
             context.Request.Headers.Authorization.ToString(),
-            $"Bearer {CloudAiReadToken}",
+            $"Bearer {CloudDelegatedUserToken}",
             StringComparison.Ordinal);
     }
 

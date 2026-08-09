@@ -31,7 +31,7 @@
 | OwnedValueObject | `ModelParameters`、`TemplateSpecification` |
 | RuntimeRecord | `AgentSessionState`、`ModelQuotaReservation`、`PersistenceCommitMarker` |
 | Audit | `AuditLogEntry`、`OutboxMessage` |
-| IdentityRecord | `ApplicationUser`、`ExternalIdentityBinding`、`IdentityRoleClaim<>`、`IdentityRole<>`、`IdentityUserClaim<>`、`IdentityUserLogin<>`、`IdentityUserRole<>`、`IdentityUserToken<>` |
+| IdentityRecord | `ApplicationUser`、`ExternalIdentityBinding`、`CloudDelegationGrant`、`IdentityRoleClaim<>`、`IdentityRole<>`、`IdentityUserClaim<>`、`IdentityUserLogin<>`、`IdentityUserRole<>`、`IdentityUserToken<>` |
 
 `AgentSessionState` 和 `ModelQuotaReservation` 是运行记录，不是聚合根；AgentSession checkpoint 的会话连续性与 Interrupted 语义仍由 [Agent 工作流与异常契约](./Agent工作流与异常契约.md) 定义。
 
@@ -56,7 +56,7 @@
 | Context | 当前集合与职责 | 迁移所有权 |
 |---|---|---|
 | `AiCopilotDbContext` | `AuditLogEntry`、`OutboxMessage`、`PersistenceCommitMarker` | 主基础设施 migration owner；唯一拥有 Outbox 与 persistence commit marker 迁移 |
-| `IdentityStoreDbContext` | Identity 记录、`ExternalIdentityBinding`；审计只作为事务参与者 | 拥有 Identity 迁移；审计映射使用 `ExcludeFromMigrations` |
+| `IdentityStoreDbContext` | Identity 记录、`ExternalIdentityBinding`、加密的 `CloudDelegationGrant`；审计只作为事务参与者 | 拥有 Identity 迁移；审计映射使用 `ExcludeFromMigrations` |
 | `AiGatewayDbContext` | 上述七个 AiGateway 集合 | 拥有已投产的 append-only migration 历史和当前增量升级 |
 | `RagDbContext` | RAG 聚合、`Document`、`DocumentChunk` | 拥有 RAG 迁移 |
 | `DataAnalysisDbContext` | `BusinessDatabase`、`DataSourcePermissionGrant` | 拥有 DataAnalysis 迁移 |
@@ -85,6 +85,7 @@
 - `OutboxDispatcher` 统一领取和发布，必须保留 PostgreSQL `FOR UPDATE SKIP LOCKED` 或等价互斥策略以及 dead-letter 上限，禁止多 worker 重复发布同一消息。
 - 业务行、Outbox、审计和数据库 durable commit marker 只能由唯一 `PersistenceCommitEngine` / `RepositoryPersistenceCommitter` 在同一数据库事务中提交。每个 execution-strategy attempt 对业务 Context 只执行一次 `SaveChangesAsync(false)`；事务确认后才 `AcceptAllChanges`、清领域事件或清 RAG factory buffer。
 - Identity 通过 `ITransactionalExecutionService` / `IdentityTransactionalExecutionService` 复用同一 engine；非成功 `Result` 必须回滚 UserManager/RoleManager 已触发的中间保存，拒绝审计只能在回滚后另行提交。禁止恢复 `EfTransactionalExecutionService`、通用 Outbox 扫描或复制第二套 transaction/retry。
+- `CloudDelegationGrant` 是当前 AI 用户与 Cloud 用户短期委托的 Identity 运行记录，不是业务聚合根。它由 `IdentityStoreDbContext` 独占迁移和写入，使用 Data Protection 独立 purpose 加密 Token；创建/提升/绑定、grant 落库和登录成功必须处于同一 Identity 事务，grant 存储失败不得签发 AICopilot JWT。当前用户撤销只能用 JWT grant id 与当前 AI UserId 精确命中，幂等设置 `RevokedAtUtc` 并立即清空密文 Token；每小时、每批 500 条的清理使用数据库 advisory lock 保持单实例，过期时清 Token，过期或撤销满 24 小时后删元数据。
 - EF execution strategy 必须使用官方 `ExecuteInTransactionAsync(... verifySucceeded ...)` 或等价官方入口，禁止手写业务重试循环。commit-unknown 不得通过 `SaveChanges(false)`、Outbox 或 audit 是否存在来推断成功。
 - 数据库 durable commit marker 只用于事务提交结果验证和 commit-ACK 丢失对账，不是 Agent durable 编排、Tool checkpoint、任务恢复点或工具重放依据。marker 必须与业务写入处于同一事务，并由 fresh context 在独立超时和 execution strategy 下验证。
 - marker 写入后 caller cancellation 不得中断 commit/verification。无法确认时返回稳定 503 `persistence_commit_outcome_unknown` 和非敏感 commit id；调用方不得自动重放业务。

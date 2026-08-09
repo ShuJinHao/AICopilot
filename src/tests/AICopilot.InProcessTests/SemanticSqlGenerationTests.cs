@@ -141,7 +141,7 @@ public sealed class SemanticSqlGenerationTests
     }
 
     [Fact]
-    public void SqlGenerator_ShouldNotInventProcessNameScope_ForRealDeviceLogQuery()
+    public void RealDeviceLogMapping_ShouldFailBeforeSqlGeneration()
     {
         var planningResult = _planner.Plan(
             "Analysis.DeviceLog.Latest",
@@ -155,21 +155,10 @@ public sealed class SemanticSqlGenerationTests
                 ["DataAnalysis:CloudReadOnly:Enabled"] = "true"
             })
             .Build();
-        var mappingProvider = new ConfiguredSemanticPhysicalMappingProvider(configuration);
-        mappingProvider.TryGetMapping(SemanticQueryTarget.DeviceLog, out var mapping).Should().BeTrue();
+        var act = () => new ConfiguredSemanticPhysicalMappingProvider(configuration);
 
-        var sql = _sqlGenerator.Generate(planningResult.Plan!, mapping);
-
-        sql.SqlText.Should().Contain("FROM public.device_logs l INNER JOIN public.devices d ON l.device_id = d.id LEFT JOIN public.mfg_processes mp ON d.process_id = mp.id");
-        sql.SqlText.Should().Contain("d.device_name AS deviceName");
-        sql.SqlText.Should().NotContain("mp.process_name AS processName");
-        sql.SqlText.Should().NotContain("mp.process_name ILIKE @p");
-        sql.SqlText.Should().Contain("l.level IN (");
-        sql.SqlText.Should().Contain("l.log_time >= @p");
-        sql.SqlText.Should().Contain("l.log_time <= @p");
-        sql.Parameters.Values.Should().NotContain("%模切%");
-        sql.Parameters.Values.Should().Contain("ERROR");
-        sql.Parameters.Values.Should().Contain("WARN");
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*temporarily closed*");
     }
 
     [Fact]

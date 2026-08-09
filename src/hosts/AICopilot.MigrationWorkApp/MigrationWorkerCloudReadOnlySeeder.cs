@@ -1,7 +1,7 @@
 using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
 
 namespace AICopilot.MigrationWorkApp;
 
@@ -17,23 +17,20 @@ internal static class MigrationWorkerCloudReadOnlySeeder
         CancellationToken cancellationToken)
     {
         var options = ResolveOptions(configuration);
-        if (!options.Enabled)
+        ValidateOptions(configuration, options);
+
+        var persistedCloudSources = await dataAnalysisDbContext.BusinessDatabases
+            .Where(database =>
+                database.ExternalSystemType == BusinessDataExternalSystemType.CloudReadOnly)
+            .ToListAsync(cancellationToken);
+        if (persistedCloudSources.Count == 0)
         {
             return;
         }
 
-        ValidateOptions(configuration, options);
-
-        var database = await dataAnalysisDbContext.BusinessDatabases
-            .SingleOrDefaultAsync(item => item.Name == options.DatabaseName, cancellationToken);
-
-        if (database is null)
+        foreach (var database in persistedCloudSources)
         {
-            dataAnalysisDbContext.BusinessDatabases.Add(CreateBusinessDatabase(options));
-        }
-        else
-        {
-            UpdateBusinessDatabase(database, options);
+            database.RetireAndClearConnectionMaterial();
         }
 
         await dataAnalysisDbContext.SaveChangesAsync(cancellationToken);
@@ -61,68 +58,8 @@ internal static class MigrationWorkerCloudReadOnlySeeder
             return;
         }
 
-        if (IsSimulationSeedEnabled(configuration))
-        {
-            throw new InvalidOperationException(
-                "DataAnalysis CloudReadOnly direct database mode cannot be enabled while CloudReadonly Simulation seeding is enabled.");
-        }
-
-        if (string.IsNullOrWhiteSpace(options.ConnectionString))
-        {
-            throw new InvalidOperationException(
-                "DataAnalysis:CloudReadOnly:ConnectionString is required when DataAnalysis:CloudReadOnly:Enabled=true.");
-        }
-
-        if (!options.ReadOnlyCredentialVerified)
-        {
-            throw new InvalidOperationException(
-                "DataAnalysis:CloudReadOnly:ReadOnlyCredentialVerified must be true before enabling the real Cloud readonly database source.");
-        }
-    }
-
-    internal static BusinessDatabase CreateBusinessDatabase(CloudReadOnlyBusinessDatabaseOptions options)
-    {
-        return new BusinessDatabase(
-            options.DatabaseName,
-            options.Description,
-            options.ConnectionString!,
-            DbProviderType.PostgreSql,
-            isReadOnly: true,
-            externalSystemType: BusinessDataExternalSystemType.CloudReadOnly,
-            readOnlyCredentialVerified: true,
-            isEnabled: true,
-            category: "CloudReadonly",
-            tags: ["cloud-readonly", "direct-db", "semantic"],
-            ownerDepartment: "AICopilot",
-            businessDomain: "Manufacturing",
-            sensitivityLevel: "Internal",
-            defaultQueryLimit: options.DefaultQueryLimit,
-            maxQueryLimit: options.MaxQueryLimit,
-            isSelectableInChat: true,
-            isSelectableInAgent: true);
-    }
-
-    private static void UpdateBusinessDatabase(
-        BusinessDatabase database,
-        CloudReadOnlyBusinessDatabaseOptions options)
-    {
-        database.UpdateInfo(options.DatabaseName, options.Description);
-        database.UpdateConnection(options.ConnectionString!, DbProviderType.PostgreSql);
-        database.UpdateSettings(
-            isEnabled: true,
-            isReadOnly: true,
-            externalSystemType: BusinessDataExternalSystemType.CloudReadOnly,
-            readOnlyCredentialVerified: true);
-        database.UpdateGovernance(
-            category: "CloudReadonly",
-            tags: ["cloud-readonly", "direct-db", "semantic"],
-            ownerDepartment: "AICopilot",
-            businessDomain: "Manufacturing",
-            sensitivityLevel: "Internal",
-            defaultQueryLimit: options.DefaultQueryLimit,
-            maxQueryLimit: options.MaxQueryLimit,
-            isSelectableInChat: true,
-            isSelectableInAgent: true);
+        throw new InvalidOperationException(
+            "DataAnalysis CloudReadOnly direct database mode is temporarily closed and cannot be enabled by configuration.");
     }
 
     private static string? GetConnectionString(
@@ -132,15 +69,6 @@ internal static class MigrationWorkerCloudReadOnlySeeder
         return section["ConnectionString"]
                ?? configuration.GetConnectionString("cloud-platform-readonly")
                ?? configuration["DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING"];
-    }
-
-    private static bool IsSimulationSeedEnabled(IConfiguration configuration)
-    {
-        var mode = configuration["CloudReadonly:Mode"];
-        var enabled = configuration["CloudReadonly:Simulation:Enabled"];
-        return string.Equals(mode, "Simulation", StringComparison.OrdinalIgnoreCase)
-               && bool.TryParse(enabled, out var parsed)
-               && parsed;
     }
 
     private static string GetValue(

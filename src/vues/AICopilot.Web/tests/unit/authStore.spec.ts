@@ -11,6 +11,7 @@ const identityServiceMock = vi.hoisted(() => ({
   finalizeCloudOidcLogin: vi.fn(),
   confirmExistingCloudOidcAccount: vi.fn(),
   cancelCloudOidcAccountConfirmation: vi.fn(),
+  revokeCurrentCloudDelegation: vi.fn(),
   getCurrentUserProfile: vi.fn()
 }))
 
@@ -182,5 +183,32 @@ describe('authStore', () => {
 
     expect(identityServiceMock.cancelCloudOidcAccountConfirmation).toHaveBeenCalledOnce()
     expect(store.isCloudAccountConfirmationRequired).toBe(false)
+  })
+
+  it('revokes the current Cloud delegation before clearing local auth', async () => {
+    identityServiceMock.revokeCurrentCloudDelegation.mockImplementation(async () => {
+      expect(sessionStorage.getItem('aicopilot.auth.token')).toBe('token-1')
+    })
+    const store = useAuthStore()
+
+    await store.logout()
+
+    expect(identityServiceMock.revokeCurrentCloudDelegation).toHaveBeenCalledOnce()
+    expect(store.token).toBe('')
+    expect(sessionStorage.getItem('aicopilot.auth.token')).toBeNull()
+    expect(sessionStorage.getItem('aicopilot.chat.currentSessionId')).toBeNull()
+  })
+
+  it('clears browser auth even when Cloud delegation revocation fails', async () => {
+    identityServiceMock.revokeCurrentCloudDelegation.mockRejectedValue(
+      new ApiError('API Error: 503', 503),
+    )
+    const store = useAuthStore()
+
+    await expect(store.logout()).resolves.toBeUndefined()
+
+    expect(store.token).toBe('')
+    expect(sessionStorage.getItem('aicopilot.auth.token')).toBeNull()
+    expect(sessionStorage.getItem('aicopilot.chat.currentSessionId')).toBeNull()
   })
 })

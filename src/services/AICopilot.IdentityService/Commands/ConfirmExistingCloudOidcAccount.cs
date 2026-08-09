@@ -9,6 +9,7 @@ namespace AICopilot.IdentityService.Commands;
 
 public sealed record ConfirmExistingCloudOidcAccountCommand(
     CloudOidcIdentityProfile Profile,
+    CloudDelegationTokenInput DelegationToken,
     string Password) : ICommand<Result<LoginUserDto>>;
 
 public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
@@ -18,6 +19,7 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
     IExternalIdentityBindingInvariantGuard bindingInvariantGuard,
     IIdentityAuditLogWriter auditLogWriter,
     IJwtTokenGenerator jwtTokenGenerator,
+    ICloudDelegationGrantStore delegationGrantStore,
     ITransactionalExecutionService transactionalExecutionService)
     : ICommandHandler<ConfirmExistingCloudOidcAccountCommand, Result<LoginUserDto>>
 {
@@ -26,6 +28,11 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
         CancellationToken cancellationToken)
     {
         var profile = NormalizeProfile(command.Profile);
+        var now = DateTime.UtcNow;
+        var validatedDelegation = CloudDelegationTokenGuard.Validate(
+            profile,
+            command.DelegationToken,
+            now);
         var localUserName = ResolveLocalUserName(profile);
         var normalizedUserName = userManager.NormalizeName(localUserName);
         if (string.IsNullOrWhiteSpace(normalizedUserName))
@@ -51,6 +58,24 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
                         return Result.Unauthorized(new ApiProblemDescriptor(
                             AuthProblemCodes.CloudIdentityInactive,
                             "Cloud 账号或员工状态无效，无法登录 AICopilot。"));
+                    }
+
+                    if (string.Equals(
+                            profile.EmployeeNo,
+                            CloudOidcCanonicalAdminOptions.RequiredEmployeeNo,
+                            StringComparison.Ordinal))
+                    {
+                        var detail =
+                            $"{CloudOidcCanonicalAdminOptions.EmergencyAdminConflictReasonCode}: " +
+                            "规范 Cloud 管理员不得通过本地 emergency admin 密码确认路径绑定，" +
+                            "请先由运维人员独立处置遗留账号冲突。";
+                        rejectionAudit.Set(CreateRejectedAudit(
+                            "Identity.CloudOidcCanonicalAdminEmergencyCollision",
+                            profile,
+                            detail));
+                        return Result.Unauthorized(new ApiProblemDescriptor(
+                            AuthProblemCodes.EmergencyAdminCanonicalCloudAdminConflict,
+                            detail));
                     }
 
                     var userBeforeLock = await userFreshReadStore.FindByNormalizedUserNameAsync(
@@ -157,7 +182,17 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
 
                     user = await EnsureSecurityStampAsync(user, ct);
 
-                    var token = await GenerateAiTokenAsync(user, profile, ct);
+                    var grant = await CreateDelegationGrantAsync(
+                        user,
+                        profile,
+                        validatedDelegation,
+                        now,
+                        ct);
+                    var token = await GenerateAiTokenAsync(
+                        user,
+                        profile,
+                        grant,
+                        ct);
                     await auditLogWriter.WriteAsync(
                         new AuditLogWriteRequest(
                             AuditActionGroups.Identity,
@@ -279,7 +314,7 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
                 profile.DisplayName,
                 profile.DepartmentId,
                 profile.DepartmentName,
-                profile.StatusVersion,
+                profile.StatusVersion!,
                 profile.AccountEnabled,
                 profile.EmployeeActive,
                 DateTime.UtcNow),
@@ -290,6 +325,7 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
     private async Task<string> GenerateAiTokenAsync(
         ApplicationUser user,
         CloudOidcIdentityProfile profile,
+        CloudDelegationGrantSnapshot grant,
         CancellationToken cancellationToken)
     {
         var userClaims = await userManager.GetClaimsAsync(user);
@@ -300,7 +336,33 @@ public sealed class ConfirmExistingCloudOidcAccountCommandHandler(
                 user.UserName!,
                 user.SecurityStamp ?? string.Empty,
                 userRoles.ToArray(),
-                userClaims.Concat(BuildCloudJwtClaims(profile)).ToArray()),
+                userClaims.Concat(BuildCloudJwtClaims(profile))
+                    .Append(new Claim(
+                        ExternalIdentityJwtClaimTypes.CloudDelegationId,
+                        grant.GrantId.ToString("D")))
+                    .ToArray(),
+                grant.ExpiresAtUtc),
+            cancellationToken);
+    }
+
+    private async Task<CloudDelegationGrantSnapshot> CreateDelegationGrantAsync(
+        ApplicationUser user,
+        CloudOidcIdentityProfile profile,
+        ValidatedCloudDelegationToken delegationToken,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        return await delegationGrantStore.CreateAsync(
+            new CreateCloudDelegationGrantRequest(
+                Guid.NewGuid(),
+                user.Id,
+                delegationToken.CloudUserId,
+                profile.Issuer,
+                profile.TenantId,
+                delegationToken.AccessToken,
+                delegationToken.ExpiresAtUtc,
+                profile.StatusVersion!,
+                now),
             cancellationToken);
     }
 

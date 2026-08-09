@@ -136,6 +136,20 @@ public class BusinessDatabase : IAggregateRoot<BusinessDatabaseId>
         Provider = provider;
     }
 
+    /// <summary>
+    /// Retires a persisted external source and removes its reusable credential material.
+    /// The empty value is intentional: the schema keeps the column non-null while the
+    /// source becomes non-selectable and cannot be reopened by runtime governance.
+    /// </summary>
+    public void RetireAndClearConnectionMaterial()
+    {
+        ConnectionString = string.Empty;
+        IsEnabled = false;
+        ReadOnlyCredentialVerified = false;
+        IsSelectableInChat = false;
+        IsSelectableInAgent = false;
+    }
+
     public void UpdateSettings(
         bool isEnabled,
         bool isReadOnly,

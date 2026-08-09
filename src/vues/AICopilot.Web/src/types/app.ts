@@ -25,7 +25,7 @@ export type CloudReadonlyRuntimeStatus =
   | 'Simulation'
   | 'RealReady'
   | 'RealMissingBaseUrl'
-  | 'RealMissingToken'
+  | 'RealMissingDelegation'
   | 'RealNotAllowed'
   | string
 
@@ -33,7 +33,8 @@ export interface CloudReadonlyStatus {
   mode: string
   status: CloudReadonlyRuntimeStatus
   baseUrlConfigured: boolean
-  tokenConfigured: boolean
+  transportConfigured: boolean
+  delegationAvailable: boolean
   productionReadAllowed: boolean
   message: string
 }

@@ -41,6 +41,24 @@ public sealed class BusinessTextToSqlFallbackRunner(
         var registeredSourceProfile = profileRegistry.GetRequired(
             context.SourceKey,
             context.SourceType);
+        if (context.SourceType == DataSourceExternalSystemType.CloudReadOnly ||
+            registeredSourceProfile.SourceType == DataSourceExternalSystemType.CloudReadOnly)
+        {
+            const string closedMessage =
+                "Real Cloud Direct DB/Text-to-SQL is temporarily closed until delegated SQL row scope can be independently enforced.";
+            await auditRecorder.RecordBusinessTextToSqlFallbackAsync(
+                database,
+                AuditResults.Rejected,
+                closedMessage,
+                ComputeHash(question),
+                string.Empty,
+                0,
+                false,
+                [],
+                cancellationToken);
+            return Failed(closedMessage, []);
+        }
+
         if (!registeredSourceProfile.TryResolveCapabilityQueryProfile(
                 context.Capability,
                 out var sourceProfile))

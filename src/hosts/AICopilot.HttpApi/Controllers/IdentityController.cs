@@ -16,7 +16,8 @@ namespace AICopilot.HttpApi.Controllers;
 public class IdentityController(
     ISender sender,
     IAuthenticationSchemeProvider authenticationSchemeProvider,
-    IOptions<CloudOidcOptions> cloudOidcOptions) : ApiControllerBase(sender)
+    IOptions<CloudOidcOptions> cloudOidcOptions,
+    ICloudDelegationTokenContractValidator delegationTokenContractValidator) : ApiControllerBase(sender)
 {
     [HttpPost("login")]
     [AllowAnonymous]
@@ -65,15 +66,10 @@ public class IdentityController(
     public async Task<IActionResult> FinalizeCloudOidcLogin()
     {
         var result = await CloudOidcFinalizationWorkflow.ExecuteAsync(
-            async _ =>
-            {
-                var authentication = await HttpContext.AuthenticateAsync(
-                    CloudOidcAuthenticationDefaults.ExternalCookieScheme);
-                return authentication.Succeeded ? authentication.Principal : null;
-            },
+            AuthenticateCloudOidcExternalSessionAsync,
             cloudOidcOptions.Value.Issuer,
-            (profile, cancellationToken) => Sender.Send(
-                new FinalizeCloudOidcLoginCommand(profile),
+            (profile, delegationToken, cancellationToken) => Sender.Send(
+                new FinalizeCloudOidcLoginCommand(profile, delegationToken),
                 cancellationToken),
             _ => HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme),
             HttpContext.RequestAborted,
@@ -92,15 +88,13 @@ public class IdentityController(
         ConfirmExistingCloudOidcAccountRequest request)
     {
         var result = await CloudOidcFinalizationWorkflow.ExecuteAsync(
-            async _ =>
-            {
-                var authentication = await HttpContext.AuthenticateAsync(
-                    CloudOidcAuthenticationDefaults.ExternalCookieScheme);
-                return authentication.Succeeded ? authentication.Principal : null;
-            },
+            AuthenticateCloudOidcExternalSessionAsync,
             cloudOidcOptions.Value.Issuer,
-            (profile, cancellationToken) => Sender.Send(
-                new ConfirmExistingCloudOidcAccountCommand(profile, request.Password),
+            (profile, delegationToken, cancellationToken) => Sender.Send(
+                new ConfirmExistingCloudOidcAccountCommand(
+                    profile,
+                    delegationToken,
+                    request.Password),
                 cancellationToken),
             _ => HttpContext.SignOutAsync(CloudOidcAuthenticationDefaults.ExternalCookieScheme),
             HttpContext.RequestAborted,
@@ -151,6 +145,15 @@ public class IdentityController(
     public async Task<IActionResult> GetCurrentUserProfile()
     {
         return ReturnResult(await Sender.Send(new GetCurrentUserProfileQuery()));
+    }
+
+    [Authorize]
+    [HttpPost("cloud-delegation/revoke-current")]
+    public async Task<IActionResult> RevokeCurrentCloudDelegation()
+    {
+        return ReturnResult(await Sender.Send(
+            new RevokeCurrentCloudDelegationCommand(),
+            HttpContext.RequestAborted));
     }
 
     [Authorize]
@@ -258,6 +261,53 @@ public class IdentityController(
     {
         return cloudOidcOptions.Value.IsConfigured()
             && await authenticationSchemeProvider.GetSchemeAsync(CloudOidcAuthenticationDefaults.AuthenticationScheme) is not null;
+    }
+
+    private async Task<CloudOidcExternalSession?> AuthenticateCloudOidcExternalSessionAsync(
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var authentication = await HttpContext.AuthenticateAsync(
+            CloudOidcAuthenticationDefaults.ExternalCookieScheme);
+        if (!authentication.Succeeded || authentication.Principal is null)
+        {
+            return null;
+        }
+
+        var accessToken = authentication.Properties?.GetTokenValue("access_token");
+        var expiresAtValue = authentication.Properties?.GetTokenValue("expires_at");
+        if (authentication.Properties is null ||
+            string.IsNullOrWhiteSpace(accessToken) ||
+            !DateTimeOffset.TryParse(
+                expiresAtValue,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal |
+                System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var expiresAt))
+        {
+            return null;
+        }
+
+        var contractProof = await delegationTokenContractValidator.ValidateAsync(
+            cloudOidcOptions.Value.Issuer,
+            accessToken,
+            cancellationToken);
+        if (contractProof is null ||
+            !CloudOidcDelegationProof.TryCreateEvidence(
+                authentication.Properties,
+                cloudOidcOptions.Value,
+                contractProof,
+                out var evidence))
+        {
+            return null;
+        }
+
+        return new CloudOidcExternalSession(
+            authentication.Principal,
+            new CloudDelegationTokenInput(
+                accessToken,
+                expiresAt.UtcDateTime,
+                evidence));
     }
 
     private static bool HasProblemCode<T>(Result<T> result, string problemCode)

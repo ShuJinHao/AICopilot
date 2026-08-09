@@ -207,6 +207,20 @@ public sealed class SecurityBoundaryArchitectureTests
     }
 
     [Fact]
+    public void CloudDelegationRevokeEndpoint_ShouldBeAuthenticatedNoBodyPost()
+    {
+        var method = typeof(IdentityController)
+            .GetMethod(nameof(IdentityController.RevokeCurrentCloudDelegation));
+
+        method.Should().NotBeNull();
+        method!.GetParameters().Should().BeEmpty();
+        method.GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+        method.GetCustomAttribute<AllowAnonymousAttribute>().Should().BeNull();
+        method.GetCustomAttribute<HttpPostAttribute>()!.Template.Should()
+            .Be("cloud-delegation/revoke-current");
+    }
+
+    [Fact]
     public void UploadDocument_ShouldDeclareRequestSizeLimits()
     {
         var method = typeof(RagController).GetMethod(nameof(RagController.UploadDocument));

@@ -7,7 +7,8 @@ public sealed record JwtTokenUser(
     string UserName,
     string SecurityStamp,
     IReadOnlyCollection<string> Roles,
-    IReadOnlyCollection<Claim> Claims);
+    IReadOnlyCollection<Claim> Claims,
+    DateTime? ExpiresAtUtc = null);
 
 public interface IJwtTokenGenerator
 {

@@ -1,5 +1,6 @@
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.AuditLogs;
+using AICopilot.EntityFrameworkCore.ExternalIdentities;
 using AICopilot.EntityFrameworkCore.Locking;
 using AICopilot.EntityFrameworkCore.Transactions;
 using AICopilot.PersistenceTestKit;
@@ -288,6 +289,56 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
         await AssertMarkerCountAsync(database.ConnectionString, 0);
     }
 
+    [Theory]
+    [InlineData("101650")]
+    [InlineData(" 101650 ")]
+    public async Task IdentitySeed_ShouldRejectEmergencyAdminCanonicalCloudConflictBeforeMutation(
+        string emergencyUserName)
+    {
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
+
+        Func<Task> action = () => RunIdentitySeedAsync(
+            database.ConnectionString,
+            CreateBootstrapConfiguration(emergencyUserName));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"*{BootstrapAdminOptions.CanonicalConflictReasonCode}*");
+        await using var verification = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        (await verification.Users.CountAsync()).Should().Be(0);
+        (await verification.Roles.CountAsync()).Should().Be(0);
+        await AssertMarkerCountAsync(database.ConnectionString, 0);
+    }
+
+    [Fact]
+    public async Task IdentitySeed_ShouldRejectUnboundPasswordBearingLegacyCanonicalAccount()
+    {
+        await using var database = await CreateMigratedDatabaseAsync(fixture);
+        var legacyCanonicalUserId = Guid.NewGuid();
+        await SeedUsersAsync(
+            database.ConnectionString,
+            new TestUser(
+                legacyCanonicalUserId,
+                CloudOidcCanonicalAdminOptions.RequiredEmployeeNo,
+                false,
+                [IdentityRoleNames.Admin],
+                Password: "Legacy-Emergency-Password-1!"));
+
+        Func<Task> action = () => RunIdentitySeedAsync(
+            database.ConnectionString,
+            CreateBootstrapConfiguration($"bootstrap-{Guid.NewGuid():N}"));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(
+                $"*{CloudOidcCanonicalAdminOptions.EmergencyAdminConflictReasonCode}*");
+        await using var verification = new IdentityStoreDbContext(
+            CreateIdentityOptions(database.ConnectionString));
+        (await verification.Users.CountAsync()).Should().Be(1);
+        (await verification.ExternalIdentityBindings.CountAsync()).Should().Be(0);
+        await AssertEnabledAdminCountAsync(database.ConnectionString, 1);
+        await AssertMarkerCountAsync(database.ConnectionString, 0);
+    }
+
     [Fact]
     public async Task IdentitySeed_ShouldNotSilentlyEnableDisabledBootstrapAdmin()
     {
@@ -411,6 +462,7 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
         await MigrationWorkerIdentitySeeder.SeedAsync(
             managers.RoleManager,
             managers.UserManager,
+            new ExternalIdentityBindingStore(dbContext),
             permissionCatalog,
             new IdentityAccessService(
                 managers.UserManager,
@@ -463,7 +515,10 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
                 IdentityGovernanceHelper.MarkUserDisabled(user);
             }
 
-            (await managers.UserManager.CreateAsync(user)).Succeeded.Should().BeTrue();
+            var createResult = string.IsNullOrWhiteSpace(definition.Password)
+                ? await managers.UserManager.CreateAsync(user)
+                : await managers.UserManager.CreateAsync(user, definition.Password);
+            createResult.Succeeded.Should().BeTrue();
             foreach (var role in definition.Roles)
             {
                 (await managers.UserManager.AddToRoleAsync(user, role)).Succeeded.Should().BeTrue();
@@ -638,5 +693,6 @@ public sealed class IdentityEnabledAdminInvariantTests(PostgresPersistenceFixtur
         Guid Id,
         string UserName,
         bool Disabled,
-        string[] Roles);
+        string[] Roles,
+        string? Password = null);
 }

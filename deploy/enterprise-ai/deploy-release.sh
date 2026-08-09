@@ -1610,6 +1610,7 @@ require_secret_value() {
   local key="$1"
   local min_length="$2"
   local value="${!key:-}"
+  local byte_length
 
   if [ -z "$value" ]; then
     printf 'Missing required secret in .env: %s\n' "$key" >&2
@@ -1621,8 +1622,9 @@ require_secret_value() {
     exit 64
   fi
 
-  if [ "${#value}" -lt "$min_length" ]; then
-    printf 'Secret in .env is too short: %s requires at least %s characters.\n' "$key" "$min_length" >&2
+  byte_length="$(LC_ALL=C printf '%s' "$value" | wc -c | tr -d '[:space:]')"
+  if [ "$byte_length" -lt "$min_length" ]; then
+    printf 'Secret in .env is too short: %s requires at least %s UTF-8 bytes.\n' "$key" "$min_length" >&2
     exit 64
   fi
 }
@@ -1729,23 +1731,34 @@ ensure_http_only_environment() {
 }
 
 ensure_required_secrets() {
+  local normalized_emergency_admin
   require_secret_value POSTGRES_PASSWORD 16
   require_secret_value RABBITMQ_PASSWORD 16
   require_secret_value QDRANT_KEY 16
+  require_env_value AICOPILOT_BOOTSTRAP_ADMIN_USERNAME
   require_secret_value AICOPILOT_BOOTSTRAP_ADMIN_PASSWORD 12
   require_secret_value AICOPILOT_API_KEY_ENCRYPTION_KEY 32
   require_secret_value AICOPILOT_JWT_SECRET_KEY 64
 
-  if is_truthy "${CLOUD_AI_READ_ENABLED:-false}" || is_truthy "${CLOUD_IDENTITY_STATUS_ENABLED:-false}"; then
-    require_secret_value CLOUD_AI_SERVICE_ACCOUNT_TOKEN 32
+  normalized_emergency_admin="$(
+    printf '%s' "$AICOPILOT_BOOTSTRAP_ADMIN_USERNAME" |
+      sed 's/^[[:space:]]*//;s/[[:space:]]*$//' |
+      tr '[:lower:]' '[:upper:]'
+  )"
+  if [ "$normalized_emergency_admin" = "101650" ]; then
+    printf 'EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT: AICOPILOT_BOOTSTRAP_ADMIN_USERNAME must not normalize to 101650.\n' >&2
+    exit 64
   fi
 
+  if ! is_truthy "${CLOUD_IDENTITY_STATUS_ENABLED:-false}"; then
+    printf 'Cloud identity-status validation must remain enabled in the production deployment contract.\n' >&2
+    exit 64
+  fi
+  require_secret_value AI_IDENTITY_STATUS_TOKEN_SIGNING_SECRET 32
+
   if is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
-    require_secret_value DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING 32
-    if ! is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED:-false}"; then
-      printf 'DATA_ANALYSIS_CLOUD_READONLY_ENABLED=true requires DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED=true.\n' >&2
-      exit 64
-    fi
+    printf 'Real Cloud Direct DB/Text-to-SQL is temporarily closed; DATA_ANALYSIS_CLOUD_READONLY_ENABLED must remain false.\n' >&2
+    exit 64
   fi
 }
 
@@ -1773,60 +1786,17 @@ check_release_state_preflight() {
 }
 
 ensure_cloud_readonly_network() {
-  local network="${DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK:-enterprise-ai-cloud-readonly}"
-  local cloud_project="${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_COMPOSE_PROJECT:-deploy}"
-  local cloud_service="${DATA_ANALYSIS_CLOUD_READONLY_CLOUD_POSTGRES_SERVICE:-postgres}"
-  local host_alias="${DATA_ANALYSIS_CLOUD_READONLY_DB_HOST_ALIAS:-cloud-postgres}"
-  local cloud_container
-
-  if ! docker network inspect "$network" >/dev/null 2>&1; then
-    docker network create --driver bridge "$network" >/dev/null
-    printf 'Created Cloud readonly Docker network: %s\n' "$network"
+  if is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
+    printf 'Real Cloud Direct DB/Text-to-SQL is temporarily closed; no Cloud database network will be created.\n' >&2
+    exit 64
   fi
-
-  if ! is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
-    return
-  fi
-
-  cloud_container="$(
-    docker ps \
-      --filter "label=com.docker.compose.project=$cloud_project" \
-      --filter "label=com.docker.compose.service=$cloud_service" \
-      --format '{{.ID}}' |
-      head -n 1
-  )"
-
-  if [ -z "$cloud_container" ]; then
-    printf 'Direct Cloud readonly DB is enabled, but Cloud PostgreSQL container was not found: project=%s service=%s\n' "$cloud_project" "$cloud_service" >&2
-    exit 66
-  fi
-
-  if docker inspect "$cloud_container" \
-    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' |
-    grep -Fx "$network" >/dev/null; then
-    printf 'Cloud PostgreSQL container is already attached to network %s.\n' "$network"
-    return
-  fi
-
-  docker network connect --alias "$host_alias" "$network" "$cloud_container"
-  printf 'Attached Cloud PostgreSQL container to network %s as %s.\n' "$network" "$host_alias"
 }
 
 check_cloud_readonly_preflight() {
-  local check_script="$DEPLOY_DIR/scripts/check-cloud-readonly-grants.sh"
-
-  if ! is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
-    printf 'CloudReadOnly direct DB is disabled; skipping readonly grant preflight.\n'
-    return
+  if is_truthy "${DATA_ANALYSIS_CLOUD_READONLY_ENABLED:-false}"; then
+    printf 'Real Cloud Direct DB/Text-to-SQL is temporarily closed; readonly grant preflight cannot be enabled.\n' >&2
+    exit 64
   fi
-
-  if [ ! -x "$check_script" ]; then
-    printf 'CloudReadOnly direct DB is enabled, but preflight script is missing or not executable: %s\n' "$check_script" >&2
-    exit 66
-  fi
-
-  printf 'Running CloudReadOnly readonly grant preflight.\n'
-  "$check_script" --env-file "$ENV_FILE"
 }
 
 check_model_provider_preflight() {

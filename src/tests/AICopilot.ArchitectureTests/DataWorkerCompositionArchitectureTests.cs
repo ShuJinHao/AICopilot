@@ -57,6 +57,8 @@ public sealed class DataWorkerCompositionArchitectureTests
         using (var provider = builder.Services.BuildServiceProvider())
         using (var scope = provider.CreateScope())
         {
+            provider.GetRequiredService<TimeProvider>().Should().BeSameAs(TimeProvider.System);
+            provider.GetRequiredService<ICloudIdentityStatusTokenProvider>().Should().NotBeNull();
             var currentUser = scope.ServiceProvider.GetRequiredService<ICurrentUser>();
             currentUser.UserName.Should().Be("data-worker");
             currentUser.IdentityProvider.Should().Be("Worker");

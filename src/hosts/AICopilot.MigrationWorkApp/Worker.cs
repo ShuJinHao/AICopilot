@@ -53,6 +53,8 @@ public class Worker(
             var mcpServerDbContext = scope.ServiceProvider.GetRequiredService<McpServerDbContext>();
             var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var externalIdentityBindingStore = scope.ServiceProvider
+                .GetRequiredService<IExternalIdentityBindingStore>();
             var permissionCatalog = scope.ServiceProvider.GetRequiredService<IPermissionCatalog>();
             var identityAccessService = scope.ServiceProvider.GetRequiredService<IIdentityAccessService>();
             var enabledAdminInvariant = scope.ServiceProvider
@@ -97,6 +99,7 @@ public class Worker(
                         await MigrationWorkerIdentitySeeder.SeedAsync(
                             roleManager,
                             userManager,
+                            externalIdentityBindingStore,
                             permissionCatalog,
                             identityAccessService,
                             enabledAdminInvariant,

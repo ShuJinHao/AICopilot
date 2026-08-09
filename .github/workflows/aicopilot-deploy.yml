@@ -111,9 +111,6 @@ jobs:
         env:
           DEPLOY_TARGET_DIR: ${{ secrets.DEPLOY_TARGET_DIR }}
           DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
-          CLOUD_AI_READ_BASE_URL: ${{ secrets.CLOUD_AI_READ_BASE_URL }}
-          CLOUD_AI_SERVICE_ACCOUNT_TOKEN: ${{ secrets.CLOUD_AI_SERVICE_ACCOUNT_TOKEN }}
-          DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING: ${{ secrets.DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING }}
         run: |
           set -euo pipefail
           set_env_value() {
@@ -156,38 +153,16 @@ jobs:
           fi
           umask 077
           printf '%s\n' "$DEPLOY_ENV_FILE" > "$DEPLOY_TARGET_DIR/.env"
-          if [ -n "${DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING:-}" ]; then
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_MODE Disabled
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ENABLED false
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ false
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_AI_READ_ENABLED false
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_ENABLED true
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_DATABASE_NAME DeviceSemanticReadonly
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING "$DATA_ANALYSIS_CLOUD_READONLY_CONNECTION_STRING"
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CREDENTIAL_VERIFIED true
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_DEFAULT_QUERY_LIMIT 200
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_MAX_QUERY_LIMIT 1000
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_DOCKER_NETWORK enterprise-ai-cloud-readonly
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_DB_HOST_ALIAS cloud-postgres
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CLOUD_COMPOSE_PROJECT deploy
-            set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_CLOUD_POSTGRES_SERVICE postgres
-            echo "Applied DataAnalysis direct Cloud readonly DB secret override. Connection string value was not printed."
-          elif [ -n "${CLOUD_AI_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-            cloud_ai_read_base_url="${CLOUD_AI_READ_BASE_URL:-}"
-            if [ -z "$cloud_ai_read_base_url" ]; then
-              echo "CLOUD_AI_READ_BASE_URL is required when CLOUD_AI_SERVICE_ACCOUNT_TOKEN is configured." >&2
-              exit 64
-            fi
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_MODE Real
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ENABLED true
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ true
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_AI_READ_ENABLED true
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_AI_READ_BASE_URL "$cloud_ai_read_base_url"
-            set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_AI_SERVICE_ACCOUNT_TOKEN "$CLOUD_AI_SERVICE_ACCOUNT_TOKEN"
-            echo "Applied Cloud AiRead production secret override. Token value was not printed."
-          else
-            echo "CLOUD_AI_SERVICE_ACCOUNT_TOKEN secret is not configured; keeping DEPLOY_ENV_FILE Cloud AiRead values."
+          retired_sensitive_pattern='^(CLOUD_AI_SERVICE_ACCOUNT_TOKEN|DATA_ANALYSIS_CLOUD_READONLY_(CONNECTION_STRING|USERNAME|PASSWORD|DATABASE|DOCKER_NETWORK|DB_HOST_ALIAS))=.+$'
+          if grep -Eq "$retired_sensitive_pattern" "$DEPLOY_TARGET_DIR/.env"; then
+            echo "DEPLOY_ENV_FILE contains retired interactive AiRead or direct Cloud DB credentials; refusing emergency deployment." >&2
+            exit 64
           fi
+          set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_MODE Disabled
+          set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ENABLED false
+          set_env_value "$DEPLOY_TARGET_DIR/.env" CLOUD_READONLY_REAL_ALLOW_PRODUCTION_READ false
+          set_env_value "$DEPLOY_TARGET_DIR/.env" DATA_ANALYSIS_CLOUD_READONLY_ENABLED false
+          echo "Real Cloud Direct DB/Text-to-SQL remains disabled; typed AiRead uses runtime current-user delegation."
           chmod +x "$DEPLOY_TARGET_DIR"/*.sh
           find "$DEPLOY_TARGET_DIR/scripts" -maxdepth 1 -type f -name '*.sh' -exec chmod +x {} +
 

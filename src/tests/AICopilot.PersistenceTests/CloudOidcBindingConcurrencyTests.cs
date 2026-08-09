@@ -1,11 +1,15 @@
+using System.Security.Cryptography;
+using System.Text;
 using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.AuditLogs;
+using AICopilot.EntityFrameworkCore.CloudDelegations;
 using AICopilot.EntityFrameworkCore.ExternalIdentities;
 using AICopilot.EntityFrameworkCore.Locking;
 using AICopilot.IdentityService.Authorization;
 using AICopilot.IdentityService.Commands;
 using AICopilot.SharedKernel.Result;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using static AICopilot.PersistenceTests.IdentityPersistenceTestSupport;
@@ -15,6 +19,9 @@ namespace AICopilot.PersistenceTests;
 [Collection(PostgresPersistenceTestCollection.Name)]
 public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture fixture)
 {
+    private static readonly IDataProtectionProvider DelegationDataProtectionProvider =
+        new EphemeralDataProtectionProvider();
+
     [Fact]
     public async Task FinalizeCloudOidcLogin_ShouldSerializeConcurrentFirstLoginIdempotently()
     {
@@ -50,11 +57,11 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         var profile = CreateProfile(userName, "same-jit-subject");
 
         var firstTask = firstHandler.Handle(
-            new FinalizeCloudOidcLoginCommand(profile),
+            new FinalizeCloudOidcLoginCommand(profile, CreateDelegationToken("same-jit-subject")),
             CancellationToken.None);
         await firstLockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var secondTask = secondHandler.Handle(
-            new FinalizeCloudOidcLoginCommand(profile),
+            new FinalizeCloudOidcLoginCommand(profile, CreateDelegationToken("same-jit-subject")),
             CancellationToken.None);
 
         try
@@ -77,7 +84,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         (await verification.Users.CountAsync(user => user.NormalizedUserName == userName.ToUpperInvariant()))
             .Should().Be(1);
         var binding = await verification.ExternalIdentityBindings.SingleAsync();
-        binding.ExternalUserId.Should().Be("same-jit-subject");
+        binding.ExternalUserId.Should().Be(NormalizeCloudSubject("same-jit-subject"));
         (await verification.AuditLogs.CountAsync(entry =>
             entry.ActionCode == "Identity.CloudOidcFirstBind" &&
             entry.Result == AuditResults.Succeeded)).Should().Be(1);
@@ -122,12 +129,14 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
 
         var firstTask = firstHandler.Handle(
             new FinalizeCloudOidcLoginCommand(
-                CreateProfile(firstUserName, "cloud-subject-a")),
+                CreateProfile(firstUserName, "cloud-subject-a"),
+                CreateDelegationToken("cloud-subject-a")),
             CancellationToken.None);
         await firstLockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var secondTask = secondHandler.Handle(
             new FinalizeCloudOidcLoginCommand(
-                CreateProfile(secondUserName, "cloud-subject-b")),
+                CreateProfile(secondUserName, "cloud-subject-b"),
+                CreateDelegationToken("cloud-subject-b")),
             CancellationToken.None);
 
         try
@@ -192,12 +201,14 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
 
         var finalizeTask = finalizeHandler.Handle(
             new FinalizeCloudOidcLoginCommand(
-                CreateProfile(userName, "jit-cloud-subject")),
+                CreateProfile(userName, "jit-cloud-subject"),
+                CreateDelegationToken("jit-cloud-subject")),
             CancellationToken.None);
         await firstLockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var confirmTask = confirmHandler.Handle(
             new ConfirmExistingCloudOidcAccountCommand(
                 CreateProfile(userName, "confirm-cloud-subject"),
+                CreateDelegationToken("confirm-cloud-subject"),
                 "irrelevant-password"),
             CancellationToken.None);
 
@@ -222,44 +233,40 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             CreateIdentityOptions(database.ConnectionString));
         (await verification.Users.CountAsync()).Should().Be(1);
         var binding = await verification.ExternalIdentityBindings.SingleAsync();
-        binding.ExternalUserId.Should().Be("jit-cloud-subject");
+        binding.ExternalUserId.Should().Be(NormalizeCloudSubject("jit-cloud-subject"));
         (await verification.AuditLogs.CountAsync(entry =>
             entry.ActionCode == "Identity.CloudOidcExistingAccountHasNoPassword" &&
             entry.Result == AuditResults.Rejected)).Should().Be(1);
     }
 
     [Fact]
-    public async Task BootstrapAdoptionAndOrdinaryLogin_ShouldSerializeWithoutReplacingAdminBinding()
+    public async Task CanonicalAdminCollectionAndConflictingLogin_ShouldSerializeWithoutReplacingBinding()
     {
         await using var database = await CreateMigratedDatabaseAsync(fixture);
-        const string bootstrapUserName = "BOOTSTRAP-ADMIN-1001";
-        var bootstrapUserId = await SeedBootstrapAdminAsync(
+        const string canonicalUserName = CloudOidcCanonicalAdminOptions.RequiredEmployeeNo;
+        var canonicalUserId = await SeedAdminAsync(
             database.ConnectionString,
-            bootstrapUserName);
+            canonicalUserName,
+            hasPassword: false);
 
-        await using var bootstrapContext = new IdentityStoreDbContext(
+        await using var canonicalContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString));
         await using var ordinaryContext = new IdentityStoreDbContext(
             CreateIdentityOptions(database.ConnectionString));
-        using var bootstrapManagers = IdentityManagerTestScope.Create(bootstrapContext);
+        using var canonicalManagers = IdentityManagerTestScope.Create(canonicalContext);
         using var ordinaryManagers = IdentityManagerTestScope.Create(ordinaryContext);
 
         var firstLockAcquired = NewSignal();
         var releaseFirstLock = NewSignal();
         var secondLockAttempted = NewSignal();
-        var bootstrapHandler = CreateFinalizeHandler(
+        var canonicalHandler = CreateFinalizeHandler(
             database.ConnectionString,
-            bootstrapContext,
-            bootstrapManagers,
+            canonicalContext,
+            canonicalManagers,
             new HoldingInvariantGuard(
-                new PostgresExternalIdentityBindingInvariantGuard(bootstrapContext),
+                new PostgresExternalIdentityBindingInvariantGuard(canonicalContext),
                 firstLockAcquired,
-                releaseFirstLock),
-            new CloudOidcBootstrapAdminBindingOptions
-            {
-                BootstrapAdminAutoBindEnabled = true,
-                BootstrapAdminUserName = bootstrapUserName
-            });
+                releaseFirstLock));
         var ordinaryHandler = CreateFinalizeHandler(
             database.ConnectionString,
             ordinaryContext,
@@ -268,14 +275,16 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
                 new PostgresExternalIdentityBindingInvariantGuard(ordinaryContext),
                 secondLockAttempted));
 
-        var bootstrapTask = bootstrapHandler.Handle(
+        var canonicalTask = canonicalHandler.Handle(
             new FinalizeCloudOidcLoginCommand(
-                CreateProfile(bootstrapUserName, "bootstrap-cloud-subject")),
+                CreateProfile(canonicalUserName, "canonical-cloud-subject"),
+                CreateDelegationToken("canonical-cloud-subject")),
             CancellationToken.None);
         await firstLockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var ordinaryTask = ordinaryHandler.Handle(
             new FinalizeCloudOidcLoginCommand(
-                CreateProfile(bootstrapUserName, "ordinary-cloud-subject")),
+                CreateProfile(canonicalUserName, "conflicting-cloud-subject"),
+                CreateDelegationToken("conflicting-cloud-subject")),
             CancellationToken.None);
 
         try
@@ -289,7 +298,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             releaseFirstLock.TrySetResult(true);
         }
 
-        (await bootstrapTask).Status.Should().Be(ResultStatus.Ok);
+        (await canonicalTask).Status.Should().Be(ResultStatus.Ok);
         var ordinaryResult = await ordinaryTask;
         ordinaryResult.Status.Should().Be(ResultStatus.Unauthorized);
         ordinaryResult.Errors!.OfType<ApiProblemDescriptor>().Single().Code.Should()
@@ -299,12 +308,12 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             CreateIdentityOptions(database.ConnectionString));
         (await verification.Users.CountAsync()).Should().Be(1);
         var binding = await verification.ExternalIdentityBindings.SingleAsync();
-        binding.UserId.Should().Be(bootstrapUserId);
-        binding.ExternalUserId.Should().Be("bootstrap-cloud-subject");
+        binding.UserId.Should().Be(canonicalUserId);
+        binding.ExternalUserId.Should().Be(NormalizeCloudSubject("canonical-cloud-subject"));
         var roleNames = await (
             from userRole in verification.UserRoles
             join role in verification.Roles on userRole.RoleId equals role.Id
-            where userRole.UserId == bootstrapUserId
+            where userRole.UserId == canonicalUserId
             select role.Name).ToArrayAsync();
         roleNames.Should().Equal(IdentityRoleNames.Admin);
     }
@@ -340,7 +349,8 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
 
         var loginTask = handler.Handle(
             new FinalizeCloudOidcLoginCommand(
-                CreateProfile(userName, externalUserId)),
+                CreateProfile(userName, externalUserId),
+                CreateDelegationToken(externalUserId)),
             CancellationToken.None);
         await lockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -389,7 +399,8 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
 
         var result = await handler.Handle(
             new FinalizeCloudOidcLoginCommand(
-                CreateProfile(userName, externalUserId)),
+                CreateProfile(userName, externalUserId),
+                CreateDelegationToken(externalUserId)),
             CancellationToken.None);
 
         result.Status.Should().Be(ResultStatus.Ok);
@@ -432,6 +443,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         var result = await handler.Handle(
             new ConfirmExistingCloudOidcAccountCommand(
                 CreateProfile(userName, "blank-stamp-subject"),
+                CreateDelegationToken("blank-stamp-subject"),
                 "ValidPassword123!"),
             CancellationToken.None);
 
@@ -444,7 +456,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         tokenGenerator.User!.SecurityStamp.Should().Be(persistedUser.SecurityStamp);
         (await verification.ExternalIdentityBindings.CountAsync(binding =>
             binding.UserId == userId &&
-            binding.ExternalUserId == "blank-stamp-subject")).Should().Be(1);
+            binding.ExternalUserId == NormalizeCloudSubject("blank-stamp-subject"))).Should().Be(1);
         var roleNames = await (
             from userRole in verification.UserRoles
             join role in verification.Roles on userRole.RoleId equals role.Id
@@ -454,14 +466,14 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
     }
 
     [Fact]
-    public async Task BootstrapAdoption_ShouldRejectUserDisabledWhileWaitingForBindingLock()
+    public async Task CanonicalAdminCollection_ShouldRejectUserDisabledWhileWaitingForBindingLock()
     {
         await using var database = await CreateMigratedDatabaseAsync(fixture);
-        const string bootstrapUserName = "BOOTSTRAP-FRESH-DISABLED";
-        var bootstrapUserId = await SeedBootstrapAdminAsync(
+        const string canonicalUserName = CloudOidcCanonicalAdminOptions.RequiredEmployeeNo;
+        var canonicalUserId = await SeedAdminAsync(
             database.ConnectionString,
-            bootstrapUserName);
-        _ = await SeedBootstrapAdminAsync(
+            canonicalUserName);
+        _ = await SeedAdminAsync(
             database.ConnectionString,
             "BOOTSTRAP-SAFETY-ADMIN");
 
@@ -477,16 +489,12 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             new HoldingInvariantGuard(
                 new PostgresExternalIdentityBindingInvariantGuard(handlerContext),
                 lockAcquired,
-                releaseLock),
-            new CloudOidcBootstrapAdminBindingOptions
-            {
-                BootstrapAdminAutoBindEnabled = true,
-                BootstrapAdminUserName = bootstrapUserName
-            });
+                releaseLock));
 
         var loginTask = handler.Handle(
             new FinalizeCloudOidcLoginCommand(
-                CreateProfile(bootstrapUserName, "disabled-bootstrap-subject")),
+                CreateProfile(canonicalUserName, "disabled-canonical-subject"),
+                CreateDelegationToken("disabled-canonical-subject")),
             CancellationToken.None);
         await lockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -494,7 +502,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         {
             await using var mutationContext = new IdentityStoreDbContext(
                 CreateIdentityOptions(database.ConnectionString));
-            var user = await mutationContext.Users.SingleAsync(item => item.Id == bootstrapUserId);
+            var user = await mutationContext.Users.SingleAsync(item => item.Id == canonicalUserId);
             IdentityGovernanceHelper.MarkUserDisabled(user);
             IdentityGovernanceHelper.RefreshSecurityStamp(user);
             await mutationContext.SaveChangesAsync();
@@ -544,6 +552,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         var confirmTask = handler.Handle(
             new ConfirmExistingCloudOidcAccountCommand(
                 CreateProfile(userName, "disabled-confirm-subject"),
+                CreateDelegationToken("disabled-confirm-subject"),
                 "ValidPassword123!"),
             CancellationToken.None);
         await lockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -715,6 +724,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         var firstTask = firstHandler.Handle(
             new ConfirmExistingCloudOidcAccountCommand(
                 CreateProfile(firstUserName),
+                CreateDelegationToken(),
                 password),
             CancellationToken.None);
         await firstLockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -722,6 +732,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         var secondTask = secondHandler.Handle(
             new ConfirmExistingCloudOidcAccountCommand(
                 CreateProfile(secondUserName),
+                CreateDelegationToken(),
                 password),
             CancellationToken.None);
 
@@ -748,7 +759,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             CreateIdentityOptions(database.ConnectionString));
         var binding = await verification.ExternalIdentityBindings.SingleAsync();
         binding.UserId.Should().Be(firstUserId);
-        binding.ExternalUserId.Should().Be("shared-cloud-subject");
+        binding.ExternalUserId.Should().Be(NormalizeCloudSubject("shared-cloud-subject"));
         (await verification.AuditLogs.CountAsync(entry =>
             entry.ActionCode == "Identity.CloudOidcExistingAccountConfirmed" &&
             entry.Result == AuditResults.Succeeded)).Should().Be(1);
@@ -805,6 +816,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         var firstTask = firstHandler.Handle(
             new ConfirmExistingCloudOidcAccountCommand(
                 CreateProfile(userName, firstExternalUserId),
+                CreateDelegationToken(firstExternalUserId),
                 password),
             CancellationToken.None);
         await firstLockAcquired.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -812,6 +824,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         var secondTask = secondHandler.Handle(
             new ConfirmExistingCloudOidcAccountCommand(
                 CreateProfile(userName, secondExternalUserId),
+                CreateDelegationToken(secondExternalUserId),
                 password),
             CancellationToken.None);
 
@@ -838,7 +851,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             CreateIdentityOptions(database.ConnectionString));
         var binding = await verification.ExternalIdentityBindings.SingleAsync();
         binding.UserId.Should().Be(userId);
-        binding.ExternalUserId.Should().Be(firstExternalUserId);
+        binding.ExternalUserId.Should().Be(NormalizeCloudSubject(firstExternalUserId));
         (await verification.AuditLogs.CountAsync(entry =>
             entry.ActionCode == "Identity.CloudOidcExistingAccountConfirmed" &&
             entry.Result == AuditResults.Succeeded)).Should().Be(1);
@@ -861,6 +874,9 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             invariantGuard,
             new IdentityAuditLogWriter(dbContext),
             tokenGenerator ?? new StubJwtTokenGenerator(),
+            new CloudDelegationGrantStore(
+                dbContext,
+                DelegationDataProtectionProvider),
             CreateService(connectionString, dbContext));
     }
 
@@ -869,7 +885,6 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         IdentityStoreDbContext dbContext,
         IdentityManagerTestScope managers,
         IExternalIdentityBindingInvariantGuard invariantGuard,
-        CloudOidcBootstrapAdminBindingOptions? bootstrapOptions = null,
         IJwtTokenGenerator? tokenGenerator = null)
     {
         return new FinalizeCloudOidcLoginCommandHandler(
@@ -880,7 +895,10 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             invariantGuard,
             new IdentityAuditLogWriter(dbContext),
             tokenGenerator ?? new StubJwtTokenGenerator(),
-            Options.Create(bootstrapOptions ?? new CloudOidcBootstrapAdminBindingOptions()),
+            new CloudDelegationGrantStore(
+                dbContext,
+                DelegationDataProtectionProvider),
+            Options.Create(new CloudOidcCanonicalAdminOptions()),
             CreateService(connectionString, dbContext));
     }
 
@@ -901,21 +919,24 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
         }
     }
 
-    private static async Task<Guid> SeedBootstrapAdminAsync(
+    private static async Task<Guid> SeedAdminAsync(
         string connectionString,
-        string userName)
+        string userName,
+        bool hasPassword = true)
     {
         return await SeedIdentityUserAsync(
             connectionString,
             userName,
-            IdentityRoleNames.Admin);
+            IdentityRoleNames.Admin,
+            hasPassword: hasPassword);
     }
 
     private static async Task<Guid> SeedIdentityUserAsync(
         string connectionString,
         string userName,
         string roleName,
-        string? externalUserId = null)
+        string? externalUserId = null,
+        bool hasPassword = true)
     {
         await SeedRolesAsync(
             connectionString,
@@ -930,8 +951,10 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             UserName = userName,
             SecurityStamp = Guid.NewGuid().ToString("N")
         };
-        (await managers.UserManager.CreateAsync(user, "ValidPassword123!"))
-            .Succeeded.Should().BeTrue();
+        var createResult = hasPassword
+            ? await managers.UserManager.CreateAsync(user, "ValidPassword123!")
+            : await managers.UserManager.CreateAsync(user);
+        createResult.Succeeded.Should().BeTrue();
         (await managers.UserManager.AddToRoleAsync(user, roleName))
             .Succeeded.Should().BeTrue();
 
@@ -944,7 +967,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
                 UserId = user.Id,
                 Provider = ExternalIdentityProviders.Cloud,
                 TenantId = CloudOidcIdentityProfile.DefaultTenantId,
-                ExternalUserId = externalUserId,
+                ExternalUserId = NormalizeCloudSubject(externalUserId),
                 AccountEnabledSnapshot = true,
                 EmployeeActiveSnapshot = true,
                 LastLoginAtUtc = now,
@@ -976,7 +999,7 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
     {
         return new CloudOidcIdentityProfile(
             "https://cloud.example.com",
-            externalUserId,
+            NormalizeCloudSubject(externalUserId),
             CloudOidcIdentityProfile.DefaultTenantId,
             employeeNo,
             employeeNo,
@@ -987,6 +1010,34 @@ public sealed class CloudOidcBindingConcurrencyTests(PostgresPersistenceFixture 
             "v1",
             AccountEnabled: true,
             EmployeeActive: true);
+    }
+
+    private static CloudDelegationTokenInput CreateDelegationToken(
+        string externalUserId = "shared-cloud-subject")
+    {
+        var subject = NormalizeCloudSubject(externalUserId);
+        return new CloudDelegationTokenInput(
+            "persistence-test-delegated-token",
+            DateTime.UtcNow.AddMinutes(CloudDelegationDefaults.LifetimeMinutes),
+            new CloudDelegationTokenEvidence(
+                "https://cloud.example.com",
+                subject,
+                subject,
+                CloudOidcIdentityProfile.DefaultTenantId,
+                CloudDelegationDefaults.Audience,
+                CloudDelegationDefaults.Actor,
+                [CloudDelegationDefaults.Scope]));
+    }
+
+    private static string NormalizeCloudSubject(string value)
+    {
+        if (Guid.TryParse(value, out var parsed) && parsed != Guid.Empty)
+        {
+            return parsed.ToString("D");
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return new Guid(hash.AsSpan(0, 16)).ToString("D");
     }
 
     private static TaskCompletionSource<bool> NewSignal()

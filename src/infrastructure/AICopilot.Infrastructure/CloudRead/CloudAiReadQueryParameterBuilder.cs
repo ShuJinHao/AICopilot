@@ -166,17 +166,9 @@ internal static class CloudAiReadQueryParameterBuilder
             query,
             "请补充生产数据查询的开始时间和结束时间，或使用 preset。",
             TimePresetValues);
-        var typeKey = GetFilterValue(query, "typeKey");
-        var processId = GetOptionalGuidFilterValue(query, "processId");
-        var deviceId = GetOptionalGuidFilterValue(query, "deviceId");
-        if (string.IsNullOrWhiteSpace(typeKey) &&
-            string.IsNullOrWhiteSpace(processId) &&
-            string.IsNullOrWhiteSpace(deviceId))
-        {
-            throw new CloudAiReadException(
-                CloudAiReadProblemCodes.MissingRequiredParameter,
-                "Cloud AiRead 查询缺少必需参数 typeKey、processId 或 deviceId，请补充生产数据查询范围。");
-        }
+        var typeKey = RequireFilterValue(query, "typeKey", "请先通过 Cloud 动态元数据封印业务记录类别。", "typeKey");
+        var deviceId = RequireGuidFilterValue(query, "deviceId", "请先通过 Cloud 动态元数据封印设备。", "deviceId");
+        var plcCode = RequireFilterValue(query, "plcCode", "请先通过 Cloud 动态元数据封印 PLC。", "plcCode");
 
         var fieldMode = (GetFilterValue(query, "fieldMode") ?? "list").Trim().ToLowerInvariant();
         if (fieldMode is not ("list" or "full"))
@@ -189,10 +181,8 @@ internal static class CloudAiReadQueryParameterBuilder
         var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["typeKey"] = typeKey,
-            ["processId"] = processId,
             ["deviceId"] = deviceId,
-            ["plcCode"] = GetFilterValue(query, "plcCode"),
-            ["plcName"] = GetFilterValue(query, "plcName"),
+            ["plcCode"] = plcCode,
             ["startTime"] = start.HasValue ? FormatCloudTime(start.Value) : null,
             ["endTime"] = end.HasValue ? FormatCloudTime(end.Value) : null,
             ["preset"] = preset,
@@ -203,6 +193,35 @@ internal static class CloudAiReadQueryParameterBuilder
         };
 
         return parameters;
+    }
+
+    public static Dictionary<string, string?> BuildDevicePlcQueryParameters(CloudAiReadQuery query)
+    {
+        query = CloudAiReadSemanticSchemaRegistry.NormalizeQuery(CloudAiReadOperation.DevicePlc, query);
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["deviceId"] = RequireGuidFilterValue(
+                query,
+                "deviceId",
+                "请补充 Cloud 正式设备 ID。",
+                "deviceId"),
+            ["maxRows"] = FormatMaxRows(query.Limit)
+        };
+    }
+
+    public static Dictionary<string, string?> BuildDataSchemaQueryParameters(CloudAiReadQuery query)
+    {
+        query = CloudAiReadSemanticSchemaRegistry.NormalizeQuery(CloudAiReadOperation.DataSchema, query);
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["deviceId"] = RequireGuidFilterValue(
+                query,
+                "deviceId",
+                "请补充 Cloud 正式设备 ID。",
+                "deviceId"),
+            ["plcCode"] = GetFilterValue(query, "plcCode"),
+            ["maxRows"] = FormatMaxRows(query.Limit)
+        };
     }
 
     private static string FormatMaxRows(int limit)

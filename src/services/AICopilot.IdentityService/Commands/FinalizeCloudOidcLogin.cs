@@ -8,7 +8,9 @@ using Microsoft.Extensions.Options;
 
 namespace AICopilot.IdentityService.Commands;
 
-public record FinalizeCloudOidcLoginCommand(CloudOidcIdentityProfile Profile)
+public record FinalizeCloudOidcLoginCommand(
+    CloudOidcIdentityProfile Profile,
+    CloudDelegationTokenInput DelegationToken)
     : ICommand<Result<LoginUserDto>>;
 
 public sealed class FinalizeCloudOidcLoginCommandHandler(
@@ -19,7 +21,8 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     IExternalIdentityBindingInvariantGuard bindingInvariantGuard,
     IIdentityAuditLogWriter auditLogWriter,
     IJwtTokenGenerator jwtTokenGenerator,
-    IOptions<CloudOidcBootstrapAdminBindingOptions> bootstrapAdminBindingOptions,
+    ICloudDelegationGrantStore delegationGrantStore,
+    IOptions<CloudOidcCanonicalAdminOptions> canonicalAdminOptions,
     ITransactionalExecutionService transactionalExecutionService)
     : ICommandHandler<FinalizeCloudOidcLoginCommand, Result<LoginUserDto>>
 {
@@ -28,6 +31,11 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         CancellationToken cancellationToken)
     {
         var profile = NormalizeProfile(command.Profile);
+        var now = DateTime.UtcNow;
+        var validatedDelegation = CloudDelegationTokenGuard.Validate(
+            profile,
+            command.DelegationToken,
+            now);
         var rejectionAudit = new RejectionAuditBuffer();
         Result<LoginUserDto> result;
         try
@@ -60,7 +68,12 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                             "Cloud 员工状态无效，无法登录 AICopilot。"));
                     }
 
-                    return await FinalizeLoginAsync(profile, rejectionAudit, ct);
+                    return await FinalizeLoginAsync(
+                        profile,
+                        validatedDelegation,
+                        now,
+                        rejectionAudit,
+                        ct);
                 },
                 cancellationToken);
         }
@@ -88,10 +101,11 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
 
     private async Task<Result<LoginUserDto>> FinalizeLoginAsync(
         CloudOidcIdentityProfile profile,
+        ValidatedCloudDelegationToken delegationToken,
+        DateTime now,
         RejectionAuditBuffer rejectionAudit,
         CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
         var localUserName = ResolveLocalUserName(profile);
         var normalizedUserName = userManager.NormalizeName(localUserName);
         if (string.IsNullOrWhiteSpace(normalizedUserName))
@@ -164,7 +178,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             : new CloudOidcLoginResolution(
                 await LoadBoundUserAsync(profile, binding, now, cancellationToken),
                 IsFirstBinding: false,
-                IsBootstrapAdminAdoption: false,
+                IsCanonicalAdminCollection: false,
                 RejectionProblem: null);
         var user = resolution.User;
 
@@ -190,9 +204,42 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 "AICopilot 本地账号已禁用，请联系 AI 管理员恢复启用。"));
         }
 
+        if (IsCanonicalAdmin(profile))
+        {
+            if (!string.Equals(
+                    user.UserName,
+                    canonicalAdminOptions.Value.CanonicalAdminEmployeeNo,
+                    StringComparison.Ordinal))
+            {
+                const string detail =
+                    "Cloud 规范管理员绑定指向了不同的 AI 本地用户名，拒绝覆盖。";
+                rejectionAudit.Set(CreateRejectedAudit(
+                    "Identity.CloudOidcCanonicalAdminUserNameConflict",
+                    profile,
+                    detail,
+                    user.Id.ToString(),
+                    user.UserName));
+                return Result.Unauthorized(new ApiProblemDescriptor(
+                    AuthProblemCodes.ExternalIdentityConflict,
+                    detail));
+            }
+
+            await EnsureCanonicalAdminRoleAsync(user);
+        }
+
         user = await EnsureSecurityStampAsync(user, cancellationToken);
 
-        var token = await GenerateAiTokenAsync(user, profile, cancellationToken);
+        var grant = await CreateDelegationGrantAsync(
+            user,
+            profile,
+            delegationToken,
+            now,
+            cancellationToken);
+        var token = await GenerateAiTokenAsync(
+            user,
+            profile,
+            grant,
+            cancellationToken);
 
         await auditLogWriter.WriteAsync(
             new AuditLogWriteRequest(
@@ -283,7 +330,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                     return new CloudOidcLoginResolution(
                         existingUser,
                         IsFirstBinding: false,
-                        IsBootstrapAdminAdoption: false,
+                        IsCanonicalAdminCollection: false,
                         RejectionProblem: null);
                 }
 
@@ -299,17 +346,36 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                         "该 AICopilot 本地账号已绑定到另一个 Cloud 身份，拒绝覆盖。"));
             }
 
-            var adoptedUser = await TryAdoptBootstrapAdminAsync(
-                existingUser,
-                profile,
-                now,
-                cancellationToken);
-            if (adoptedUser is not null)
+            if (IsCanonicalAdmin(profile))
             {
+                if (await userManager.HasPasswordAsync(existingUser))
+                {
+                    var detail =
+                        $"{CloudOidcCanonicalAdminOptions.EmergencyAdminConflictReasonCode}: " +
+                        "未绑定的规范 Cloud 管理员工号对应一个带本地密码的 AI 账号，" +
+                        "该账号可能属于遗留 emergency admin 恢复链，拒绝自动提升或绑定。";
+                    rejectionAudit.Set(CreateRejectedAudit(
+                        "Identity.CloudOidcCanonicalAdminEmergencyCollision",
+                        profile,
+                        detail,
+                        existingUser.Id.ToString(),
+                        existingUser.UserName));
+                    return CloudOidcLoginResolution.Rejected(
+                        new ApiProblemDescriptor(
+                            AuthProblemCodes.EmergencyAdminCanonicalCloudAdminConflict,
+                            detail));
+                }
+
+                await EnsureCanonicalAdminRoleAsync(existingUser);
+                await CreateBindingAsync(
+                    existingUser.Id,
+                    profile,
+                    now,
+                    cancellationToken);
                 return new CloudOidcLoginResolution(
-                    adoptedUser,
+                    existingUser,
                     IsFirstBinding: true,
-                    IsBootstrapAdminAdoption: true,
+                    IsCanonicalAdminCollection: true,
                     RejectionProblem: null);
             }
 
@@ -339,10 +405,13 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                     "检测到同名的 AICopilot 本地账号，请输入该账号的本地密码完成绑定。"));
         }
 
-        if (!await roleManager.RoleExistsAsync(IdentityRoleNames.User))
+        var initialRole = IsCanonicalAdmin(profile)
+            ? IdentityRoleNames.Admin
+            : IdentityRoleNames.User;
+        if (!await roleManager.RoleExistsAsync(initialRole))
         {
             throw new InvalidOperationException(
-                "AICopilot JIT login cannot create a user because the local User role is missing.");
+                $"AICopilot JIT login cannot create a user because the local {initialRole} role is missing.");
         }
 
         var user = new ApplicationUser
@@ -377,11 +446,11 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 $"Cloud OIDC JIT user creation failed: {string.Join(',', createResult.Errors.Select(error => error.Code))}");
         }
 
-        var roleResult = await userManager.AddToRoleAsync(user, IdentityRoleNames.User);
+        var roleResult = await userManager.AddToRoleAsync(user, initialRole);
         if (!roleResult.Succeeded)
         {
             throw new InvalidOperationException(
-                $"Cloud OIDC JIT default-role assignment failed: {string.Join(',', roleResult.Errors.Select(error => error.Code))}");
+                $"Cloud OIDC JIT {initialRole}-role assignment failed: {string.Join(',', roleResult.Errors.Select(error => error.Code))}");
         }
 
         await CreateBindingAsync(user.Id, profile, now, cancellationToken);
@@ -389,49 +458,38 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         return new CloudOidcLoginResolution(
             user,
             IsFirstBinding: true,
-            IsBootstrapAdminAdoption: false,
+            IsCanonicalAdminCollection: IsCanonicalAdmin(profile),
             RejectionProblem: null);
     }
 
-    private async Task<ApplicationUser?> TryAdoptBootstrapAdminAsync(
-        ApplicationUser existingUser,
-        CloudOidcIdentityProfile profile,
-        DateTime now,
-        CancellationToken cancellationToken)
+    private async Task EnsureCanonicalAdminRoleAsync(ApplicationUser user)
     {
-        var options = bootstrapAdminBindingOptions.Value;
-        if (!options.BootstrapAdminAutoBindEnabled ||
-            string.IsNullOrWhiteSpace(options.BootstrapAdminUserName) ||
-            string.IsNullOrWhiteSpace(profile.EmployeeNo) ||
-            string.IsNullOrWhiteSpace(existingUser.UserName))
+        var roles = await userManager.GetRolesAsync(user);
+        if (roles.Contains(IdentityRoleNames.Admin, StringComparer.Ordinal))
         {
-            return null;
+            return;
         }
 
-        var bootstrapAdminUserName = options.BootstrapAdminUserName.Trim();
-        if (!string.Equals(profile.EmployeeNo, bootstrapAdminUserName, StringComparison.Ordinal) ||
-            !string.Equals(existingUser.UserName, bootstrapAdminUserName, StringComparison.Ordinal))
+        if (!await roleManager.RoleExistsAsync(IdentityRoleNames.Admin))
         {
-            return null;
+            throw new InvalidOperationException(
+                "AICopilot canonical Cloud admin cannot be collected because the local Admin role is missing.");
         }
 
-        var roles = await userManager.GetRolesAsync(existingUser);
-        if (!roles.Contains(IdentityRoleNames.Admin, StringComparer.Ordinal))
+        var result = await userManager.AddToRoleAsync(user, IdentityRoleNames.Admin);
+        if (!result.Succeeded)
         {
-            return null;
+            throw new InvalidOperationException(
+                $"Cloud OIDC canonical Admin role assignment failed: {string.Join(',', result.Errors.Select(error => error.Code))}");
         }
+    }
 
-        var existingUserBinding = await bindingStore.FindByUserProviderAsync(
-            existingUser.Id,
-            ExternalIdentityProviders.Cloud,
-            cancellationToken);
-        if (existingUserBinding is not null)
-        {
-            return null;
-        }
-
-        await CreateBindingAsync(existingUser.Id, profile, now, cancellationToken);
-        return existingUser;
+    private bool IsCanonicalAdmin(CloudOidcIdentityProfile profile)
+    {
+        return string.Equals(
+            profile.EmployeeNo,
+            canonicalAdminOptions.Value.CanonicalAdminEmployeeNo,
+            StringComparison.Ordinal);
     }
 
     private Task CreateBindingAsync(
@@ -451,7 +509,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 profile.DisplayName,
                 profile.DepartmentId,
                 profile.DepartmentName,
-                profile.StatusVersion,
+                profile.StatusVersion!,
                 profile.AccountEnabled,
                 profile.EmployeeActive,
                 now),
@@ -492,11 +550,16 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     private async Task<string> GenerateAiTokenAsync(
         ApplicationUser user,
         CloudOidcIdentityProfile profile,
+        CloudDelegationGrantSnapshot grant,
         CancellationToken cancellationToken)
     {
         var userClaims = await userManager.GetClaimsAsync(user);
         var userRoles = await userManager.GetRolesAsync(user);
-        var cloudClaims = BuildCloudJwtClaims(profile);
+        var cloudClaims = BuildCloudJwtClaims(profile)
+            .Append(new Claim(
+                ExternalIdentityJwtClaimTypes.CloudDelegationId,
+                grant.GrantId.ToString("D")))
+            .ToArray();
 
         return await jwtTokenGenerator.GenerateTokenAsync(
             new JwtTokenUser(
@@ -504,15 +567,37 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
                 user.UserName!,
                 user.SecurityStamp ?? string.Empty,
                 userRoles.ToArray(),
-                userClaims.Concat(cloudClaims).ToArray()),
+                userClaims.Concat(cloudClaims).ToArray(),
+                grant.ExpiresAtUtc),
+            cancellationToken);
+    }
+
+    private async Task<CloudDelegationGrantSnapshot> CreateDelegationGrantAsync(
+        ApplicationUser user,
+        CloudOidcIdentityProfile profile,
+        ValidatedCloudDelegationToken delegationToken,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        return await delegationGrantStore.CreateAsync(
+            new CreateCloudDelegationGrantRequest(
+                Guid.NewGuid(),
+                user.Id,
+                delegationToken.CloudUserId,
+                profile.Issuer,
+                profile.TenantId,
+                delegationToken.AccessToken,
+                delegationToken.ExpiresAtUtc,
+                profile.StatusVersion!,
+                now),
             cancellationToken);
     }
 
     private static string ResolveLoginAuditActionCode(CloudOidcLoginResolution resolution)
     {
-        if (resolution.IsBootstrapAdminAdoption)
+        if (resolution.IsCanonicalAdminCollection)
         {
-            return "Identity.CloudOidcBootstrapAdminAdopted";
+            return "Identity.CloudOidcCanonicalAdminCollected";
         }
 
         return resolution.IsFirstBinding ? "Identity.CloudOidcFirstBind" : "Identity.CloudOidcLogin";
@@ -523,9 +608,9 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
         ApplicationUser user,
         CloudOidcLoginResolution resolution)
     {
-        if (resolution.IsBootstrapAdminAdoption)
+        if (resolution.IsCanonicalAdminCollection)
         {
-            return $"Cloud 身份收编首部署 AI 管理员：{profile.Subject} -> {user.UserName}";
+            return $"Cloud 规范管理员已创建、提升或幂等绑定：{profile.Subject} -> {user.UserName}";
         }
 
         return resolution.IsFirstBinding
@@ -722,7 +807,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
     private sealed record CloudOidcLoginResolution(
         ApplicationUser? User,
         bool IsFirstBinding,
-        bool IsBootstrapAdminAdoption,
+        bool IsCanonicalAdminCollection,
         ApiProblemDescriptor? RejectionProblem)
     {
         public static CloudOidcLoginResolution Rejected(ApiProblemDescriptor problem)
@@ -730,7 +815,7 @@ public sealed class FinalizeCloudOidcLoginCommandHandler(
             return new CloudOidcLoginResolution(
                 User: null,
                 IsFirstBinding: true,
-                IsBootstrapAdminAdoption: false,
+                IsCanonicalAdminCollection: false,
                 RejectionProblem: problem);
         }
     }

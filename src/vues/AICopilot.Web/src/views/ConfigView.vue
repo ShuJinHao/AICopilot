@@ -275,7 +275,8 @@ onMounted(refresh)
         <div class="cloud-facts">
           <span>模式 <strong>{{ cloudReadonlyStatus?.mode || '-' }}</strong></span>
           <span>BaseUrl <strong>{{ yesNo(cloudReadonlyStatus?.baseUrlConfigured) }}</strong></span>
-          <span>凭据 <strong>{{ yesNo(cloudReadonlyStatus?.tokenConfigured) }}</strong></span>
+          <span>传输配置 <strong>{{ yesNo(cloudReadonlyStatus?.transportConfigured) }}</strong></span>
+          <span>当前委托 <strong>{{ yesNo(cloudReadonlyStatus?.delegationAvailable) }}</strong></span>
           <span>正式只读 <strong>{{ yesNo(cloudReadonlyStatus?.productionReadAllowed) }}</strong></span>
         </div>
       </AiCard>

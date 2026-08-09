@@ -22,7 +22,7 @@ public sealed class MigrationWorkerCloudReadOnlySeederTests
     }
 
     [Fact]
-    public void ValidateOptions_ShouldRequireConnectionString_WhenEnabled()
+    public void ValidateOptions_ShouldRejectEnabledModeBeforeConnectionValidation()
     {
         var configuration = CreateConfiguration(new Dictionary<string, string?>
         {
@@ -34,11 +34,11 @@ public sealed class MigrationWorkerCloudReadOnlySeederTests
         var act = () => MigrationWorkerCloudReadOnlySeeder.ValidateOptions(configuration, options);
 
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*ConnectionString is required*");
+            .WithMessage("*temporarily closed*");
     }
 
     [Fact]
-    public void ValidateOptions_ShouldRequireVerifiedReadOnlyCredential_WhenEnabled()
+    public void ValidateOptions_ShouldRejectEnabledModeBeforeCredentialValidation()
     {
         var configuration = CreateConfiguration(new Dictionary<string, string?>
         {
@@ -50,11 +50,11 @@ public sealed class MigrationWorkerCloudReadOnlySeederTests
         var act = () => MigrationWorkerCloudReadOnlySeeder.ValidateOptions(configuration, options);
 
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*ReadOnlyCredentialVerified must be true*");
+            .WithMessage("*temporarily closed*");
     }
 
     [Fact]
-    public void ValidateOptions_ShouldRejectSimulationSeedConflict()
+    public void ValidateOptions_ShouldRejectEnabledModeEvenWhenSimulationIsConfigured()
     {
         var configuration = CreateConfiguration(new Dictionary<string, string?>
         {
@@ -69,11 +69,11 @@ public sealed class MigrationWorkerCloudReadOnlySeederTests
         var act = () => MigrationWorkerCloudReadOnlySeeder.ValidateOptions(configuration, options);
 
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*cannot be enabled while CloudReadonly Simulation seeding is enabled*");
+            .WithMessage("*temporarily closed*");
     }
 
     [Fact]
-    public void CreateBusinessDatabase_ShouldCreateVerifiedCloudReadOnlySource()
+    public void FullyConfiguredRealCloudSource_ShouldStillFailBeforeRegistration()
     {
         var configuration = CreateConfiguration(new Dictionary<string, string?>
         {
@@ -85,18 +85,38 @@ public sealed class MigrationWorkerCloudReadOnlySeederTests
         });
         var options = MigrationWorkerCloudReadOnlySeeder.ResolveOptions(configuration);
 
-        MigrationWorkerCloudReadOnlySeeder.ValidateOptions(configuration, options);
-        var database = MigrationWorkerCloudReadOnlySeeder.CreateBusinessDatabase(options);
+        var act = () => MigrationWorkerCloudReadOnlySeeder.ValidateOptions(
+            configuration,
+            options);
 
-        database.Name.Should().Be(MigrationWorkerCloudReadOnlySeeder.DefaultDatabaseName);
-        database.Provider.Should().Be(DbProviderType.PostgreSql);
-        database.IsEnabled.Should().BeTrue();
-        database.IsReadOnly.Should().BeTrue();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*temporarily closed*");
+    }
+
+    [Fact]
+    public void RetireCloudSource_ShouldClearConnectionAndEveryRuntimeSelectionFlag()
+    {
+        var database = new BusinessDatabase(
+            "legacy-cloud",
+            "legacy Cloud source",
+            TestReadOnlyConnectionString,
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            externalSystemType: BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: true,
+            isEnabled: true,
+            isSelectableInChat: true,
+            isSelectableInAgent: true);
+
+        database.RetireAndClearConnectionMaterial();
+
+        database.ConnectionString.Should().BeEmpty();
+        database.IsEnabled.Should().BeFalse();
+        database.ReadOnlyCredentialVerified.Should().BeFalse();
+        database.IsSelectableInChat.Should().BeFalse();
+        database.IsSelectableInAgent.Should().BeFalse();
         database.ExternalSystemType.Should().Be(BusinessDataExternalSystemType.CloudReadOnly);
-        database.ReadOnlyCredentialVerified.Should().BeTrue();
-        database.DefaultQueryLimit.Should().Be(100);
-        database.MaxQueryLimit.Should().Be(500);
-        database.Tags.Should().Contain("direct-db");
+        database.IsReadOnly.Should().BeTrue();
     }
 
     private static IConfiguration CreateConfiguration(Dictionary<string, string?> values)

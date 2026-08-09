@@ -49,13 +49,13 @@ public sealed class BusinessQueryPipelineTests
     }
 
     [Theory]
-    [InlineData(BusinessQueryOutcome.Unsupported, true)]
-    [InlineData(BusinessQueryOutcome.Unavailable, true)]
+    [InlineData(BusinessQueryOutcome.Unsupported, false)]
+    [InlineData(BusinessQueryOutcome.Unavailable, false)]
     [InlineData(BusinessQueryOutcome.Success, false)]
     [InlineData(BusinessQueryOutcome.Empty, false)]
     [InlineData(BusinessQueryOutcome.NeedClarification, false)]
     [InlineData(BusinessQueryOutcome.Unauthorized, false)]
-    public void FallbackPolicy_ShouldOnlyAllowEligibleSameSourceOutcomes(
+    public void FallbackPolicy_ShouldFailClosedForEveryRealCloudProviderOutcome(
         BusinessQueryOutcome outcome,
         bool expected)
     {
@@ -74,6 +74,7 @@ public sealed class BusinessQueryPipelineTests
             StandardBusinessDataSourceProfiles.CloudReadOnly);
 
         decision.IsEligible.Should().Be(expected);
+        decision.ReasonCode.Should().Be("real_cloud_text_to_sql_temporarily_closed");
     }
 
     [Fact]
@@ -95,7 +96,7 @@ public sealed class BusinessQueryPipelineTests
                 cloudContext,
                 crossSourceResult,
                 StandardBusinessDataSourceProfiles.CloudReadOnly)
-            .ReasonCode.Should().Be("cross_source_fallback_forbidden");
+            .ReasonCode.Should().Be("real_cloud_text_to_sql_temporarily_closed");
 
         var simulationContext = CreateContext(
             DataSourceExternalSystemType.SimulationBusiness,
@@ -114,6 +115,81 @@ public sealed class BusinessQueryPipelineTests
                 simulationResult,
                 simulationProfile)
             .ReasonCode.Should().Be("explicit_source_selection_required");
+    }
+
+    [Fact]
+    public void FallbackPolicy_ShouldCloseRealCloudBeforeProductionScopeEvaluation()
+    {
+        var unsealedPlan = new SemanticQueryPlan(
+            "Analysis.ProductionData.ByDevice",
+            SemanticQueryTarget.ProductionData,
+            SemanticQueryKind.ByDevice,
+            "query",
+            new SemanticProjection(["recordId"]),
+            [new SemanticFilter("deviceId", SemanticFilterOperator.Equal, Guid.NewGuid().ToString("D"))],
+            null,
+            null,
+            20);
+        var context = CreateContext(
+                DataSourceExternalSystemType.CloudReadOnly,
+                sourceExplicitlySelected: true) with
+            {
+                Capability = BusinessDataCapability.ProductionRecord,
+                SemanticPlan = unsealedPlan
+            };
+        var result = BusinessQueryProviderResult.FromOutcome(
+            context,
+            "cloud-plugin",
+            BusinessQueryOutcome.Unavailable,
+            "safe");
+
+        var decision = BusinessQueryFallbackPolicy.EvaluateSameSourceTextToSql(
+            context,
+            result,
+            StandardBusinessDataSourceProfiles.CloudReadOnly);
+
+        decision.IsEligible.Should().BeFalse();
+        decision.ReasonCode.Should().Be("real_cloud_text_to_sql_temporarily_closed");
+    }
+
+    [Fact]
+    public void FallbackPolicy_ShouldFailClosedForProductionEvenAfterExactScopeIsSealed()
+    {
+        var sealedPlan = new SemanticQueryPlan(
+            "Analysis.ProductionData.ByDevice",
+            SemanticQueryTarget.ProductionData,
+            SemanticQueryKind.ByDevice,
+            "query",
+            new SemanticProjection(["recordId"]),
+            [
+                new SemanticFilter("deviceId", SemanticFilterOperator.Equal, Guid.NewGuid().ToString("D")),
+                new SemanticFilter("plcCode", SemanticFilterOperator.Equal, "PLC-01"),
+                new SemanticFilter("typeKey", SemanticFilterOperator.Equal, "die-cutting-completion")
+            ],
+            null,
+            null,
+            20);
+        var context = CreateContext(
+                DataSourceExternalSystemType.CloudReadOnly,
+                sourceExplicitlySelected: true) with
+            {
+                Capability = BusinessDataCapability.ProductionRecord,
+                SemanticPlan = sealedPlan
+            };
+        var result = BusinessQueryProviderResult.FromOutcome(
+            context,
+            "cloud-plugin",
+            BusinessQueryOutcome.Unavailable,
+            "safe");
+
+        var decision = BusinessQueryFallbackPolicy.EvaluateSameSourceTextToSql(
+            context,
+            result,
+            StandardBusinessDataSourceProfiles.CloudReadOnly);
+
+        decision.IsEligible.Should().BeFalse();
+        decision.ReasonCode.Should().Be(
+            "real_cloud_text_to_sql_temporarily_closed");
     }
 
     [Fact]
@@ -476,7 +552,7 @@ public sealed class BusinessQueryPipelineTests
                 context,
                 pluginResult,
                 StandardBusinessDataSourceProfiles.CloudReadOnly)
-            .ReasonCode.Should().Be("capability_fallback_disabled");
+            .ReasonCode.Should().Be("real_cloud_text_to_sql_temporarily_closed");
     }
 
     [Fact]

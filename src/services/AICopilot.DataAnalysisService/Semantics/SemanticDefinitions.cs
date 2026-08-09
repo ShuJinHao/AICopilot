@@ -90,9 +90,9 @@ public sealed class ProductionDataSemanticDefinition : SemanticEntityDefinition
     public ProductionDataSemanticDefinition()
         : base(
             SemanticQueryTarget.ProductionData,
-            ["生产数据", "过站数据", "工序数据", "正极模切", "负极模切", "弹夹", "冲切", "production data", "station data"],
+            ["生产数据", "过站数据", "工序数据", "业务记录", "production data", "station data", "business record"],
             ["recordId", "typeKey", "typeName", "deviceId", "deviceName", "barcode", "result", "completedAt", "receivedAt", "fields", "fieldSchema"],
-            ["typeKey", "processId", "deviceId", "deviceCode", "plcCode", "plcName", "preset", "barcode", "result", "fieldMode"],
+            ["typeKey", "processId", "processCode", "processName", "deviceId", "deviceCode", "plcCode", "plcName", "preset", "barcode", "result", "fieldMode"],
             ["completedAt", "typeKey", "result"],
             new Dictionary<SemanticQueryKind, SemanticProjection>
             {

@@ -2826,6 +2826,7 @@ public sealed class AICopilotArchitectureAnalyzerTests
                 public sealed record ConfirmExistingCloudOidcAccountCommand : QueryOfString;
                 public sealed record FinalizeCloudOidcLoginCommand : QueryOfString;
                 public sealed record LoginUserCommand : QueryOfString;
+                public sealed record RevokeCurrentCloudDelegationCommand : QueryOfString;
             }
             """;
 

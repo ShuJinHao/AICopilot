@@ -1,3 +1,4 @@
+using AICopilot.Core.DataAnalysis.Aggregates.BusinessDatabase;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.Core.Rag.Ids;
@@ -5,6 +6,7 @@ using AICopilot.EntityFrameworkCore;
 using AICopilot.EntityFrameworkCore.Persistence;
 using AICopilot.MigrationWorkApp;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Npgsql;
 
 namespace AICopilot.PersistenceTests;
@@ -14,6 +16,78 @@ public sealed class MigrationSafetyTests(PostgresPersistenceFixture fixture)
 {
     private const string PreIdentityGuidMigration = "20260428150008_DetachAiGatewayFromAiCopilotDbContext";
     private const string PreDocumentSequenceCalibrationMigration = "20260519091000_AddKnowledgeGovernanceP0";
+
+    [Fact]
+    public async Task CloudReadonlySeeder_ShouldRetireEveryPersistedDirectCloudSourceIdempotently()
+    {
+        await using var database = await PostgresScratchDatabase.CreateAsync(
+            fixture.ConnectionString,
+            "aicopilot_cloud_retirement");
+        var options = new DbContextOptionsBuilder<DataAnalysisDbContext>()
+            .UseNpgsqlWithMigrationHistory(
+                database.ConnectionString,
+                MigrationHistoryTables.DataAnalysis)
+            .Options;
+        var legacyCloud = new BusinessDatabase(
+            "legacy-cloud-readonly",
+            "legacy direct Cloud source",
+            "Host=cloud.internal;Database=cloud;Username=reader;Password=fake-test-only",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            externalSystemType: BusinessDataExternalSystemType.CloudReadOnly,
+            readOnlyCredentialVerified: true,
+            isEnabled: true,
+            isSelectableInChat: true,
+            isSelectableInAgent: true);
+        var localSource = new BusinessDatabase(
+            "local-simulation-source",
+            "unrelated local source",
+            "Host=local.internal;Database=local;Username=reader;Password=fake-test-only",
+            DbProviderType.PostgreSql,
+            isReadOnly: true,
+            externalSystemType: BusinessDataExternalSystemType.NonCloud,
+            readOnlyCredentialVerified: true,
+            isEnabled: true,
+            isSelectableInChat: true,
+            isSelectableInAgent: true);
+
+        await using (var setup = new DataAnalysisDbContext(options))
+        {
+            await setup.Database.MigrateAsync();
+            setup.BusinessDatabases.AddRange(legacyCloud, localSource);
+            await setup.SaveChangesAsync();
+        }
+
+        var disabledConfiguration = new ConfigurationBuilder().Build();
+        await using (var migration = new DataAnalysisDbContext(options))
+        {
+            await MigrationWorkerCloudReadOnlySeeder.EnsureSourceAsync(
+                disabledConfiguration,
+                migration,
+                CancellationToken.None);
+            await MigrationWorkerCloudReadOnlySeeder.EnsureSourceAsync(
+                disabledConfiguration,
+                migration,
+                CancellationToken.None);
+        }
+
+        await using var verify = new DataAnalysisDbContext(options);
+        var retired = await verify.BusinessDatabases.SingleAsync(item =>
+            item.ExternalSystemType == BusinessDataExternalSystemType.CloudReadOnly);
+        retired.ConnectionString.Should().BeEmpty();
+        retired.IsEnabled.Should().BeFalse();
+        retired.ReadOnlyCredentialVerified.Should().BeFalse();
+        retired.IsSelectableInChat.Should().BeFalse();
+        retired.IsSelectableInAgent.Should().BeFalse();
+
+        var untouched = await verify.BusinessDatabases.SingleAsync(item =>
+            item.ExternalSystemType == BusinessDataExternalSystemType.NonCloud);
+        untouched.ConnectionString.Should().Be(
+            "Host=local.internal;Database=local;Username=reader;Password=fake-test-only");
+        untouched.IsEnabled.Should().BeTrue();
+        untouched.IsSelectableInChat.Should().BeTrue();
+        untouched.IsSelectableInAgent.Should().BeTrue();
+    }
 
     [Fact]
     public async Task McpInitialMigration_ShouldMoveLegacyPublicTable_AndPreserveRows()

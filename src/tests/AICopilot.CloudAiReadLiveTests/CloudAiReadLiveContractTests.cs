@@ -11,7 +11,7 @@ namespace AICopilot.CloudAiReadLiveTests;
 
 /// <summary>
 /// This project is intentionally separate from the normal backend test suite.
-/// It only accepts a real, non-production Cloud provider through environment variables;
+/// It only accepts a real, non-production Cloud provider and short-lived delegated-user tokens through environment variables;
 /// invoking it without the required environment fails instead of silently skipping.
 /// </summary>
 public sealed class CloudAiReadLiveContractTests
@@ -32,7 +32,7 @@ public sealed class CloudAiReadLiveContractTests
     {
         var environment = LiveEnvironment.ReadRequired();
         using var httpClient = new HttpClient();
-        var client = CreateClient(httpClient, environment.BaseUrl, environment.FullToken);
+        var client = CreateClient(httpClient, environment.BaseUrl, environment.FullDelegatedToken);
 
         var range = new CloudAiReadTimeRange("occurredAt", environment.StartTime, environment.EndTime);
         var futureRange = new CloudAiReadTimeRange(
@@ -95,7 +95,10 @@ public sealed class CloudAiReadLiveContractTests
 
         using (var stateOnlyHttpClient = new HttpClient())
         {
-            var stateOnlyClient = CreateClient(stateOnlyHttpClient, environment.BaseUrl, environment.StateOnlyToken);
+            var stateOnlyClient = CreateClient(
+                stateOnlyHttpClient,
+                environment.BaseUrl,
+                environment.StateOnlyDelegatedToken);
             var stateByCode = await stateOnlyClient.GetDeviceClientStatesAsync(Query(
                 [Filter("deviceCode", environment.DeviceCode)],
                 limit: 20));
@@ -104,7 +107,10 @@ public sealed class CloudAiReadLiveContractTests
 
         using (var forbiddenHttpClient = new HttpClient())
         {
-            var forbiddenClient = CreateClient(forbiddenHttpClient, environment.BaseUrl, environment.ForbiddenToken);
+            var forbiddenClient = CreateClient(
+                forbiddenHttpClient,
+                environment.BaseUrl,
+                environment.ForbiddenDelegatedToken);
             var forbidden = () => forbiddenClient.GetDevicesAsync(Query([]));
             var exception = await forbidden.Should().ThrowAsync<CloudAiReadException>();
             exception.Which.Code.Should().Be(CloudAiReadProblemCodes.Forbidden);
@@ -234,7 +240,9 @@ public sealed class CloudAiReadLiveContractTests
     private static async Task AssertStrictProviderShapesAsync(LiveEnvironment environment)
     {
         using var httpClient = new HttpClient { BaseAddress = new Uri(environment.BaseUrl) };
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", environment.FullToken);
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            environment.FullDelegatedToken);
         var start = Uri.EscapeDataString(environment.StartTime.ToString("O"));
         var end = Uri.EscapeDataString(environment.EndTime.ToString("O"));
 
@@ -293,7 +301,10 @@ public sealed class CloudAiReadLiveContractTests
             .Should().BeEquivalentTo(expectedItemProperties);
     }
 
-    private static CloudAiReadClient CreateClient(HttpClient httpClient, string baseUrl, string token)
+    private static CloudAiReadClient CreateClient(
+        HttpClient httpClient,
+        string baseUrl,
+        string delegatedToken)
     {
         return new CloudAiReadClient(
             httpClient,
@@ -301,9 +312,9 @@ public sealed class CloudAiReadLiveContractTests
             {
                 Enabled = true,
                 BaseUrl = baseUrl,
-                ServiceAccountToken = token,
                 TimeoutSeconds = 30
             }),
+            new FixedCloudDelegationAccessTokenProvider(delegatedToken),
             NullLogger<CloudAiReadClient>.Instance);
     }
 
@@ -349,9 +360,9 @@ public sealed class CloudAiReadLiveContractTests
 
     private sealed record LiveEnvironment(
         string BaseUrl,
-        string FullToken,
-        string StateOnlyToken,
-        string ForbiddenToken,
+        string FullDelegatedToken,
+        string StateOnlyDelegatedToken,
+        string ForbiddenDelegatedToken,
         string DeviceId,
         string MissingDeviceId,
         string StaleDeviceId,
@@ -369,9 +380,9 @@ public sealed class CloudAiReadLiveContractTests
         {
             return new LiveEnvironment(
                 Require("CLOUD_AI_READ_LIVE_BASE_URL"),
-                Require("CLOUD_AI_READ_LIVE_TOKEN"),
-                Require("CLOUD_AI_READ_LIVE_STATE_ONLY_TOKEN"),
-                Require("CLOUD_AI_READ_LIVE_FORBIDDEN_TOKEN"),
+                Require("CLOUD_AI_READ_LIVE_DELEGATED_TOKEN"),
+                Require("CLOUD_AI_READ_LIVE_STATE_ONLY_DELEGATED_TOKEN"),
+                Require("CLOUD_AI_READ_LIVE_FORBIDDEN_DELEGATED_TOKEN"),
                 RequireGuid("CLOUD_AI_READ_LIVE_DEVICE_ID"),
                 RequireGuid("CLOUD_AI_READ_LIVE_MISSING_DEVICE_ID"),
                 RequireGuid("CLOUD_AI_READ_LIVE_STALE_DEVICE_ID"),
@@ -429,6 +440,17 @@ public sealed class CloudAiReadLiveContractTests
             }
 
             return parsed;
+        }
+    }
+
+    private sealed class FixedCloudDelegationAccessTokenProvider(string delegatedToken)
+        : ICloudDelegationAccessTokenProvider
+    {
+        public Task<string> GetCurrentTokenAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(delegatedToken);
         }
     }
 }

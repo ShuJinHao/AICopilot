@@ -7,6 +7,7 @@ using AICopilot.Core.McpServer.Aggregates.McpServerInfo;
 using AICopilot.Core.Rag.Aggregates.EmbeddingModel;
 using AICopilot.Core.Rag.Aggregates.KnowledgeBase;
 using AICopilot.EntityFrameworkCore.AuditLogs;
+using AICopilot.EntityFrameworkCore.CloudDelegations;
 using AICopilot.EntityFrameworkCore.ExternalIdentities;
 using AICopilot.EntityFrameworkCore.Locking;
 using AICopilot.EntityFrameworkCore.Outbox;
@@ -84,6 +85,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         builder.Services.AddScoped<IIdentityAuditLogWriter, IdentityAuditLogWriter>();
         builder.Services.AddScoped<IExternalIdentityBindingStore, ExternalIdentityBindingStore>();
+        builder.Services.AddScoped<ICloudDelegationGrantStore, CloudDelegationGrantStore>();
         builder.Services.AddScoped<IIdentityUserFreshReadStore, IdentityUserFreshReadStore>();
         builder.Services.AddScoped<
             IExternalIdentityBindingInvariantGuard,

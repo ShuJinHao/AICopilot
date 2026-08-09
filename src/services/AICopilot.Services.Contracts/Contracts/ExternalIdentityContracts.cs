@@ -5,6 +5,14 @@ public static class ExternalIdentityProviders
     public const string Cloud = "Cloud";
 }
 
+public static class CloudDelegationDefaults
+{
+    public const string Scope = "iiot.ai.read";
+    public const string Audience = "iiot-cloud-ai-read";
+    public const string Actor = "ai-delegated-user";
+    public const int LifetimeMinutes = 30;
+}
+
 public static class ExternalIdentityJwtClaimTypes
 {
     public const string IdentityProvider = "identity_provider";
@@ -16,6 +24,7 @@ public static class ExternalIdentityJwtClaimTypes
     public const string CloudDepartmentId = "cloud_department_id";
     public const string CloudDepartmentName = "cloud_department_name";
     public const string CloudStatusVersion = "cloud_status_version";
+    public const string CloudDelegationId = "cloud_delegation_id";
 }
 
 public sealed record CloudOidcIdentityProfile(
@@ -35,22 +44,107 @@ public sealed record CloudOidcIdentityProfile(
     public const string DefaultTenantId = "default";
 }
 
-public sealed class CloudOidcBootstrapAdminBindingOptions
+public sealed class CloudOidcCanonicalAdminOptions
 {
     public const string SectionName = "CloudOidc";
+    public const string RequiredEmployeeNo = "101650";
+    public const string EmergencyAdminConflictReasonCode =
+        "EMERGENCY_ADMIN_CANONICAL_CLOUD_ADMIN_CONFLICT";
 
-    public bool BootstrapAdminAutoBindEnabled { get; init; }
-
-    public string BootstrapAdminUserName { get; init; } = string.Empty;
+    public string CanonicalAdminEmployeeNo { get; init; } = RequiredEmployeeNo;
 
     public void EnsureValid()
     {
-        if (BootstrapAdminAutoBindEnabled && string.IsNullOrWhiteSpace(BootstrapAdminUserName))
+        if (!string.Equals(
+                CanonicalAdminEmployeeNo?.Trim(),
+                RequiredEmployeeNo,
+                StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                "CloudOidc:BootstrapAdminUserName is required when CloudOidc:BootstrapAdminAutoBindEnabled is true.");
+                $"CloudOidc:CanonicalAdminEmployeeNo must be the fixed non-secret business value {RequiredEmployeeNo}.");
         }
     }
+}
+
+public sealed record CloudDelegationTokenEvidence(
+    string Issuer,
+    string Subject,
+    string DelegatedUserId,
+    string TenantId,
+    string Audience,
+    string Actor,
+    IReadOnlyList<string> Scopes);
+
+public sealed record CloudDelegationTokenInput(
+    string AccessToken,
+    DateTime ExpiresAtUtc,
+    CloudDelegationTokenEvidence Evidence);
+
+public sealed record CreateCloudDelegationGrantRequest(
+    Guid GrantId,
+    Guid AiUserId,
+    Guid CloudUserId,
+    string Issuer,
+    string TenantId,
+    string AccessToken,
+    DateTime ExpiresAtUtc,
+    string IssuedStatusVersion,
+    DateTime CreatedAtUtc);
+
+public sealed record CloudDelegationGrantSnapshot(
+    Guid GrantId,
+    Guid AiUserId,
+    Guid CloudUserId,
+    string Issuer,
+    string TenantId,
+    DateTime ExpiresAtUtc,
+    string IssuedStatusVersion,
+    DateTime? RevokedAtUtc,
+    DateTime CreatedAtUtc);
+
+public sealed record CloudDelegationAccessToken(
+    Guid GrantId,
+    Guid AiUserId,
+    Guid CloudUserId,
+    string AccessToken,
+    DateTime ExpiresAtUtc);
+
+public sealed record CloudDelegationRevocationResult(
+    bool Found,
+    bool AlreadyRevoked);
+
+public sealed record CloudDelegationPurgeResult(
+    bool LockAcquired,
+    int ClearedTokenCount,
+    int DeletedMetadataCount);
+
+public interface ICloudDelegationGrantStore
+{
+    Task<CloudDelegationGrantSnapshot> CreateAsync(
+        CreateCloudDelegationGrantRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<CloudDelegationAccessToken?> ResolveAsync(
+        Guid grantId,
+        Guid aiUserId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default);
+
+    Task<CloudDelegationRevocationResult> RevokeCurrentAsync(
+        Guid grantId,
+        Guid aiUserId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default);
+
+    Task<CloudDelegationPurgeResult> PurgeExpiredAsync(
+        DateTime utcNow,
+        int batchSize,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ICloudDelegationAccessTokenProvider
+{
+    Task<string> GetCurrentTokenAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed record ExternalIdentityBindingSnapshot(

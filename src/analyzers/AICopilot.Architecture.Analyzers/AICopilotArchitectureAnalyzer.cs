@@ -55,6 +55,7 @@ public sealed class AICopilotArchitectureAnalyzer : DiagnosticAnalyzer
             "AICopilot.IdentityService.Commands.ConfirmExistingCloudOidcAccountCommand",
             "AICopilot.IdentityService.Commands.FinalizeCloudOidcLoginCommand",
             "AICopilot.IdentityService.Commands.LoginUserCommand",
+            "AICopilot.IdentityService.Commands.RevokeCurrentCloudDelegationCommand",
             "AICopilot.IdentityService.Queries.GetCurrentUserProfileQuery",
             "AICopilot.IdentityService.Queries.GetInitializationStatusQuery");
 

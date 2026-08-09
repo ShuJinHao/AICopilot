@@ -12,6 +12,7 @@ internal sealed class CloudAiReadHttpTransport(HttpClient httpClient, ILogger lo
         string path,
         IReadOnlyDictionary<string, string?>? query,
         CloudAiReadOptions configuredOptions,
+        string delegatedAccessToken,
         CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -20,7 +21,7 @@ internal sealed class CloudAiReadHttpTransport(HttpClient httpClient, ILogger lo
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
             BuildUri(configuredOptions, path, query));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuredOptions.ServiceAccountToken);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", delegatedAccessToken);
 
         try
         {

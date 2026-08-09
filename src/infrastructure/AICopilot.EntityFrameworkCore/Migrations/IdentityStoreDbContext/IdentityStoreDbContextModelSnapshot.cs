@@ -17,7 +17,7 @@ namespace AICopilot.EntityFrameworkCore.Migrations.IdentityStoreDbContext
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.6")
+                .HasAnnotation("ProductVersion", "10.0.9")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -107,6 +107,58 @@ namespace AICopilot.EntityFrameworkCore.Migrations.IdentityStoreDbContext
                         {
                             t.ExcludeFromMigrations();
                         });
+                });
+
+            modelBuilder.Entity("AICopilot.EntityFrameworkCore.CloudDelegations.CloudDelegationGrant", b =>
+                {
+                    b.Property<Guid>("GrantId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AiUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CloudUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IssuedStatusVersion")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Issuer")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("ProtectedToken")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("GrantId");
+
+                    b.HasIndex("AiUserId", "ExpiresAtUtc");
+
+                    b.HasIndex("CloudUserId", "ExpiresAtUtc");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.HasIndex("RevokedAtUtc");
+
+                    b.ToTable("cloud_delegation_grants", "identity");
                 });
 
             modelBuilder.Entity("AICopilot.EntityFrameworkCore.ExternalIdentities.ExternalIdentityBinding", b =>
@@ -379,6 +431,17 @@ namespace AICopilot.EntityFrameworkCore.Migrations.IdentityStoreDbContext
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", "identity");
+                });
+
+            modelBuilder.Entity("AICopilot.EntityFrameworkCore.CloudDelegations.CloudDelegationGrant", b =>
+                {
+                    b.HasOne("AICopilot.Services.Contracts.ApplicationUser", "AiUser")
+                        .WithMany()
+                        .HasForeignKey("AiUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AiUser");
                 });
 
             modelBuilder.Entity("AICopilot.EntityFrameworkCore.ExternalIdentities.ExternalIdentityBinding", b =>

@@ -1,4 +1,5 @@
 using AICopilot.EntityFrameworkCore.AuditLogs;
+using AICopilot.EntityFrameworkCore.CloudDelegations;
 using AICopilot.EntityFrameworkCore.Configuration.Audit;
 using AICopilot.EntityFrameworkCore.Configuration.Identity;
 using AICopilot.EntityFrameworkCore.ExternalIdentities;
@@ -18,6 +19,8 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
     public DbSet<AuditLogEntry> AuditLogs => Set<AuditLogEntry>();
 
     public DbSet<ExternalIdentityBinding> ExternalIdentityBindings => Set<ExternalIdentityBinding>();
+
+    public DbSet<CloudDelegationGrant> CloudDelegationGrants => Set<CloudDelegationGrant>();
 
     internal bool HasPersistedChangesInCurrentAttempt => persistedRowsInCurrentAttempt > 0;
 
@@ -60,6 +63,7 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
         base.OnModelCreating(builder);
         ConfigureIdentitySchema(builder);
         builder.ApplyConfiguration(new ExternalIdentityBindingConfiguration());
+        builder.ApplyConfiguration(new CloudDelegationGrantConfiguration());
         builder.ApplyConfiguration(new AuditLogEntryConfiguration());
         builder.Entity<AuditLogEntry>()
             .ToTable("audit_logs", table => table.ExcludeFromMigrations());
