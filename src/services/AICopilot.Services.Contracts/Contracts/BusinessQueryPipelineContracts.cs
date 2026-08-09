@@ -384,6 +384,16 @@ public sealed record BusinessQueryContext(
 
     public bool HasSameFilters(BusinessQueryContext requested)
     {
+        if (SemanticPlan?.Target == SemanticQueryTarget.ProductionData ||
+            requested.SemanticPlan?.Target == SemanticQueryTarget.ProductionData)
+        {
+            return SemanticPlan?.Target == SemanticQueryTarget.ProductionData &&
+                   requested.SemanticPlan?.Target == SemanticQueryTarget.ProductionData &&
+                   ProductionQueryScopePolicy.HasSameConfirmedScope(
+                       SemanticPlan,
+                       requested.SemanticPlan);
+        }
+
         return ScopeMatches(SemanticPlan?.Filters, requested.SemanticPlan?.Filters);
     }
 
