@@ -43,6 +43,10 @@ public sealed class CloudOidcHttpAppFixture : AICopilotAppFixture
         SetEnvironmentVariable("CloudOidc__AllowIntranetHttpOidc", "true");
         SetEnvironmentVariable("CloudOidc__RequireHttpsMetadata", "false");
         SetEnvironmentVariable("CloudOidc__ClientId", "aicopilot");
+        SetEnvironmentVariable("CloudAiRead__Enabled", "false");
+        SetEnvironmentVariable(
+            "CloudAiRead__BaseUrl",
+            provider.BaseUri.ToString().TrimEnd('/'));
     }
 
     protected override ValueTask DisposeAdditionalTestHostsAsync()
