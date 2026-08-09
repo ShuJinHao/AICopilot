@@ -1757,7 +1757,8 @@ ensure_http_only_environment() {
     require_http_url_value CLOUD_AI_READ_BASE_URL
   fi
 
-  if [ -n "${CLOUD_IDENTITY_STATUS_BASE_URL:-}" ]; then
+  if is_truthy "${CLOUD_IDENTITY_STATUS_ENABLED:-false}" ||
+     [ -n "${CLOUD_IDENTITY_STATUS_BASE_URL:-}" ]; then
     require_http_url_value CLOUD_IDENTITY_STATUS_BASE_URL
   fi
 
