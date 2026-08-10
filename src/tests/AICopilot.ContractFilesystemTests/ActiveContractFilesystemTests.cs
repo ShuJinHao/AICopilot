@@ -81,7 +81,7 @@ public sealed class ActiveContractFilesystemTests
         const string expectedRoutingParagraph =
             "本文档只登记当前能力状态和下一退出门，不承载实现正文、验证算法、部署操作或历史过程。MAF / Harness 细节见 [Agent 工作流与异常契约](./Agent工作流与异常契约.md)，Cloud 查询与数据安全见 [Cloud 只读数据分析契约](./Cloud只读数据分析契约.md)，聚合与持久化见 [DDD 聚合根边界](./DDD聚合根边界.md)，候选与生产退出规则见 [AICopilot 安全部署契约](./AICopilot安全部署契约.md)。战略性“不做”边界只见 [AICopilot 业务规则](./AICopilot业务规则.md)。";
         const string expectedStatusParagraph =
-            "当前状态：业务目标已确定、源码仅部分收口。身份与只读安全主链已实现，但只以当前源码重新构建后的最终门禁结果作为签收证据；其它复审问题、跨项目真实 E2E、生产迁移和部署尚未收口，当前代码尚未提交、未部署，不是生产基线。`SingleInstance` 已完成且唯一技术正文只在[Agent 工作流与异常契约第 1.2 节](./Agent工作流与异常契约.md#12-agentsession-持久化)，不再列为缺口。";
+            "当前状态：身份、当前用户委托 AiRead、`101650` 自动收编、grant 注销/清理、system identity-status token 和真实 Cloud SQL fail-close 候选源码已合并到 `main`；生产 E2E、生产迁移和部署未执行，当前不是生产基线。`SingleInstance` 已完成且唯一技术正文只在[Agent 工作流与异常契约第 1.2 节](./Agent工作流与异常契约.md#12-agentsession-持久化)，不再列为缺口。";
         const string tableHeader =
             "| 能力 | 源码状态 | 候选状态 | 生产状态 | 下一退出门 |";
         Regex.Matches(
@@ -199,6 +199,7 @@ public sealed class ActiveContractFilesystemTests
             "待验证",
             "验证中",
             "已通过",
+            "已合并 `main`",
             "验证失败",
             "不适用",
         ];
@@ -250,6 +251,7 @@ public sealed class ActiveContractFilesystemTests
                 ("已收口", "验证失败", "未验收", "取得该能力候选证据"),
                 ("已建立", "已通过", "未验收", "取得该能力产物证据"),
                 ("已收口", "已通过", "未验收", "取得该能力产物证据"),
+                ("已收口", "已合并 `main`", "未验收", "完成该能力生产验收"),
                 ("已建立", "已通过", "验收中", "完成该能力生产验收"),
                 ("已收口", "已通过", "验收中", "完成该能力生产验收"),
                 ("已建立", "已通过", "验收暂停", "完成该能力生产验收"),
