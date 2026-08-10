@@ -8,11 +8,11 @@
 |---|---|---|---|---|
 | Harness / MAF 主聊天 | 已收口 | 待验证 | 未验收 | 取得该能力候选证据 |
 | AgentSession 与逐次批准 | 已收口 | 待验证 | 未验收 | 取得该能力候选证据 |
-| Cloud OIDC/JIT 普通身份与 `101650` 例外 | 已收口 | 已合并 `main` | 未验收 | 完成该能力生产验收 |
-| Cloud typed AiRead 用户委托 | 已收口 | 已合并 `main` | 未验收 | 完成该能力生产验收 |
-| Cloud delegation grant revoke / cleanup | 已收口 | 已合并 `main` | 未验收 | 完成该能力生产验收 |
-| system identity-status token | 已收口 | 已合并 `main` | 未验收 | 完成该能力生产验收 |
-| Cloud Direct DB / Text-to-SQL 生产关闭 | 已收口 | 已合并 `main` | 未验收 | 完成该能力生产验收 |
+| Cloud OIDC/JIT 普通身份与 `101650` 例外 | 已收口 | 待验证 | 未验收 | 取得该能力候选证据 |
+| Cloud typed AiRead 用户委托 | 已收口 | 待验证 | 未验收 | 取得该能力候选证据 |
+| Cloud delegation grant revoke / cleanup | 已收口 | 待验证 | 未验收 | 取得该能力候选证据 |
+| system identity-status token | 已收口 | 待验证 | 未验收 | 取得该能力候选证据 |
+| Cloud Direct DB / Text-to-SQL 生产关闭 | 已收口 | 待验证 | 未验收 | 取得该能力候选证据 |
 | KnowledgeQuery / RAG | 已建立 | 待验证 | 未验收 | 取得该能力候选证据 |
 | MCP 2.0 受治理通道 | 已收口 | 待验证 | 未验收 | 取得该能力候选证据 |
 | 模型调用治理 | 已建立 | 待验证 | 未验收 | 取得该能力候选证据 |
