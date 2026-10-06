@@ -397,7 +397,9 @@ public sealed class SecurityDeploymentTests
         architectureRoadmap.Should().NotContain("AgentSafetyApplicationTests");
         architectureRoadmap.Should().NotContain("CloudAiReadClientTests");
         architectureRoadmap.Should().NotContain("AiEvalBehaviorGuardrailTests");
-        agentInstructions.Should().Contain("工作区 `../docs/总规则.md` 是唯一默认必读入口");
+        agentInstructions.Should().Contain("本文件是 AICopilot 的独立入口");
+        agentInstructions.Should().Contain("不自动加载外层总规则");
+        agentInstructions.Should().NotContain("工作区 `../docs/总规则.md` 是唯一默认必读入口");
         agentInstructions.Should().NotContain(
             "必须用同一项目和 filter 的 `--list-tests` 证明至少命中 1 项");
         agentInstructions.Should().NotContain(

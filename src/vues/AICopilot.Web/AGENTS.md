@@ -1,5 +1,12 @@
 # AICopilot.Web Frontend Rules
 
+## 修改授权
+
+- 严禁擅自修改用户未明确确认的内容，严格按已确认的项目、文件范围和操作执行。
+- Git 提交、上传仅授权处理已确认的现有改动，不授权额外修复源码、测试、依赖、配置或其他项目。
+- 遇到问题或 CI 失败，先说明原因、拟修改文件及影响并询问用户；未明确同意前不得修改，也不得为通过检查关闭门禁。
+
+
 修改 AICopilot 前端前必须读完本文件。本文件约束 `src/vues/AICopilot.Web` 下的 Vue、Pinia、SSE 协议处理、消息渲染和前端测试。
 
 ## 1. Backend Errors Are Contract Data
@@ -63,11 +70,6 @@ Widget 是后端结构化展示契约，不是任意 ECharts 配置。前端只�
 - 两种模式下的工具面都必须经 Tool Gate、身份、权限、schema 和批准绑定；模式切换不得扩大 Cloud/MES/ERP 写权限。
 - 主聊天一轮只支持一个待批工具调用；前端不得尝试排队、部分保留或自动批准多个调用。
 
-## Pre-change Checklist
+## 6. 验证
 
-- [ ] 读完本文件。
-- [ ] 新增错误路径展示后端安全 `code` / `detail`。
-- [ ] 文本 chunk 经过 think 标签兜底清洗。
-- [ ] 前端单元测试覆盖状态 reset、错误解析或 chunk 处理变更。
-- [ ] 所有会话写动作使用 resolved session，并且激活期间 fail-closed。
-- [ ] `npm run type-check`、`npm run lint:check`、受影响 Vitest selector 和 production build 通过；全量单元测试只在明确授权时运行。
+前端代码改动执行 `npm run type-check`、`npm run lint:check`、受影响 Vitest selector 和 production build；测试覆盖受影响的状态 reset、错误解析与 chunk 处理。全量单元测试须明确授权，纯文档变更只做静态核对。
