@@ -2,7 +2,7 @@
 
 > **状态：第 0～7 批候选代码继续保留；复审问题尚未全部收口，当前候选代码不是生产基线；真实 Windows 验收、生产绑定迁移和部署仍未执行。**
 >
-> 本文件只细化 AICopilot 产品业务。跨端业务真值、当前现场和已经关闭的裁决统一见[业务总纲](../../docs/业务规则.md)；API、DTO、SQL、锁、持久化、部署和测试算法只见第 11 章专题契约。
+> 本文件承载 AICopilot 产品业务；初始化与执行边界见本仓 [AGENTS.md](../AGENTS.md)。仅涉及跨端身份或接口语义时，按相关 `BR-*` 追溯[业务总纲](../../docs/业务规则.md)。API、DTO、SQL、锁、持久化、部署和测试算法见第 11 章专题契约。
 
 ## 1. 产品定位与核心职责
 
@@ -171,7 +171,7 @@ Plan / Execute 的产品语义：
 | 聚合、repository、DbContext、迁移、事务、审计、Outbox、commit marker、RAG 文件 | [DDD 聚合根边界](./DDD聚合根边界.md) |
 | HTTP/OIDC issuer、secret、模型 seed、镜像、migration 和 Runner | [AICopilot 安全部署契约](./AICopilot安全部署契约.md)及 `../deploy/enterprise-ai/README.md` |
 | 当前架构状态与下一退出门 | [AI 架构路线图](./AI架构路线图.md) |
-| 测试范围、授权、质量和工作区部署入口 | [工作区总规则](../../docs/总规则.md)及[上传部署总览](../../docs/上传部署总览.md) |
+| 测试范围、授权与质量 | 本仓 [AGENTS.md](../AGENTS.md)及项目选择器；部署时另读[上传部署总览](../../docs/上传部署总览.md)的 AI 章节 |
 
 本文不复制精确 API、DTO、SQL、MCP SDK、锁算法、migration、Analyzer、TestKit、coverage 或部署步骤。
 
@@ -179,7 +179,7 @@ Plan / Execute 的产品语义：
 
 | 原章节 | 第二轮归属 |
 |---|---|
-| 改动收口门禁 | 项目 `AGENTS.md` 与工作区总规则 |
+| 改动收口门禁 | 本仓 `AGENTS.md` |
 | 核心职责、战略性不做 | 第 1 章 |
 | Cloud 只读边界 | 第 2、3、6 章；精确 AiRead 转 Cloud 专题契约 |
 | 固定 AP/CP 查询映射 | 第10章当前现场，不再作为通用规则 |
@@ -190,4 +190,4 @@ Plan / Execute 的产品语义：
 | Human-in-the-loop | 第 8 章；精确批准协议转 Agent 契约 |
 | 对话、Plan / Execute | 第 9 章；Harness 和前端实现转 Agent 契约 |
 | HTTP、密钥、模型 seed 与部署 | 第 11 章安全部署与 README |
-| 文档入口与工程边界 | 第 11 章专题路由和工作区总规则 |
+| 文档入口与工程边界 | 第 11 章专题路由和本仓 `AGENTS.md` |
