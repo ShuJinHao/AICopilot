@@ -1,5 +1,12 @@
 # AICopilot.Web Frontend Rules
 
+## 修改授权
+
+- 严禁擅自修改用户未明确确认的内容，严格按已确认的项目、文件范围和操作执行。
+- Git 提交、上传仅授权处理已确认的现有改动，不授权额外修复源码、测试、依赖、配置或其他项目。
+- 遇到问题或 CI 失败，先说明原因、拟修改文件及影响并询问用户；未明确同意前不得修改，也不得为通过检查关闭门禁。
+
+
 修改 AICopilot 前端前必须读完本文件。本文件约束 `src/vues/AICopilot.Web` 下的 Vue、Pinia、SSE 协议处理、消息渲染和前端测试。
 
 ## 1. Backend Errors Are Contract Data
